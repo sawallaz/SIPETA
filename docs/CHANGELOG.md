@@ -63,6 +63,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `php artisan test` runs against SQLite `:memory:` (per `phpunit.xml`); full suite is 32 passed / 185 assertions (28 Phase-2 + 2 default + 2 Phase-3.1).
 - Not pushed — awaiting approval per task instruction ("Wait for my next instruction").
 
+### Added (Phase 3.2.1 — KK Resource — 2026-08-05)
+- **KartuKeluarga Filament Resource** (`app/Filament/Resources/KartuKeluargas/`):
+  - `KartuKeluargaResource` references the existing `App\Models\KartuKeluarga` model — no model class, factory, or migration was created or modified.
+  - Standard pages auto-generated: `ListKartuKeluargas`, `CreateKartuKeluarga`, `EditKartuKeluarga`.
+  - Form schema (`KartuKeluargaForm`) and table schema (`KartuKeluargasTable`) are empty scaffolds — **forms/tables intentionally NOT built** (out of scope for 3.2.1).
+  - Registered automatically through Filament's `discoverResources()` in `AdminPanelProvider` (no provider edit required).
+  - Note: Filament auto-pluralized the resource *namespace* to `KartuKeluargas`; the class is `KartuKeluargaResource`, the route slug is `kartu-keluarga`, and the nav label resolves to "Kartu Keluarga".
+
+### Notes
+- No models, migrations, factories, Penduduk features, or OCR code were created or modified (out of scope for 3.2.1).
+- No new tests added (none required by the task). `getRelations()` returns an empty array — no `Penduduk` relation leaked into the resource.
+- `php artisan test`: 32 passed / 185 assertions; 3 env-gated MySQL tests skipped (`RUN_MYSQL_TESTS` unset). Routes `admin/kartu-keluarga*` registered and the panel boots.
+
 ## [1.3.0] - 2026-08-03
 
 ### Added (Phase 1.5 — 2026-08-05)
