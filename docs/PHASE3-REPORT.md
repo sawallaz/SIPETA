@@ -16,14 +16,74 @@
 
 *Summary only — full report at `docs/PHASE3.2.1-REPORT.md`.* Generated the `KartuKeluarga` Filament Resource (empty scaffold, auto-registered), referencing the existing `App\Models\KartuKeluarga`. No models/migrations/factories/Penduduk/OCR created. Test suite: 32 passed / 185 assertions. Committed `9ea75fe`, pushed to `origin/main`.
 
-## Phase 3.2.2 / 3.2.3 / 3.2.4 — Status: NOT PRESENT in repository
+## Phase 3.2.2 / 3.2.4 — Status: 3.2.2 done (e34eedd), 3.2.3 done (this task), 3.2.4 pending
 
 The Phase 3.2.5 instruction asserted these phases were already done. Verification (git log + file inspection) shows otherwise:
 
 - `git log` shows only `9ea75fe` (3.2.1). No 3.2.2/3.2.3/3.2.4 commits exist.
 - `app/Filament/Resources/KartuKeluargas/Schemas/KartuKeluargaForm.php` is still an **empty scaffold** (`->components([])`) — the form schema described as "done" in 3.2.2 is not present.
 
-These phases were therefore **not** implemented in this environment. Their absence is recorded here as an honest discrepancy; they remain pending work. This 3.2.5 task implements the table schema only and does not modify the form.
+Status as recorded during 3.2.5: 3.2.2 (Form) and 3.2.3 (Table) are **now done** (commits `e34eedd` and this task respectively); only 3.2.4 remains pending. The 3.2.5 task implemented the base table schema only.
+
+## Phase 3.2.3 — KK Table Schema (complete)
+
+### Verdict
+
+**Phase 3.2.3 COMPLETE** — the `KartuKeluarga` Filament table is now fully configured with all required columns, labels, search/sort/toggle, copyable KK number, formatted dates, empty state, default sort, pagination, record title, default visibility, and the exact View/Edit/Delete row actions plus Bulk Delete. `php artisan test` and `./vendor/bin/pint --test` both pass.
+
+### What changed (code)
+
+`app/Filament/Resources/KartuKeluargas/Tables/KartuKeluargasTable.php` — extended the base table (3.2.5) into the complete configuration. Field names taken from the repository model (`kk_number`, `address`, `postal_code` — not the `no_kk`/`alamat`/`kode_pos` guesses found in some references).
+
+Columns:
+
+| Column | Field | Config |
+|--------|-------|--------|
+| Nomor KK | `kk_number` | `->label('Nomor KK')`, searchable, sortable, **copyable**, toggleable (visible by default) |
+| Alamat | `address` | `->label('Alamat')`, searchable, `->wrap()`, `->limit(50)` (truncation), toggleable (visible) |
+| Kode Pos | `postal_code` | `->label('Kode Pos')`, searchable, sortable, `->placeholder('-')` for nulls, toggleable (visible) |
+| Jumlah Anggota | `kkAnggotas_count` | `->counts('kkAnggotas')` (existing relation aggregate), sortable, toggleable (visible) |
+| Dibuat | `created_at` | `->dateTime('d M Y H:i')`, sortable, toggleable (visible) |
+| Diperbarui | `updated_at` | `->dateTime('d M Y H:i')`, sortable, toggleable (visible) |
+
+Table-level config:
+
+- `->defaultSort('created_at', 'desc')`
+- `->recordTitleAttribute('kk_number')` (used by action modals)
+- `->paginated([10, 25, 50])` + `->defaultPaginationPageOption(10)`
+- `->emptyStateHeading(...)`, `->emptyStateDescription(...)`, `->emptyStateIcon(Heroicon::OutlinedDocumentPlus)`
+
+Row actions (`recordActions`): exactly `ViewAction`, `EditAction`, `DeleteAction`. Bulk actions (`toolbarActions`): exactly `DeleteBulkAction` (in a `BulkActionGroup`).
+
+`ViewAction` is a **modal** action in Filament 4 (reuses the form schema) — it requires no separate View page or route, so no page was added (no scope creep). All action/method names verified against the installed `filament/filament` v4.12.5 vendor source.
+
+### Out of scope (not touched)
+
+Filters, advanced search, exports, imports, relation managers, Penduduk, OCR, dashboard, model changes, migration changes, form schema. No extra columns, actions, or pages were added. `getPages()` unchanged (index/create/edit only).
+
+### Verification
+
+```bash
+$ php -l app/Filament/Resources/KartuKeluargas/Tables/KartuKeluargasTable.php
+  No syntax errors detected
+
+$ ./vendor/bin/pint --test app/Filament/Resources/KartuKeluargas/Tables/KartuKeluargasTable.php
+  PASS
+
+$ php artisan test
+  Tests:    35 passed (185 assertions), 3 skipped
+  (3 skipped = ENV-gated RUN_MYSQL_TESTS login/dashboard checks; not scoped to this resource)
+```
+
+### Build applicability
+
+`npm run build` **not applicable** — this phase changed only PHP (Filament table) and Markdown (this report). No frontend assets, Tailwind classes, or blade views were modified, so no asset compilation is required.
+
+### Commit
+
+`feat(filament): Phase 3.2.3 — complete KK table schema` — table file + this report update. One commit, pushed to `origin/main`.
+
+---
 
 ## Phase 3.2.5 — KK Table Schema
 
