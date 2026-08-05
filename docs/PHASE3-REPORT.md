@@ -131,3 +131,76 @@ view was touched.
 ### Commit
 
 `fix(filament): finalize Phase 3.2`
+
+## Phase 3.3 — Penduduk Resource
+
+### Verdict
+
+**COMPLETE.** Full CRUD resource for `App\Models\Penduduk` with form, table,
+validation, search, sorting, pagination, row actions and bulk delete. No OCR and
+no dashboard widgets (explicitly out of scope).
+
+### Files added
+
+- `app/Filament/Resources/Penduduks/PendudukResource.php`
+- `app/Filament/Resources/Penduduks/Schemas/PendudukForm.php`
+- `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php`
+- `app/Filament/Resources/Penduduks/Pages/{List,Create,Edit}Penduduk*.php`
+- `tests/Feature/Phase3/PendudukResourceTest.php`
+
+Scaffolded with `php artisan make:filament-resource Penduduk`, so the directory
+layout matches the KK resource exactly.
+
+### Form
+
+Five sections, all labels in Bahasa Indonesia, all field names taken from the
+model's `$fillable`:
+
+| Section | Fields |
+|---|---|
+| Identitas | `nik`, `full_name`, `birth_place`, `birth_date`, `gender`, `blood_type` |
+| Kartu Keluarga & Wilayah | `kk_id`, `family_relation`, `rt_id` |
+| Data Sosial | `religion_id`, `education_id`, `occupation_id`, `marital_status` |
+| Status Kependudukan | `resident_status`, `moved_*`, `deceased_*` |
+| Catatan | `notes` |
+
+Enum selects are built from the `App\Enums\*` cases (never hardcoded strings).
+Lookup selects use the model's existing relations (`kartuKeluarga`, `rt`,
+`religion`, `education`, `occupation`) via `->relationship()`, searchable and
+preloaded. `birth_date` has `maxDate(now())`; age is never a form field (ADR-007).
+
+Conditional validation: the `resident_status` select is `->live()`; the Pindah
+block (and its required `moved_at`) and the Meninggal block (and its required
+`deceased_at`) are shown only for the matching status.
+
+### Table
+
+Default-visible: NIK (copyable), Nama Lengkap, Nomor KK, Jenis Kelamin (badge),
+Tanggal Lahir, Usia, RT, Status (badge — green/amber/red). Toggleable-hidden:
+Agama, Pendidikan, Pekerjaan, Dibuat, Diperbarui.
+
+Usia is a computed column reading the model's `getAgeAttribute()` accessor — the
+value is never stored (ADR-007). Search covers name (partial), NIK, KK number
+and RT. Default sort `full_name` ascending. Pagination `[10, 25, 50, 100]`,
+default 25. Row actions: View / Edit / Delete. Bulk: Delete only.
+
+### Tests
+
+`PendudukResourceTest` — 19 tests: page rendering, all form fields present,
+create, edit, required-field validation, 16-digit NIK, NIK uniqueness,
+self-ignoring uniqueness on edit, conditional `moved_at` / `deceased_at`
+requirements, search by name / NIK / KK number, sorting, pagination, row-action
+delete, bulk delete, navigation metadata.
+
+### Verification
+
+```
+php artisan test        64 passed (340 assertions), 3 skipped
+./vendor/bin/pint --test  PASS (109 files)
+```
+
+`npm run build` not applicable — PHP and Markdown only.
+
+### Commit
+
+`feat(filament): Phase 3.3 — Penduduk resource`
