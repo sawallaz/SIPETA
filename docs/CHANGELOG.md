@@ -49,6 +49,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/PHASE2-AUDIT.md` — Phase 2 audit (verdict: NOT COMPLETE, gated plan 2.3/2.4/2.5 outstanding).
 - `docs/PHASE2-REPORT.md` — Phase 2 finalization report (verdict: COMPLETE).
 
+### Added (Phase 3.1 — Filament Foundation — 2026-08-05)
+- **Filament admin panel scaffold** (`app/Providers/Filament/AdminPanelProvider.php`, registered in `bootstrap/providers.php`):
+  - `panel id 'admin'`, `path 'admin'`, `->login()` enabled, default panel.
+  - Temporary SIPETA branding: `->brandName('SIPETA')`, primary color `Color::Amber`.
+  - Navigation skeleton: `navigationGroups(['Kependudukan', 'Master Data'])` (placeholder groups; no Resources/CRUD yet — those are Phase 3.2+).
+  - Filament auto-provides the Dashboard page and the `admin/login` route.
+- **Phase 3.1 smoke test** (`tests/Feature/Phase3/AdminPanelTest.php`): asserts `/admin/login` returns 200 and the `filament.admin.auth.login` route is registered.
+
+### Notes
+- No Resources, Pages, Widgets, CRUD, migrations, models, or OCR code were created (out of scope for 3.1).
+- Admin user was NOT created: MySQL is unreachable in this environment (no server running) and the task forbids database writes. The Phase 2 `AdminUserSeeder` remains the idempotent source for the admin user when the DB is available.
+- `php artisan test` runs against SQLite `:memory:` (per `phpunit.xml`); full suite is 32 passed / 185 assertions (28 Phase-2 + 2 default + 2 Phase-3.1).
+- Not pushed — awaiting approval per task instruction ("Wait for my next instruction").
+
 ## [1.3.0] - 2026-08-03
 
 ### Added (Phase 1.5 — 2026-08-05)
