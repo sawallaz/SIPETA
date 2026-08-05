@@ -120,14 +120,16 @@ See `.ai/ocr.md` for the pipeline. The OCR module is invoked from the "Upload Fo
 
 ## 7. Database Philosophy
 
-- 4 production tables: `kartu_keluarga`, `penduduk`, `settings`, `backup_logs`.
+- 13 production tables (Phase 2.2 schema-of-record): `kartu_keluarga`, `penduduk`, `settings`, `backup_logs`, `audit_logs`, `religions`, `educations`, `occupations`, `area_units`, `rts`, `kk_anggota`, `kk_photos`, `ocr_jobs`.
 - One KK → many Penduduk.
-- One settings row (singleton).
-- `backup_logs` is append-only.
+- One settings row (singleton, `id = 1`).
+- `backup_logs` and `audit_logs` are append-only (no `updated_at`).
+- `kk_anggota` preserves membership history across KK re-issues.
+- **No soft deletes** — resident lifecycle is `resident_status` (ACTIVE / PINDAH / MENINGGAL) + `kk_anggota.status` (AKTIF / KELUAR).
 - Never duplicate KK information across rows.
-- Never store age.
+- Never store age (computed at read time).
 
-Schema details: `.ai/database.md`.
+Schema details: `.ai/database.md` (rewritten in Phase 2.2 to match the committed migrations).
 
 ## 8. Storage
 
@@ -274,5 +276,5 @@ Authoritative source: `docs/REQUIREMENTS.md` §3. Summary highlights:
 ## 21. Future Improvements
 
 - Move cache facility to Redis if multi-user is enabled.
-- Add a separate `audit_logs` table for compliance.
+- `audit_logs` implemented in Phase 2.2 (append-only morphic trail; written by Model Observers in the application phase).
 - Add WebView2 pinning for Tauri to avoid version drift (when Phase 7 starts).

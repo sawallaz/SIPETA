@@ -19,14 +19,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Phase 2 — 2026-08-05)
+- **Phase 2.3 Seeders** (8 idempotent seeders + `DatabaseSeeder` orchestration):
+  - `SettingsSeeder` (singleton `id=1`), `ReligionSeeder` (7 rows), `EducationSeeder` (10 rows), `OccupationSeeder` (12 rows), `RegionSeeder` (3 area_units + 19 rts), `AdminUserSeeder` (single admin per ADR-005), `ResidentStatusSeeder` and `RelationshipStatusSeeder` (obviously-fake demo fixtures covering the enum value sets).
+- **Phase 2.4 Eloquent Models** (13 models + `User` extension):
+  - `app/Models`: `Setting`, `Religion`, `Education`, `Occupation`, `AreaUnit`, `Rt`, `KartuKeluarga`, `OcrJob`, `Penduduk`, `KkAnggota`, `KkPhoto`, `BackupLog`, `AuditLog`. All set `$table` explicitly; `Penduduk` adds `scopeActive()` and a computed `getAgeAttribute()` (never stored); relations, casts, and `audits()` morph relation added.
+  - `app/Enums` (11): `Gender`, `BloodType`, `MaritalStatus`, `FamilyRelation`, `ResidentStatus`, `OcrJobStatus`, `OcrOutcome`, `KkAnggotaStatus`, `BackupType`, `BackupStatus`, `PhotoType`.
+  - `database/factories` (13): `PendudukFactory` builds the full FK chain (kk → rts/lookup masters).
+- **Phase 2.5 Database Verification** (4 test suites, 28 tests, 181 assertions in `tests/Feature/Phase2/`):
+  - `SchemaTest` — 13 tables, unique constraints, approved indexes, the two audit-fix indexes, FK rules (RESTRICT vs SET NULL), and **no soft-delete columns**.
+  - `DatabaseBehaviourTest` — FK enforcement, unique rejection, RESTRICT blocks KK delete, SET NULL cascade, KK re-issue membership history preserved, append-only `backup_logs` / `audit_logs`.
+  - `RelationAndScopeTest` — relations, `scopeActive`, computed `age`, enum casts round-trip, invalid enum throws.
+  - `MigrationLifecycleTest` — `migrate:fresh` produces all tables, `migrate:reset` removes them, re-migrate restores, seeder idempotency.
+- **Two additive index migrations** (audit-fix findings from `docs/PHASE2-AUDIT.md`):
+  - `2026_08_05_101300_add_started_at_index_to_backup_logs_table` — `INDEX (started_at)` on `backup_logs`.
+  - `2026_08_05_101400_add_kk_id_index_to_ocr_jobs_table` — `INDEX (kk_id)` on `ocr_jobs` (explicit; FK auto-creates it too).
+
+### Changed
+- `.ai/database.md` — rewritten (v1.1.0 → v1.2.0) to the 13-table schema-of-record; `resident_status` = ACTIVE/PINDAH/MENINGGAL; lookup masters as FKs; explicit soft-delete policy (none); Eloquent relationship reference updated with explicit `kk_id` FKs.
+- `.ai/architecture.md` — §7 Database Philosophy now lists 13 tables, append-only logs, `kk_anggota` history, no-soft-delete; §21 notes `audit_logs` implemented in Phase 2.2.
+- `docs/FEATURES.md` — F-CORE-01 status Implemented; F-CORE-07 status values corrected to ACTIVE/PINDAH/MENINGGAL; F-CORE-16 phase corrected to Phase 6.
+
+### Notes
+- No released migration was edited. The two new index migrations are purely additive.
+- `resident_status` values are Indonesian (ACTIVE / PINDAH / MENINGGAL), not the earlier draft's MOVED / DECEASED.
+- Verification was performed against a throwaway SQLite database (`php artisan test` uses `sqlite :memory:`); MySQL is the production engine but is not running in this environment.
+
 ### Documentation
-- Initial documentation scaffolding created.
-- `docs/REQUIREMENTS.md` defined.
-- `docs/FEATURES.md` defined.
-- `docs/USER_GUIDE.md` defined.
-- `docs/BACKLOG.md` defined.
-- `.ai/ocr.md` defined.
-- Metadata block (title, purpose, scope, version, status, last updated, related) standardized across all `.ai/` documents.
+- `docs/PHASE2-AUDIT.md` — Phase 2 audit (verdict: NOT COMPLETE, gated plan 2.3/2.4/2.5 outstanding).
+- `docs/PHASE2-REPORT.md` — Phase 2 finalization report (verdict: COMPLETE).
+
+## [1.3.0] - 2026-08-03
+
+### Added (Phase 1.5 — 2026-08-05)
+- `scripts/` helper suite: `setup.sh`, `verify.sh`, `backup.sh`, `clean.sh`, and `db-user.sql`.
+  - `setup.sh` runs `composer run setup` + `storage:link`.
+  - `verify.sh` runs `composer validate`, `optimize:clear`, and `php -l` over the codebase (prints PASS/FAIL).
+  - `backup.sh` dumps the `sipeta` DB to `storage/app/backups/sipeta_<ts>.sql.gz`; includes a commented cron example.
+  - `clean.sh` clears caches + regenerates autoloader + `npm cache verify` — deliberately NON-destructive (no `git clean -fdx`).
+- `pint.json` (Laravel preset) for `laravel/pint` (already in require-dev).
+- `barryvdh/laravel-ide-helper` (dev) + generated `_ide_helper.php` / `.phpstorm.meta.php` (gitignored).
+- Three storage disks in `config/filesystems.php`: `kk_uploads`, `ocr_temp`, `db_backups` (private local disks), with matching directories and `.gitignore` rules.
+- `.env.example` `DB_HOST` changed `127.0.0.1` → `localhost`; `.env` left untouched (it works as-is).
+
+### Deferred (deliberately, for KKN speed)
+- PHPStan — postponed until the app is nearly complete (avoids churn on style/static warnings during feature work).
+- GitHub Actions CI — not needed for a single-developer KKN project; focus stays on features.
+- `release.sh` — premature (no release, desktop app, or installer yet).
+- Full `/tmp` clone-from-scratch verification — deferred to pre-deployment.
 
 ### Architecture
 - Tauri + PHP embedded runtime strategy decided.

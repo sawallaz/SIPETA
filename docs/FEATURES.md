@@ -22,13 +22,13 @@ Feature status legend:
 
 | ID | Feature | Status | Phase | Owner Doc |
 |----|---------|--------|-------|-----------|
-| F-CORE-01 | Single admin login | Planned | Phase 1 | `.ai/hermes.md` §8 |
+| F-CORE-01 | Single admin login | Implemented | Phase 1 | `.ai/hermes.md` §8 |
 | F-CORE-02 | Dashboard statistics | Planned | Phase 3 | `.ai/architecture.md` §4 |
 | F-CORE-03 | KK CRUD | Planned | Phase 3 | `.ai/database.md` |
 | F-CORE-04 | Penduduk CRUD | Planned | Phase 3 | `.ai/database.md` |
 | F-CORE-05 | Search (Nama, NIK, KK Number) | Planned | Phase 3 | `.ai/workflow.md` |
 | F-CORE-06 | Filter (RT, RW, Lingkungan, Gender, Religion, Education, Occupation, Status, Exact Age, Age Range) | Planned | Phase 3 | `.ai/workflow.md` |
-| F-CORE-07 | Resident status workflow (ACTIVE / MOVED / DECEASED) | Planned | Phase 3 | `.ai/project-rules.md` |
+| F-CORE-07 | Resident status workflow (ACTIVE / PINDAH / MENINGGAL) | Planned | Phase 3 | `.ai/project-rules.md` |
 | F-CORE-08 | KK photo upload and display | Planned | Phase 3 | `.ai/database.md` |
 | F-CORE-09 | OCR from KK photo | Planned | Phase 4 | `.ai/ocr.md` |
 | F-CORE-10 | OCR review and manual correction | Planned | Phase 4 | `.ai/ocr.md` |
