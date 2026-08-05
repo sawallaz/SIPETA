@@ -2,10 +2,10 @@
 
 namespace App\Filament\Resources\KartuKeluargas\Schemas;
 
-use Filament\Forms\Components\Grid;
-use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 
 class KartuKeluargaForm
@@ -22,7 +22,7 @@ class KartuKeluargaForm
                                 TextInput::make('kk_number')
                                     ->label('Nomor KK')
                                     ->required()
-                                    ->unique('kartu_keluargas', 'kk_number', ignoreRecord: true)
+                                    ->unique('kartu_keluarga', 'kk_number', ignoreRecord: true)
                                     ->maxLength(16)
                                     ->regex('/^[0-9]{16}$/')
                                     ->helperText('Nomor Kartu Keluarga, 16 digit angka.'),
