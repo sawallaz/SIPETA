@@ -6,7 +6,7 @@
 | **Version** | 1.2.0 |
 | **Status** | Approved |
 | **Last Updated** | 2026-08-05 |
-| **Related Documents** | `.ai/hermes.md`, `.ai/architecture.md`, `.ai/workflow.md`, `.ai/ocr.md`, `.ai/project-rules.md`, `.ai/coding.md`, `.ai/testing.md`, `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `docs/PHASE2-ARCHITECTURE.md`, `docs/PHASE2-AUDIT.md` |
+| **Related Documents** | `.ai/hermes.md`, `.ai/architecture.md`, `.ai/workflow.md`, `.ai/ocr.md`, `.ai/project-rules.md`, `.ai/coding.md`, `.ai/testing.md`, `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `docs/PHASE2.md` |
 
 ---
 

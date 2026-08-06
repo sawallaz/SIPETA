@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `DatabaseBehaviourTest` — FK enforcement, unique rejection, RESTRICT blocks KK delete, SET NULL cascade, KK re-issue membership history preserved, append-only `backup_logs` / `audit_logs`.
   - `RelationAndScopeTest` — relations, `scopeActive`, computed `age`, enum casts round-trip, invalid enum throws.
   - `MigrationLifecycleTest` — `migrate:fresh` produces all tables, `migrate:reset` removes them, re-migrate restores, seeder idempotency.
-- **Two additive index migrations** (audit-fix findings from `docs/PHASE2-AUDIT.md`):
+- **Two additive index migrations** (audit-fix findings recorded in `docs/PHASE2.md` §2.3 Audit):
   - `2026_08_05_101300_add_started_at_index_to_backup_logs_table` — `INDEX (started_at)` on `backup_logs`.
   - `2026_08_05_101400_add_kk_id_index_to_ocr_jobs_table` — `INDEX (kk_id)` on `ocr_jobs` (explicit; FK auto-creates it too).
 
@@ -46,8 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verification was performed against a throwaway SQLite database (`php artisan test` uses `sqlite :memory:`); MySQL is the production engine but is not running in this environment.
 
 ### Documentation
-- `docs/PHASE2-AUDIT.md` — Phase 2 audit (verdict: NOT COMPLETE, gated plan 2.3/2.4/2.5 outstanding).
-- `docs/PHASE2-REPORT.md` — Phase 2 finalization report (verdict: COMPLETE).
+- `docs/PHASE2.md` — Phase 2 consolidated record (§2.1 Architecture, §2.2 Finalization verdict: COMPLETE, §2.3 Audit verdict: NOT COMPLETE at audit time, gaps later closed).
 
 ### Added (Phase 3.1 — Filament Foundation — 2026-08-05)
 - **Filament admin panel scaffold** (`app/Providers/Filament/AdminPanelProvider.php`, registered in `bootstrap/providers.php`):
