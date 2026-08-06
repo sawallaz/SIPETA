@@ -53,6 +53,7 @@ Feature status legend:
 | F-HIGH-06 | Export filename includes filter summary | Planned | Phase 5 |
 | F-HIGH-07 | KK photo viewer with zoom | Planned | Phase 3 |
 | F-HIGH-08 | KK photo download | Planned | Phase 3 |
+| F-HIGH-09 | Dashboard recent activity (5 newest KK & Penduduk) | Implemented | Phase 4 |
 
 ## 3. Medium Priority
 

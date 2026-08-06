@@ -2,11 +2,11 @@
 | --- | --- |
 | **Title** | SIPETA Phase 4 — Dashboard |
 | **Purpose** | Track Phase 4 (Admin Panel Dashboard) sub-phase progress. |
-| **Scope** | 4.1 Dashboard foundation (layout + placeholder KPI cards). 4.2 Enhanced KPI cards (population statistics). 4.3 Distribution charts (per RT, per Lingkungan, per Pekerjaan). Later: recent activity, quick actions, polish. |
-| **Version** | 1.2.0 |
+| **Scope** | 4.1 Dashboard foundation (layout + placeholder KPI cards). 4.2 Enhanced KPI cards (population statistics). 4.3 Distribution charts (per RT, per Lingkungan, per Pekerjaan). 4.4 Recent activity (5 newest KK + Penduduk). Later: quick actions, polish. |
+| **Version** | 1.3.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
-| **Related Documents** | `.ai/hermes.md`, `.ai/filament.md`, `docs/PHASE3.md`, `docs/REQUIREMENTS.md`, `app/Filament/Pages/Dashboard.php`, `app/Filament/Widgets/SipetaStatsOverview.php`, `app/Filament/Widgets/PendudukPerRTChart.php`, `app/Filament/Widgets/PendudukPerLingkunganChart.php`, `app/Filament/Widgets/PendudukPerPekerjaanChart.php` |
+| **Related Documents** | `.ai/hermes.md`, `.ai/filament.md`, `docs/PHASE3.md`, `docs/REQUIREMENTS.md`, `app/Filament/Pages/Dashboard.php`, `app/Filament/Widgets/SipetaStatsOverview.php`, `app/Filament/Widgets/PendudukPerRTChart.php`, `app/Filament/Widgets/PendudukPerLingkunganChart.php`, `app/Filament/Widgets/PendudukPerPekerjaanChart.php`, `app/Filament/Widgets/RecentActivityWidget.php` |
 
 ---
 
@@ -202,3 +202,77 @@ view was added (Chart.js ships with Filament; widgets use the shipped
 ### 4.3.6 Commit
 
 `feat(dashboard): Phase 4.3 — distribution charts (per RT, Lingkungan, Pekerjaan)`
+
+---
+
+## Phase 4.4
+
+### 4.4.1 Objective
+
+Add a Recent Activity section to the dashboard showing the latest activity
+from existing data only: the 5 newest Kartu Keluarga and the 5 newest
+Penduduk. No new tables, migrations, seeders, observers, or audit log —
+`kartu_keluarga` and `penduduk` already carry `created_at`.
+
+### 4.4.2 Deliverables
+
+- **`app/Filament/Widgets/RecentActivityWidget.php`** — extends
+  `Filament\Widgets\Widget` (eager-rendered like the other dashboard
+  widgets). Data is read-only: the 5 newest KK (`KartuKeluarga::latest()`,
+  limit 5) and the 5 newest Penduduk (`Penduduk::latest()`, limit 5) merged
+  into a single chronological list (newest first). Each entry carries:
+  - `icon` — `heroicon-o-home-modern` (KK) / `heroicon-o-user` (Penduduk);
+  - `title` — "KK {kk_number}" / full name;
+  - `subtitle` — address / "NIK {nik}";
+  - `created_at` — rendered human-readable in Bahasa Indonesia
+    (`->locale('id')->diffForHumans()`, e.g. "2 jam yang lalu");
+  - `url` — the record's edit page via existing resource routes
+    (`KartuKeluargaResource::getUrl('edit', ...)` /
+    `PendudukResource::getUrl('edit', ...)`).
+- **`resources/views/filament/widgets/recent-activity-widget.blade.php`** —
+  new Blade view. Wraps Filament's `x-filament::section`; when there is no
+  data at all it renders Filament's `x-filament::empty-state` ("Belum ada
+  aktivitas"). Rows are `<a>` links with icon, title, subtitle, and a
+  `<time>` element. The panel does not compile arbitrary Tailwind utilities
+  (no custom Vite theme is registered — verified against the compiled
+  `public/css/filament/filament/app.css`), so the list is styled by a small
+  scoped `<style>` block (`fi-wi-recent-activity-*` classes, light + dark
+  variants) instead of utility classes.
+- **Dashboard page** (`app/Filament/Pages/Dashboard.php`) — the widget is
+  appended LAST in `getWidgets()` (below KPI cards and charts); no previous
+  widget was reordered or modified.
+
+### 4.4.3 Not done (explicitly out of scope for 4.4)
+
+- No audit log implementation, no observers, no activity table, no
+  migrations, no seeders.
+- No changes to `SipetaStatsOverview`, the chart widgets, Resources, or
+  prior-phase code (only the required mount line in `Dashboard.php`).
+- No edit/create actions from the widget, no pagination, no filters.
+
+### 4.4.4 Files changed (4.4 only)
+
+| File | Change |
+| --- | --- |
+| `app/Filament/Widgets/RecentActivityWidget.php` | New — recent activity widget (5 newest KK + 5 newest Penduduk, merged newest-first). |
+| `resources/views/filament/widgets/recent-activity-widget.blade.php` | New — widget Blade view with scoped styling and Filament empty state. |
+| `app/Filament/Pages/Dashboard.php` | Modified — `RecentActivityWidget` appended to `getWidgets()` (no reordering). |
+| `tests/Feature/Phase4/RecentActivityWidgetTest.php` | New — renders, empty state, 5 newest KK, 5 newest Penduduk (4 tests). |
+| `docs/PHASE4.md` | Updated — this section; metadata Version 1.2.0 → 1.3.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 4.4 entry; Version 1.4.0 → 1.5.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-09 (recent activity) added, status Implemented. |
+
+### 4.4.5 Verification
+
+```text
+php artisan test       97 passed (458 assertions), 3 skipped
+./vendor/bin/pint --test  PASS (124 files)
+```
+
+`npm run build` not applicable — no frontend build asset changed (no
+Tailwind classes in the new view, no `resources/css` / `resources/js` /
+`vite.config` edits; the panel does not load the app Vite bundle).
+
+### 4.4.6 Commit
+
+`feat(dashboard): Phase 4.4 — recent activity widget`

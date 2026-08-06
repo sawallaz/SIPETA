@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.4.0 |
+| **Version** | 1.5.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -88,6 +88,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No migrations, models, resources, or prior-phase code changed. Chart type choice (bar for RT/Lingkungan, doughnut for Pekerjaan) is a presentation decision documented in `docs/PHASE4.md` §4.3.
 - Verification: `php artisan test` 93 passed / 437 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (122 files). `npm run build` not applicable — no frontend asset, Tailwind class, or Blade view added (Chart.js ships with Filament).
 - Known doc debt (not part of this phase): Phase 4.1 / 4.2 changelog entries and the `F-CORE-02` status flip were not recorded at the time.
+
+### Added (Phase 4.4 — Recent Activity Widget — 2026-08-06)
+- **Recent Activity widget** (`app/Filament/Widgets/RecentActivityWidget.php`): eager-rendered dashboard widget listing the 5 newest Kartu Keluarga and the 5 newest Penduduk from existing `created_at` data only, merged into one newest-first list. Each row shows an icon (`heroicon-o-home-modern` / `heroicon-o-user`), a title ("KK {kk_number}" / full name), a subtitle (address / "NIK {nik}"), a human-readable Bahasa Indonesia timestamp (`->locale('id')->diffForHumans()`), and a link to the record's edit page via the existing resource routes (`KartuKeluargaResource::getUrl('edit')` / `PendudukResource::getUrl('edit')`).
+- **Widget Blade view** (`resources/views/filament/widgets/recent-activity-widget.blade.php`): wraps `x-filament::section`; renders Filament's `x-filament::empty-state` ("Belum ada aktivitas") when there is no data. The panel does not compile arbitrary Tailwind utilities (no custom Vite theme), so the list is styled by a small scoped `<style>` block (`fi-wi-recent-activity-*`, light + dark variants).
+- **Dashboard page** (`app/Filament/Pages/Dashboard.php`) — `RecentActivityWidget` appended last in `getWidgets()`; no prior widget reordered.
+- **Phase 4.4 tests** (`tests/Feature/Phase4/RecentActivityWidgetTest.php`, 4 tests): widget renders on `/admin`; empty state when no data; exactly the 5 newest KK listed (newest first, `/edit` URLs); exactly the 5 newest Penduduk listed (newest first, `/edit` URLs).
+
+### Notes
+- Read-only: no observers, no audit log, no activity table, no migrations, no seeders. Everything reads `kartu_keluarga.created_at` / `penduduk.created_at`.
+- Verification: `php artisan test` 97 passed / 458 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (124 files). `npm run build` not applicable — no frontend build asset changed (no Tailwind classes, no `resources/css` / `resources/js` / `vite.config` edits).
 
 ## [1.3.0] - 2026-08-03
 
