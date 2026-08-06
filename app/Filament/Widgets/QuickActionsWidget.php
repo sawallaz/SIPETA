@@ -18,6 +18,8 @@ class QuickActionsWidget extends Widget
 {
     protected static bool $isLazy = false;
 
+    protected int|string|array $columnSpan = 'full';
+
     protected string $view = 'filament.widgets.quick-actions-widget';
 
     /**

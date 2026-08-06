@@ -34,6 +34,8 @@ class SipetaStatsOverview extends StatsOverviewWidget
     // initial dashboard HTML (no Livewire lazy hydration needed).
     protected static bool $isLazy = false;
 
+    protected int|string|array $columnSpan = 'full';
+
     protected function getStats(): array
     {
         $totalPenduduk = Penduduk::count();
@@ -101,7 +103,7 @@ class SipetaStatsOverview extends StatsOverviewWidget
             Stat::make('Penduduk Meninggal', $this->format(Penduduk::where('resident_status', ResidentStatus::MENINGGAL->value)->count()))
                 ->description('Berstatus meninggal')
                 ->icon('heroicon-o-x-circle')
-                ->color('gray'),
+                ->color('danger'),
         ];
     }
 

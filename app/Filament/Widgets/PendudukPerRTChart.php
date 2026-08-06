@@ -20,7 +20,11 @@ class PendudukPerRTChart extends ChartWidget
 {
     protected static bool $isLazy = false;
 
+    protected int|string|array $columnSpan = 'full';
+
     protected ?string $heading = 'Penduduk per RT';
+
+    protected ?string $description = 'Jumlah penduduk aktif di setiap RT';
 
     protected ?string $emptyStateHeading = 'Belum ada data penduduk';
 
@@ -48,6 +52,8 @@ class PendudukPerRTChart extends ChartWidget
                 [
                     'label' => 'Penduduk aktif',
                     'data' => $rts->pluck('active_count')->all(),
+                    // Brand color (amber) shared by both bar charts (Phase 4.6).
+                    'backgroundColor' => '#f59e0b',
                 ],
             ],
             'labels' => $rts->map(fn (Rt $rt) => "RT {$rt->number}")->all(),

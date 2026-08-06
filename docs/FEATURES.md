@@ -55,6 +55,7 @@ Feature status legend:
 | F-HIGH-08 | KK photo download | Planned | Phase 3 |
 | F-HIGH-09 | Dashboard recent activity (5 newest KK & Penduduk) | Implemented | Phase 4 |
 | F-HIGH-10 | Dashboard quick actions (Tambah / Data KK & Penduduk) | Implemented | Phase 4 |
+| F-HIGH-11 | Dashboard polish (full-width layout, ordering, consistent colors) | Implemented | Phase 4 |
 
 ## 3. Medium Priority
 

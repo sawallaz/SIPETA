@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.6.0 |
+| **Version** | 1.7.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -108,6 +108,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 - Static link grid only: no custom buttons, forms, modals, or permission logic; all four shortcuts reuse the existing KK / Penduduk resource routes.
 - Verification: `php artisan test` 101 passed / 481 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (126 files). `npm run build` not applicable — no frontend build asset changed.
+
+### Added (Phase 4.6 — Dashboard Polish — 2026-08-06)
+- **Operator-first widget ordering** (`app/Filament/Pages/Dashboard.php`): Quick Actions now top (most frequent workflows), then KPI cards, then the three charts, Recent Activity last (reference feed). Previously Quick Actions was mounted last.
+- **Full-width responsive layout**: every dashboard widget now sets `columnSpan = 'full'`. Filament's dashboard grid defaults to two columns at `columnSpan = 1`, so all six widgets previously rendered cramped half-width; full width gives the KPI cards, wide 19-RT bar charts, action-card grid, and activity list room to breathe and wrap on narrow screens. Applied to `SipetaStatsOverview`, the three charts, `RecentActivityWidget`, and `QuickActionsWidget`.
+- **Chart descriptions (Bahasa Indonesia)**: "Jumlah penduduk aktif di setiap RT", "Jumlah penduduk aktif di setiap RW / lingkungan", and "Sebaran penduduk aktif menurut pekerjaan" — clarifying the active-only scope per `docs/REQUIREMENTS.md` §5.5.
+- **Consistent chart colors**: both bar charts (RT, Lingkungan) now render in the brand amber (`#f59e0b`, matching `Color::Amber`) instead of Chart.js's default palette; the Pekerjaan doughnut gets an explicit categorical 12-color palette (Tailwind 500-scale, amber-anchored) covering the 12 seeded occupations with a white slice border.
+- **Consistent KPI status colors**: `Penduduk Meninggal` `gray` → `danger`, completing the status family (Aktif `success`, Pindah `warning`, Meninggal `danger`).
+- **Layout test** (`tests/Feature/Phase4/DashboardLayoutTest.php`, 3 tests): locks in the operator-first widget order, asserts every widget's `columnSpan` is `'full'`, and confirms the polished dashboard still renders.
+
+### Notes
+- Polish only — no new widgets, charts, resources, migrations, models, controllers, or Livewire components; no widget views or Vite assets changed. KPI values, chart data, quick-action routes, and recent-activity queries are unchanged. Loading/empty states already existed (all widgets `$isLazy = false`, charts + recent activity have empty states); Indonesian number formatting already present.
+- Verification: `php artisan test` 104 passed / 491 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (127 files). `npm run build` not applicable — no frontend build asset changed.
 
 ## [1.3.0] - 2026-08-03
 

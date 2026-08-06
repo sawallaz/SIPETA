@@ -20,7 +20,11 @@ class PendudukPerLingkunganChart extends ChartWidget
 {
     protected static bool $isLazy = false;
 
+    protected int|string|array $columnSpan = 'full';
+
     protected ?string $heading = 'Penduduk per Lingkungan';
+
+    protected ?string $description = 'Jumlah penduduk aktif di setiap RW / lingkungan';
 
     protected ?string $emptyStateHeading = 'Belum ada data penduduk';
 
@@ -51,6 +55,8 @@ class PendudukPerLingkunganChart extends ChartWidget
                 [
                     'label' => 'Penduduk aktif',
                     'data' => $areas->map(fn (AreaUnit $area) => (int) ($counts[$area->id] ?? 0))->all(),
+                    // Brand color (amber) shared by both bar charts (Phase 4.6).
+                    'backgroundColor' => '#f59e0b',
                 ],
             ],
             'labels' => $areas->map(fn (AreaUnit $area) => $area->name)->all(),

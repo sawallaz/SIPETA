@@ -2,8 +2,8 @@
 | --- | --- |
 | **Title** | SIPETA Phase 4 — Dashboard |
 | **Purpose** | Track Phase 4 (Admin Panel Dashboard) sub-phase progress. |
-| **Scope** | 4.1 Dashboard foundation (layout + placeholder KPI cards). 4.2 Enhanced KPI cards (population statistics). 4.3 Distribution charts (per RT, per Lingkungan, per Pekerjaan). 4.4 Recent activity (5 newest KK + Penduduk). 4.5 Quick actions (Tambah / Data KK & Penduduk). Later: polish. |
-| **Version** | 1.4.0 |
+| **Scope** | 4.1 Dashboard foundation (layout + placeholder KPI cards). 4.2 Enhanced KPI cards (population statistics). 4.3 Distribution charts (per RT, per Lingkungan, per Pekerjaan). 4.4 Recent activity (5 newest KK + Penduduk). 4.5 Quick actions (Tambah / Data KK & Penduduk). 4.6 Dashboard polish (layout, ordering, spacing, readability, colors). |
+| **Version** | 1.5.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
 | **Related Documents** | `.ai/hermes.md`, `.ai/filament.md`, `docs/PHASE3.md`, `docs/REQUIREMENTS.md`, `app/Filament/Pages/Dashboard.php`, `app/Filament/Widgets/SipetaStatsOverview.php`, `app/Filament/Widgets/PendudukPerRTChart.php`, `app/Filament/Widgets/PendudukPerLingkunganChart.php`, `app/Filament/Widgets/PendudukPerPekerjaanChart.php`, `app/Filament/Widgets/RecentActivityWidget.php`, `app/Filament/Widgets/QuickActionsWidget.php` |
@@ -356,3 +356,99 @@ Tailwind classes in the new view, no `resources/css` / `resources/js` /
 ### 4.5.6 Commit
 
 `feat(dashboard): Phase 4.5 — quick actions widget`
+
+---
+
+## Phase 4.6
+
+### 4.6.1 Objective
+
+Polish the dashboard presentation and usability only. No new business
+features — no new widgets, charts, resources, migrations, models,
+controllers, or Livewire components. Every change is presentational or
+layout-related; all existing amounts, queries, and routes are unchanged.
+
+### 4.6.2 Deliverables
+
+- **Widget ordering** (`app/Filament/Pages/Dashboard.php`) — the dashboard
+  is now ordered operator-first: `QuickActionsWidget` on top (the most
+  frequent workflows — Tambah / Data KK & Penduduk), then
+  `SipetaStatsOverview` (KPI cards), then the three distribution charts,
+  and `RecentActivityWidget` last (a reference feed). Previously Quick
+  Actions was mounted last.
+- **Responsive, full-width layout** — every dashboard widget now declares
+  `protected int|string|array $columnSpan = 'full'`. Filament's dashboard
+  grid defaults to two columns with each widget at `columnSpan = 1`, so
+  previously all six widgets rendered cramped at half width. Full width
+  gives the 11 KPI cards, the wide 19-RT bar charts, the action-card grid,
+  and the activity list room to breathe and wraps gracefully on narrow
+  screens. Applied to `SipetaStatsOverview`, the three charts,
+  `RecentActivityWidget`, and `QuickActionsWidget`.
+- **Chart descriptions** — each chart now carries a Bahasa Indonesia
+  `description` clarifying its scope (active residents per
+  `docs/REQUIREMENTS.md` §5.5):
+  - `Penduduk per RT` → "Jumlah penduduk aktif di setiap RT";
+  - `Penduduk per Lingkungan` → "Jumlah penduduk aktif di setiap RW / lingkungan";
+  - `Penduduk per Pekerjaan` → "Sebaran penduduk aktif menurut pekerjaan".
+- **Consistent chart colors** — the two bar charts (RT, Lingkungan) now
+  render in the single brand color (`#f59e0b`, matching the panel's
+  `Color::Amber` primary) instead of Chart.js's default palette. The
+  Pekerjaan doughnut gets an explicit categorical 12-color palette
+  (Tailwind 500-scale, anchored on the brand amber) covering the 12 seeded
+  occupations, with a white slice border for clean separation.
+- **Consistent KPI status colors** — `Penduduk Meninggal` changed from
+  `gray` to `danger`, completing the status color family
+  (Aktif `success`, Pindah `warning`, Meninggal `danger`).
+- **Unchanged by design** — loading states are left eager
+  (`$isLazy = false` on every widget already; no regression to lazy
+  hydration), empty states already exist (charts + recent activity), number
+  formatting was already Indonesian (`1.234.567`), and headings /
+  descriptions already existed on the KPI cards and the two list widgets.
+  No duplicated visual elements were found; the dashboard page title is not
+  repeated by any widget.
+
+### 4.6.3 Not done (explicitly out of scope for 4.6)
+
+- No new widgets, charts, resources, migrations, models, controllers, or
+  Livewire components.
+- No business-feature change: KPI values, chart data, quick-action
+  destinations, and recent-activity queries are byte-for-byte unchanged.
+- KPI count/selection not reduced (the "lean dashboard" idea belongs to a
+  future phase, not polish — removing cards would drop existing data).
+- No custom dashboard page view (`filament.pages.dashboard`) — layout is
+  improved purely via widget `columnSpan` and ordering, staying on the
+  framework's default responsive grid.
+- Filament's default grid gap (1rem) is retained as the widget spacing.
+
+### 4.6.4 Files changed (4.6 only)
+
+| File | Change |
+| --- | --- |
+| `app/Filament/Pages/Dashboard.php` | Modified — widget order changed to operator-first (Quick Actions first, Recent Activity last); docblock. |
+| `app/Filament/Widgets/SipetaStatsOverview.php` | Modified — `columnSpan = 'full'`; `Penduduk Meninggal` color → `danger`. |
+| `app/Filament/Widgets/PendudukPerRTChart.php` | Modified — `columnSpan = 'full'`, description added, dataset brand color `#f59e0b`. |
+| `app/Filament/Widgets/PendudukPerLingkunganChart.php` | Modified — `columnSpan = 'full'`, description added, dataset brand color `#f59e0b`. |
+| `app/Filament/Widgets/PendudukPerPekerjaanChart.php` | Modified — `columnSpan = 'full'`, description added, 12-color doughnut palette. |
+| `app/Filament/Widgets/RecentActivityWidget.php` | Modified — `columnSpan = 'full'`. |
+| `app/Filament/Widgets/QuickActionsWidget.php` | Modified — `columnSpan = 'full'`. |
+| `tests/Feature/Phase4/DashboardLayoutTest.php` | New — locks in widget order + full-width spans + page renders (3 tests). |
+| `docs/PHASE4.md` | Updated — this section; metadata Version 1.4.0 → 1.5.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 4.6 entry; Version 1.6.0 → 1.7.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-11 (dashboard polish) added, status Implemented. |
+
+### 4.6.5 Verification
+
+```text
+php artisan test       104 passed (491 assertions), 3 skipped
+./vendor/bin/pint --test  PASS (127 files)
+```
+
+`npm run build` not applicable — no frontend build asset changed (no
+`resources/css` / `resources/js` / `vite.config` edits and no widget view
+was modified; the polish is pure PHP: ordering, `columnSpan`, chart
+descriptions, and chart dataset colors, which ship via the framed
+`chart-widget` view and Chart.js).
+
+### 4.6.6 Commit
+
+`feat(dashboard): Phase 4.6 — dashboard polish`
