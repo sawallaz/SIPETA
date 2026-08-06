@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.10.0 |
+| **Version** | 1.11.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -159,6 +159,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 - No OCR recognition, Tesseract, AI vision, parsing, migrations, schema changes, dashboard changes, or frontend assets. Denoise, adaptive binarization, border removal, and automatic deskew (`.ai/ocr.md` §4.2 steps 2–5) need an image-processing library absent from the repo; the `appliedTransforms` pipeline structure is ready for them in the OCR engine phase (`docs/PHASE5.md` §5.3.3).
 - Verification: `php artisan test` 124 passed / 581 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (135 files). `npm run build` not applicable — no frontend build asset changed.
+
+### Added (Phase 5.4 — OCR Engine Integration — 2026-08-06)
+- **Engine contract** (`app/Services/OcrEngine.php`, new — `.ai/ocr.md` §12): `run(string $imagePath): OcrResult`; the pipeline's abstraction over the OCR binary.
+- **Tesseract engine** (`app/Services/TesseractOcrEngine.php`, new): invokes `tesseract <image> stdout -l ind --psm 6 tsv` via Laravel's Process facade (`.ai/ocr.md` §4.3), parses word-level TSV into raw text (words grouped into lines in reading order) plus a mean word confidence (0–100, 2 decimals). Non-zero exit → `OcrEngineException` (new, `app/Exceptions/`) with stderr; timeout (`config/ocr.php` `timeout_seconds`, 10 s per `.ai/ocr.md` §4.9) → `OcrEngineException`; empty/no-word output → empty `OcrResult` (`''`, 0.0, 0 words).
+- **OCR result DTO** (`app/Services/OcrResult.php`, new readonly): `rawText`, `confidence`, `wordCount`, `durationMs` — in-memory only, never persisted.
+- **Configuration** (`config/ocr.php`, new — `.ai/ocr.md` §6): `tesseract_path` (env `TESSERACT_PATH`, default `tesseract` on PATH), `language` `ind`, `psm` `6`, `confidence_threshold` 70, `timeout_seconds` 10, `temp_retention_hours` 24. Resolution/size bounds stay owned by `ImagePreprocessor` / `KkDocumentUploadService`.
+- **Pipeline stage** (`app/Services/OcrProcessingService.php`): new `extract(OcrJob)` stage after `start()` — resolves the preprocessed image on the `ocr_temp` disk, runs the engine, persists the outcome on existing columns (no migration): mean confidence ≥ 70 → `SUCCESS`, below (incl. empty results) → `LOW_CONFIDENCE`, both persisting `raw_text` + `confidence` + `finished_at`; engine failure/timeout → `FAILED` with `error_message` + `finished_at`. `ocrResult()` accessor added. `start()` untouched — the Phase 5.1–5.3 tests were not rewritten.
+- **DI binding** (`app/Providers/AppServiceProvider.php`): `OcrEngine` → `TesseractOcrEngine`; tests override with a fake.
+- **Phase 5.4 tests**:
+  - `tests/Feature/Phase5/TesseractOcrEngineTest.php` (6 tests, Process-faked): successful TSV parse, invocation shape + timeout wiring via `Process::assertRan`, empty output, non-zero exit with/without stderr, plus an env-gated real-binary test (`RUN_TESSERACT_TESTS=1`, same gating as the Phase 3 real-MySQL test) rendering a NIK with GD + DejaVu and asserting real tesseract 5.5 + `ind` extracts it.
+  - `tests/Feature/Phase5/OcrEnginePipelineTest.php` (9 tests, `tests/Support/FakeOcrEngine.php` bound in the container): SUCCESS/LOW_CONFIDENCE persisted with raw text + confidence, threshold boundary 70.0, empty result → LOW_CONFIDENCE, engine failure → FAILED, timeout → FAILED ("timed out"), DB status sequence PENDING → SUCCESS, extract without `start()` rejected, non-PROCESSING job rejected.
+- `SUCCESS` / `LOW_CONFIDENCE` are now persisted outcomes (previously reserved for the extraction sub-phase per `docs/PHASE5.md` §5.2.3); `PROCESSING` remains runtime-only.
+
+### Notes
+- No parsing, no KartuKeluarga / Penduduk creation, no review UI, no confidence highlighting, no dashboard changes, no migrations. The `.ai/ocr.md` §4.3 character whitelist is deliberately deferred — a digits/uppercase whitelist would mangle lowercase name/address text before the parsing stage exists (`docs/PHASE5.md` §5.4.3).
+- Verification: `php artisan test` 138 passed / 628 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (143 files). `npm run build` not applicable — no frontend build asset changed. Real-binary smoke (`RUN_TESSERACT_TESTS=1`) passes on this host.
 
 ## [1.3.0] - 2026-08-03
 

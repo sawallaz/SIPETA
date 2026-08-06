@@ -2,11 +2,11 @@
 | --- | --- |
 | **Title** | SIPETA Phase 5 — OCR |
 | **Purpose** | Track Phase 5 (OCR) sub-phase progress. |
-| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking). OCR extraction, parsing, review UI, confidence highlighting, and duplicate detection land in later 5.x sub-phases. |
-| **Version** | 1.2.0 |
+| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking); 5.4 OCR engine integration (Tesseract invocation, raw text extraction, confidence aggregation, failure/timeout handling, job status update, raw extracted text persistence). Parsing, review UI, confidence highlighting, and duplicate detection land in later 5.x sub-phases. |
+| **Version** | 1.3.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
-| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Models/OcrJob.php` |
+| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Services/OcrEngine.php`, `app/Services/TesseractOcrEngine.php`, `app/Services/OcrResult.php`, `app/Models/OcrJob.php`, `config/ocr.php` |
 
 ---
 
@@ -284,3 +284,125 @@ php artisan test        124 passed (581 assertions), 3 skipped
 ### 5.3.6 Commit
 
 `feat(ocr): Phase 5.3 — image preprocessing`
+
+---
+
+## 5.4 OCR Engine Integration
+
+### 5.4.1 Objective
+
+Integrate the OCR engine the roadmap specifies — Tesseract 5 (`.ai/ocr.md`
+§4.3) — into the pipeline: run text extraction over the preprocessed image,
+aggregate word-level confidence, handle engine failures and timeouts, update
+the job status, and persist the raw extracted text on the existing `ocr_jobs`
+schema. No parsing, no KartuKeluarga/Penduduk creation, no review UI.
+
+### 5.4.2 Deliverables
+
+- **Engine contract** (`app/Services/OcrEngine.php`, new — interface):
+  `run(string $imagePath): OcrResult`; the abstraction through which the
+  pipeline invokes OCR. Tests bind a fake (`.ai/ocr.md` §12) so the suite
+  never depends on the real executable.
+- **Tesseract engine** (`app/Services/TesseractOcrEngine.php`, new):
+  invokes `tesseract <image> stdout -l ind --psm 6 tsv` through Laravel's
+  Process facade (`.ai/ocr.md` §4.3: Indonesian language pack, single uniform
+  text block, TSV for word confidence). Parses word-level TSV rows into raw
+  text (words grouped back into lines in reading order) and a mean word
+  confidence (0–100, 2 decimals). Non-zero exit → `OcrEngineException` with
+  stderr; timeout (`config/ocr.php` `timeout_seconds`, 10 s per `.ai/ocr.md`
+  §4.9) → `OcrEngineException`; empty/no-word output → empty `OcrResult`
+  (`''`, confidence 0.0, 0 words) — the engine ran, it just saw nothing.
+- **OCR result DTO** (`app/Services/OcrResult.php`, new — readonly):
+  `rawText`, `confidence`, `wordCount`, `durationMs`. In-memory only; the
+  extractable fields are persisted by the pipeline, never the DTO.
+- **Engine exception** (`app/Exceptions/OcrEngineException.php`, new):
+  engine failures and timeouts; the pipeline persists the job FAILED before
+  rethrowing.
+- **Pipeline stage** (`app/Services/OcrProcessingService.php`, updated):
+  new `extract(OcrJob)` stage that follows `start()` — resolves the
+  preprocessed image path on the `ocr_temp` disk, runs the engine, and
+  persists the outcome on the existing columns (no migration):
+  - mean confidence ≥ 70 (config `confidence_threshold`) → `SUCCESS`;
+  - below the threshold, including empty results → `LOW_CONFIDENCE`;
+  - in both cases `raw_text`, `confidence`, and `finished_at` are persisted;
+  - engine failure/timeout → `FAILED` with `error_message` + `finished_at`
+    (same mark-failed path as load/preprocess failures);
+  - `ocrResult()` accessor exposes the last result (in-memory).
+  `start()` is unchanged from 5.2/5.3 — the engine stage is a separate call,
+  so the Phase 5.1–5.3 tests were not rewritten.
+- **Configuration** (`config/ocr.php`, new — `.ai/ocr.md` §6):
+  `tesseract_path` (env `TESSERACT_PATH`, default `tesseract` on PATH; the
+  Windows desktop packaging sets the explicit path), `language` `ind`,
+  `psm` `6`, `confidence_threshold` 70, `timeout_seconds` 10,
+  `temp_retention_hours` 24. Resolution/size bounds stay owned by
+  `ImagePreprocessor` / `KkDocumentUploadService` (not duplicated).
+- **DI binding** (`app/Providers/AppServiceProvider.php`, updated):
+  `OcrEngine` → `TesseractOcrEngine`.
+- **Tests**:
+  - `tests/Feature/Phase5/TesseractOcrEngineTest.php` (6 tests): successful
+    run parses TSV into raw text + mean confidence; invocation shape
+    (`-l ind`, `--psm 6`, `tsv`, `stdout`, image path) and timeout wiring
+    asserted via `Process::assertRan`; empty output → empty result; non-zero
+    exit with stderr → exception; non-zero exit without stderr → exit-code
+    message; plus an env-gated real-binary test (`RUN_TESSERACT_TESTS=1`, the
+    same gating as the Phase 3 real-MySQL test) that renders a NIK with
+    GD + DejaVu and asserts the real tesseract 5.5 + `ind` extracts it.
+  - `tests/Feature/Phase5/OcrEnginePipelineTest.php` (9 tests,
+    `FakeOcrEngine` bound in the container): SUCCESS persisted with raw text
+    and confidence; LOW_CONFIDENCE persisted; threshold boundary (70.0 →
+    SUCCESS); empty result → LOW_CONFIDENCE with `''`/0.0; engine failure →
+    FAILED with error_message; timeout → FAILED with "timed out"; DB status
+    sequence (PENDING after `start()`, SUCCESS after `extract()`); extract
+    without `start()` rejected; extract on a non-PROCESSING job rejected.
+  - `tests/Support/FakeOcrEngine.php` (new): shared engine test double.
+
+### 5.4.3 Not done (deferred)
+
+- Parsing KK fields and creating KartuKeluarga / Penduduk rows — the next
+  sub-phase; this phase persists only the raw extracted text.
+- Confidence highlighting, review UI, dashboard changes — none in this phase.
+- No new migrations: `raw_text`, `confidence`, `status`, `finished_at` all
+  exist on `ocr_jobs` from Phase 2; `SUCCESS` / `LOW_CONFIDENCE` became
+  persistable outcomes here (previously documented as "extraction
+  sub-phase's job" in §5.2.3).
+- Character whitelist (`.ai/ocr.md` §4.3: digits, uppercase, punctuation):
+  deliberately **not** applied — a digits/uppercase whitelist would mangle
+  lowercase name/address text before the parsing stage exists to handle
+  casing. Revisit during the parsing sub-phase.
+- Auto-deskew, queued processing, and temp-file GC remain out of scope (as
+  in 5.1–5.3).
+
+### 5.4.4 Files changed (5.4 only)
+
+| File | Change |
+| --- | --- |
+| `config/ocr.php` | New — engine configuration per `.ai/ocr.md` §6. |
+| `app/Services/OcrEngine.php` | New — engine contract (`.ai/ocr.md` §12). |
+| `app/Services/TesseractOcrEngine.php` | New — Tesseract integration (Process facade, TSV parsing, timeout + failure mapping). |
+| `app/Services/OcrResult.php` | New — in-memory OCR result DTO. |
+| `app/Exceptions/OcrEngineException.php` | New — engine failure/timeout exception. |
+| `app/Services/OcrProcessingService.php` | Updated — `extract()` stage + `ocrResult()` accessor; `start()` untouched. |
+| `app/Providers/AppServiceProvider.php` | Updated — `OcrEngine` → `TesseractOcrEngine` binding. |
+| `tests/Support/FakeOcrEngine.php` | New — shared engine test double. |
+| `tests/Feature/Phase5/TesseractOcrEngineTest.php` | New — 6 engine tests (5 Process-faked + 1 env-gated real binary). |
+| `tests/Feature/Phase5/OcrEnginePipelineTest.php` | New — 9 pipeline tests with the fake engine. |
+| `docs/PHASE5.md` | Updated — this §5.4 section; Version 1.2.0 → 1.3.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 5.4 entry; Version 1.10.0 → 1.11.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-15 (OCR engine integration) added, status Implemented. |
+
+### 5.4.5 Verification
+
+```text
+php artisan test        138 passed (628 assertions), 4 skipped (3 MySQL + 1 Tesseract, env-gated)
+./vendor/bin/pint --test  PASS (143 files)
+```
+
+`npm run build` not applicable — no frontend asset changed (pure PHP + docs).
+
+Real-binary smoke on this host: `RUN_TESSERACT_TESTS=1 php artisan test
+--filter=real_tesseract` passes (tesseract 5.5.0, `ind` pack installed) —
+the integration layer extracts a rendered NIK end to end.
+
+### 5.4.6 Commit
+
+`feat(ocr): Phase 5.4 — OCR engine integration`

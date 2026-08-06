@@ -3,28 +3,34 @@
 namespace App\Services;
 
 use App\Enums\OcrJobStatus;
+use App\Exceptions\OcrEngineException;
 use App\Exceptions\OcrProcessingException;
 use App\Models\OcrJob;
 use Illuminate\Filesystem\FilesystemManager;
 use InvalidArgumentException;
 
 /**
- * OCR processing pipeline (Phase 5.2 + 5.3).
+ * OCR processing pipeline (Phase 5.2 + 5.3 + 5.4).
  *
- * Starts processing a PENDING OCR job: validates the job, transitions it to
- * the PROCESSING runtime state, loads the uploaded source image from the
- * private kk_uploads disk, validates processing prerequisites, and runs the
- * image preprocessing stage (Phase 5.3 — ImagePreprocessor) on it.
+ * Two sequential stages, each its own method:
+ *
+ *   start(OcrJob)   — validate the PENDING job, move it to the PROCESSING
+ *                     runtime state, load the uploaded source image from the
+ *                     private kk_uploads disk, validate processing
+ *                     prerequisites, and run image preprocessing (5.3).
+ *   extract(OcrJob) — run the OCR engine over the preprocessed image and
+ *                     persist the outcome: SUCCESS / LOW_CONFIDENCE with
+ *                     confidence + raw_text + finished_at, or FAILED with
+ *                     error_message when the engine fails or times out (5.4).
  *
  * PROCESSING is an in-memory state only: the ocr_jobs.status column
  * constraint (SQLite CHECK / MySQL ENUM, from the Phase 2 migration) predates
- * the PROCESSING value, so it cannot be persisted yet. The DB records PENDING
- * (created by the upload service) and the terminal FAILED state — set with
- * error_message and finished_at when processing cannot continue.
+ * the PROCESSING value, so it cannot be persisted — the DB row stays PENDING
+ * until a terminal state (SUCCESS / LOW_CONFIDENCE / FAILED) is persisted.
  *
- * Actual OCR extraction is a later sub-phase; this service only prepares the
- * job for it. The preprocessing result of the last run is exposed via
- * preprocessResult() (in-memory only, never persisted).
+ * The preprocessing and engine results of the last run are exposed via
+ * preprocessResult() / ocrResult() (in-memory only, never persisted). No
+ * parsing or database mapping happens here — that is a later sub-phase.
  */
 class OcrProcessingService
 {
@@ -36,9 +42,12 @@ class OcrProcessingService
 
     private ?PreprocessResult $preprocessResult = null;
 
+    private ?OcrResult $ocrResult = null;
+
     public function __construct(
         private readonly FilesystemManager $filesystem,
         private readonly ImagePreprocessor $preprocessor,
+        private readonly OcrEngine $engine,
     ) {}
 
     /**
@@ -69,6 +78,34 @@ class OcrProcessingService
     }
 
     /**
+     * Run the OCR engine over the preprocessed image and persist the job
+     * outcome. A job must already be in the PROCESSING runtime state with a
+     * preprocessing result (i.e. start() must have run on this instance).
+     *
+     * @throws InvalidArgumentException when the job is not in PROCESSING
+     *                                  state or preprocessing has not run
+     * @throws OcrEngineException when the engine fails or times out; the job
+     *                            is persisted as FAILED first
+     */
+    public function extract(OcrJob $job): OcrJob
+    {
+        $this->assertExtractable($job);
+
+        try {
+            $imagePath = $this->filesystem->disk(ImagePreprocessor::DISK)->path($this->preprocessResult->path);
+            $this->ocrResult = $this->engine->run($imagePath);
+        } catch (OcrEngineException $e) {
+            $this->markFailed($job, $e->getMessage());
+
+            throw $e;
+        }
+
+        $this->persistOutcome($job, $this->ocrResult);
+
+        return $job;
+    }
+
+    /**
      * Preprocessing result of the last start() run — tracking metadata only
      * (path, dimensions, brightness, transforms, warnings, duration). Never
      * persisted; null until start() has run successfully.
@@ -76,6 +113,16 @@ class OcrProcessingService
     public function preprocessResult(): ?PreprocessResult
     {
         return $this->preprocessResult;
+    }
+
+    /**
+     * OCR result of the last extract() run — raw text + mean confidence +
+     * word count + duration (in-memory only). Null until extract() has run
+     * successfully.
+     */
+    public function ocrResult(): ?OcrResult
+    {
+        return $this->ocrResult;
     }
 
     /**
@@ -90,6 +137,48 @@ class OcrProcessingService
                 sprintf('OCR job %d cannot be started: status must be PENDING, got %s.', $job->id, $job->status->value)
             );
         }
+    }
+
+    /**
+     * Reject jobs that are not extractable (must be in the PROCESSING runtime
+     * state with a preprocessing result available).
+     *
+     * @throws InvalidArgumentException
+     */
+    private function assertExtractable(OcrJob $job): void
+    {
+        if ($job->status !== OcrJobStatus::PROCESSING) {
+            throw new InvalidArgumentException(
+                sprintf('OCR job %d cannot be extracted: status must be PROCESSING, got %s.', $job->id, $job->status->value)
+            );
+        }
+
+        if ($this->preprocessResult === null) {
+            throw new InvalidArgumentException(
+                sprintf('OCR job %d cannot be extracted: preprocessing has not run (call start() first).', $job->id)
+            );
+        }
+    }
+
+    /**
+     * Persist the terminal outcome of a successful extraction.
+     *
+     * Mean confidence >= the configured threshold yields SUCCESS, otherwise
+     * LOW_CONFIDENCE (including empty/no-word results). Raw text and
+     * confidence are stored on the existing ocr_jobs columns — no schema
+     * change.
+     */
+    private function persistOutcome(OcrJob $job, OcrResult $result): void
+    {
+        $threshold = (float) config('ocr.confidence_threshold', 70);
+
+        $job->status = $result->confidence >= $threshold
+            ? OcrJobStatus::SUCCESS
+            : OcrJobStatus::LOW_CONFIDENCE;
+        $job->confidence = $result->confidence;
+        $job->raw_text = $result->rawText;
+        $job->finished_at = now();
+        $job->save();
     }
 
     /**
