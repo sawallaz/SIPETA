@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.15.0 |
+| **Version** | 1.16.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -229,6 +229,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No review-page UI wiring (service-layer contract only, same as 5.7). No migrations / schema changes — the reviewed `rt` / `rw` / `lingkungan` fields still have no persistable columns; RT resolves to an existing `rts` row by number (area-unit disambiguation out of scope).
 - No changes to OCR parsing, the OCR engine, preprocessing, the review page, the dashboard, or Phase 5.1–5.7 code.
 - No migrations, no frontend build asset. `php artisan test` 195 passed / 924 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (161 files).
+
+### Added (Phase 5.9 — OCR Finalization — 2026-08-07)
+- **Completion service** (`app/Services/OcrCompletionService.php`, new — the centralized success/failure completion handler closing the OCR lifecycle after the Phase 5.7 KK + Phase 5.8 Penduduk imports, ADR-009):
+  - `finalize(OcrJob $job, ?User $operator = null): OcrCompletionResult` — transitions the fully imported job (outcome SAVED + `kk_id` + the `penduduk_imported_at` snapshot marker) to the terminal **COMPLETED** state.
+  - **Completion timestamp** recorded on the audit snapshot (`extracted_data.ocr_completed_at`); the extraction `finished_at` is never overwritten.
+  - **Import summary generation** persisted on the snapshot as `completion_summary` (imported, kk_number, kartu_keluarga_id, member_count, penduduk_count, completed_at).
+  - **Final processing metrics** persisted as `processing_metrics` (ocr_status, confidence, duration_ms, word_count, member_count, imported_penduduk_count).
+  - **Cleanup of temporary processing artifacts**: best-effort removal of the pipeline's transient files on the private `ocr_temp` disk (`ImagePreprocessor::DISK`) after the completion is persisted — the uploaded source document on `kk_uploads` (the persistent archive) is never touched; a cleanup failure logs a warning and never rolls back (or breaks) the completion.
+  - **Audit/event logging** using the project's existing approach: an `AuditLog` row (`event` `ocr.completed`, actor + summary values) in the same DB transaction as the job update, plus `Log::info('OCR finalize …', pipeline_stage=finalize)` per `.ai/ocr.md` §9.
+  - **Idempotence**: an already-COMPLETED job returns `already_completed` and writes nothing (no duplicate completion). **Fault handling**: a failing job-save step rolls the whole finalization back (no COMPLETED state, no summary, no audit entry); not-fully-imported / FAILED jobs are rejected by the guard with `InvalidArgumentException` (`markJobCompleted()` kept `protected` so the rollback is verifiable).
+- **Completion result DTO** (`app/Services/OcrCompletionResult.php`, new — `final readonly`, in-memory only): status `completed` / `already_completed` with `jobId`, `kartuKeluargaId`, `kkNumber`, `importedPendudukCount`, `summary`, `metrics`; `isCompleted()` / `isAlreadyCompleted()`.
+- **COMPLETED status** (`app/Enums/OcrJobStatus.php` + `database/migrations/2026_08_07_101500_add_completed_status_to_ocr_jobs_table.php`): the enum gains the terminal `COMPLETED` case (included in `persistable()`), and the `ocr_jobs.status` column constraint (SQLite CHECK / MySQL ENUM) is widened to accept it — the exact "deliberate future schema change" documented in Phase 5.2; purely additive (existing values/rows/NOT-NULL untouched).
+- **Phase 5.9 tests** (`tests/Feature/Phase5/OcrCompletionServiceTest.php`, 11 tests, fixtures built by running the real Phase 5.7 + 5.8 imports): successful finalize marks the job COMPLETED (persisted); completion summary + processing metrics generated; completion timestamp recorded without overwriting `finished_at`; audit entry appended with the operator; result DTO reports completed details; duplicate completion refused with exactly one audit entry and no duplicate writes; transaction rolls back when the job-update step fails (no COMPLETED state, no audit entry, temp files survive); guards reject a KK-only (no Penduduk import), a not-yet-imported, and a FAILED job; transient `ocr_temp` artifacts cleaned up while the uploaded source archive survives.
+
+### Notes (Phase 5.9)
+- No changes to the OCR engine, parsing, review workflow, KK import, Penduduk import, dashboard, or Filament resources. No new columns/tables — the completion timestamp, summary and metrics live in the existing `extracted_data` JSON, the audit entry on `audit_logs`, cleanup touches only the `ocr_temp` disk. Finalization is a service-layer contract with no UI wiring (same as 5.7 / 5.8).
+- `php artisan test` 206 passed / 983 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (165 files).
 
 ### Added (Phase 5.7 — Import Kartu Keluarga — 2026-08-07)
 - **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*` per ADR-016):
