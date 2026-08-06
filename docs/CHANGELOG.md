@@ -3,9 +3,9 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.3.0 |
+| **Version** | 1.4.0 |
 | **Status** | Active |
-| **Last Updated** | 2026-08-03 |
+| **Last Updated** | 2026-08-06 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
 
 ---
@@ -74,6 +74,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No models, migrations, factories, Penduduk features, or OCR code were created or modified (out of scope for 3.2.1).
 - No new tests added (none required by the task). `getRelations()` returns an empty array — no `Penduduk` relation leaked into the resource.
 - `php artisan test`: 32 passed / 185 assertions; 3 env-gated MySQL tests skipped (`RUN_MYSQL_TESTS` unset). Routes `admin/kartu-keluarga*` registered and the panel boots.
+
+### Added (Phase 4.3 — Dashboard Charts — 2026-08-06)
+- **Three Chart.js chart widgets** (`app/Filament/Widgets/`, each extending `Filament\Widgets\ChartWidget` and eager-rendered like the KPI cards):
+  - `PendudukPerRTChart` — bar chart of active residents per RT (every RT shown, zero-padded, natural number order "RT 01" before "RT 10").
+  - `PendudukPerLingkunganChart` — bar chart of active residents per Lingkungan / RW, attributed through `penduduk.rt_id → rts.area_unit_id` in one aggregate join query (every area unit shown, zero-padded).
+  - `PendudukPerPekerjaanChart` — doughnut chart of active residents per occupation (only occupations with ≥ 1 active resident; count desc, ties broken by name).
+- **All charts count active residents only** (`resident_status = ACTIVE`), per `docs/REQUIREMENTS.md` §5.5 "Charts reflect active residents only".
+- **Dashboard page** (`app/Filament/Pages/Dashboard.php`) — `getWidgets()` now mounts the three charts after `SipetaStatsOverview`.
+- **Phase 4.3 tests** (`tests/Feature/Phase4/DashboardChartTest.php`, 2 tests): chart headings render on `/admin`; chart labels/values match a controlled database including zero-padded RTs and the active-only filter (PINDAH / MENINGGAL residents excluded).
+
+### Notes
+- No migrations, models, resources, or prior-phase code changed. Chart type choice (bar for RT/Lingkungan, doughnut for Pekerjaan) is a presentation decision documented in `docs/PHASE4.md` §4.3.
+- Verification: `php artisan test` 93 passed / 437 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (122 files). `npm run build` not applicable — no frontend asset, Tailwind class, or Blade view added (Chart.js ships with Filament).
+- Known doc debt (not part of this phase): Phase 4.1 / 4.2 changelog entries and the `F-CORE-02` status flip were not recorded at the time.
 
 ## [1.3.0] - 2026-08-03
 

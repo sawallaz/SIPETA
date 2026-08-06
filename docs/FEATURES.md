@@ -45,7 +45,7 @@ Feature status legend:
 
 | ID | Feature | Status | Phase |
 |----|---------|--------|-------|
-| F-HIGH-01 | Dashboard charts (per RT, per Lingkungan, per Pekerjaan) | Planned | Phase 5 |
+| F-HIGH-01 | Dashboard charts (per RT, per Lingkungan, per Pekerjaan) | Implemented | Phase 4 |
 | F-HIGH-02 | Backup log table | Planned | Phase 6 |
 | F-HIGH-03 | OCR confidence highlighting | Planned | Phase 4 |
 | F-HIGH-04 | OCR duplicate detection (image hash + KK number) | Planned | Phase 4 |

@@ -2,11 +2,11 @@
 | --- | --- |
 | **Title** | SIPETA Phase 4 — Dashboard |
 | **Purpose** | Track Phase 4 (Admin Panel Dashboard) sub-phase progress. |
-| **Scope** | 4.1 Dashboard foundation (layout + placeholder KPI cards). 4.2 Enhanced KPI cards (population statistics). Later: charts, filters, exports, polish. |
-| **Version** | 1.1.0 |
+| **Scope** | 4.1 Dashboard foundation (layout + placeholder KPI cards). 4.2 Enhanced KPI cards (population statistics). 4.3 Distribution charts (per RT, per Lingkungan, per Pekerjaan). Later: recent activity, quick actions, polish. |
+| **Version** | 1.2.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
-| **Related Documents** | `.ai/hermes.md`, `.ai/filament.md`, `docs/PHASE3.md`, `app/Filament/Pages/Dashboard.php`, `app/Filament/Widgets/SipetaStatsOverview.php` |
+| **Related Documents** | `.ai/hermes.md`, `.ai/filament.md`, `docs/PHASE3.md`, `docs/REQUIREMENTS.md`, `app/Filament/Pages/Dashboard.php`, `app/Filament/Widgets/SipetaStatsOverview.php`, `app/Filament/Widgets/PendudukPerRTChart.php`, `app/Filament/Widgets/PendudukPerLingkunganChart.php`, `app/Filament/Widgets/PendudukPerPekerjaanChart.php` |
 
 ---
 
@@ -128,3 +128,77 @@ view; icons are the bundled blade-heroicons set).
 ### 4.2.6 Commit
 
 `feat(dashboard): Phase 4.2 — enhance KPI cards`
+
+---
+
+## Phase 4.3
+
+### 4.3.1 Objective
+
+Add the three distribution charts from the Phase 4 roadmap (`.ai/roadmap.md`
+§5 "Charts (per RT, per Lingkungan, per Pekerjaan)") to the dashboard.
+Per `docs/REQUIREMENTS.md` §5.5, **charts reflect active residents only**
+(`resident_status = ACTIVE`). No tables, exports, filters, new models, or
+new migrations.
+
+### 4.3.2 Deliverables
+
+- **`app/Filament/Widgets/PendudukPerRTChart.php`** — bar chart of active
+  residents per RT. Every RT is shown, including RTs with zero active
+  residents (zero-padded), so the chart mirrors the kelurahan structure
+  (19 RTs across 3 area units per `RegionSeeder`). RTs are ordered naturally
+  by number ("RT 01" before "RT 10"). One query via
+  `Rt::withCount(['penduduks as active_count' => active-only])`.
+- **`app/Filament/Widgets/PendudukPerLingkunganChart.php`** — bar chart of
+  active residents per Lingkungan / RW. Residents are attributed through
+  their RT (`penduduk.rt_id → rts.area_unit_id`) in a single aggregate join
+  query; every area unit is shown (zero-padded), ordered by name.
+- **`app/Filament/Widgets/PendudukPerPekerjaanChart.php`** — doughnut chart
+  of active residents per occupation (`occupations` lookup, 12 rows seeded).
+  Only occupations with at least one active resident are shown, sorted by
+  count descending with ties broken by name (largest share first).
+- **Dashboard page** (`app/Filament/Pages/Dashboard.php`) — `getWidgets()`
+  (public) now mounts the three charts after `SipetaStatsOverview`.
+- Chart type choice is a presentation decision: bar for RT and Lingkungan
+  (ordered, comparable administrative units), doughnut for Pekerjaan (share
+  of population). All three use Filament v4's built-in `ChartWidget`
+  (Chart.js); no frontend asset, Tailwind class, or Blade view was added.
+  Widgets are eager-rendered (`$isLazy = false`, cheap aggregate queries),
+  matching the KPI cards, with Bahasa Indonesia empty states.
+
+### 4.3.3 Not done (explicitly out of scope for 4.3)
+
+- No tables, exports, PDF/Excel/CSV, or filters on the dashboard.
+- No trend/line charts, no per-gender-per-RT statistics (F-LOW-02 remains
+  backlog), no chart filters or date ranges.
+- No new models, migrations, or database fields — every chart uses existing
+  tables (`penduduk`, `rts`, `area_units`, `occupations`).
+- No changes to `SipetaStatsOverview`, Resources, or prior-phase code.
+
+### 4.3.4 Files changed (4.3 only)
+
+| File | Change |
+| --- | --- |
+| `app/Filament/Widgets/PendudukPerRTChart.php` | New — bar chart, active residents per RT. |
+| `app/Filament/Widgets/PendudukPerLingkunganChart.php` | New — bar chart, active residents per Lingkungan / RW. |
+| `app/Filament/Widgets/PendudukPerPekerjaanChart.php` | New — doughnut chart, active residents per Pekerjaan. |
+| `app/Filament/Pages/Dashboard.php` | Modified — mounts the three chart widgets. |
+| `tests/Feature/Phase4/DashboardChartTest.php` | New — headings render + chart data matches controlled records, active-only verified (2 tests). |
+| `docs/PHASE4.md` | Updated — this section; metadata Version 1.1.0 → 1.2.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 4.3 entry; Version 1.3.0 → 1.4.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-01 status Planned → Implemented, phase corrected to Phase 4. |
+
+### 4.3.5 Verification
+
+```text
+php artisan test       93 passed (437 assertions), 3 skipped
+./vendor/bin/pint --test  PASS (122 files)
+```
+
+`npm run build` not applicable — no frontend asset, Tailwind class, or Blade
+view was added (Chart.js ships with Filament; widgets use the shipped
+`filament-widgets::chart-widget` view).
+
+### 4.3.6 Commit
+
+`feat(dashboard): Phase 4.3 — distribution charts (per RT, Lingkungan, Pekerjaan)`
