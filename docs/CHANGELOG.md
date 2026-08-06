@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.5.0 |
+| **Version** | 1.6.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -98,6 +98,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 - Read-only: no observers, no audit log, no activity table, no migrations, no seeders. Everything reads `kartu_keluarga.created_at` / `penduduk.created_at`.
 - Verification: `php artisan test` 97 passed / 458 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (124 files). `npm run build` not applicable — no frontend build asset changed (no Tailwind classes, no `resources/css` / `resources/js` / `vite.config` edits).
+
+### Added (Phase 4.5 — Quick Actions Widget — 2026-08-06)
+- **Quick Actions widget** (`app/Filament/Widgets/QuickActionsWidget.php`): eager-rendered dashboard widget (`$isLazy = false`) exposing four static shortcuts to the existing resource routes — `Tambah Kartu Keluarga` → `KartuKeluargaResource::getUrl('create')`, `Tambah Penduduk` → `PendudukResource::getUrl('create')`, `Data Kartu Keluarga` → `KartuKeluargaResource::getUrl('index')`, `Data Penduduk` → `PendudukResource::getUrl('index')`. Each action carries label, Bahasa Indonesia description, heroicon, and URL. No queries, no new resources/pages/migrations/models/controllers/Livewire components.
+- **Widget Blade view** (`resources/views/filament/widgets/quick-actions-widget.blade.php`): wraps `x-filament::section` (heading "Aksi Cepat"); four link cards in a responsive CSS grid, styled by a scoped `<style>` block (`fi-wi-quick-actions-*`, light + dark variants) since the panel does not compile arbitrary Tailwind utilities.
+- **Dashboard page** (`app/Filament/Pages/Dashboard.php`) — `QuickActionsWidget` mounted AFTER `RecentActivityWidget` in `getWidgets()`; no prior widget reordered.
+- **Phase 4.5 tests** (`tests/Feature/Phase4/QuickActionsWidgetTest.php`, 4 tests): widget renders on `/admin` ("Aksi Cepat"); exactly the four actions exposed with the expected labels; all four visible on the dashboard; every action URL matches its registered Filament route (`filament.admin.resources.{kartu-keluargas,penduduks}.{create,index}`, asserted via `Route::has` + `route()` equality).
+
+### Notes
+- Static link grid only: no custom buttons, forms, modals, or permission logic; all four shortcuts reuse the existing KK / Penduduk resource routes.
+- Verification: `php artisan test` 101 passed / 481 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (126 files). `npm run build` not applicable — no frontend build asset changed.
 
 ## [1.3.0] - 2026-08-03
 

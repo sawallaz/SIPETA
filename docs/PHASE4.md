@@ -2,11 +2,11 @@
 | --- | --- |
 | **Title** | SIPETA Phase 4 — Dashboard |
 | **Purpose** | Track Phase 4 (Admin Panel Dashboard) sub-phase progress. |
-| **Scope** | 4.1 Dashboard foundation (layout + placeholder KPI cards). 4.2 Enhanced KPI cards (population statistics). 4.3 Distribution charts (per RT, per Lingkungan, per Pekerjaan). 4.4 Recent activity (5 newest KK + Penduduk). Later: quick actions, polish. |
-| **Version** | 1.3.0 |
+| **Scope** | 4.1 Dashboard foundation (layout + placeholder KPI cards). 4.2 Enhanced KPI cards (population statistics). 4.3 Distribution charts (per RT, per Lingkungan, per Pekerjaan). 4.4 Recent activity (5 newest KK + Penduduk). 4.5 Quick actions (Tambah / Data KK & Penduduk). Later: polish. |
+| **Version** | 1.4.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
-| **Related Documents** | `.ai/hermes.md`, `.ai/filament.md`, `docs/PHASE3.md`, `docs/REQUIREMENTS.md`, `app/Filament/Pages/Dashboard.php`, `app/Filament/Widgets/SipetaStatsOverview.php`, `app/Filament/Widgets/PendudukPerRTChart.php`, `app/Filament/Widgets/PendudukPerLingkunganChart.php`, `app/Filament/Widgets/PendudukPerPekerjaanChart.php`, `app/Filament/Widgets/RecentActivityWidget.php` |
+| **Related Documents** | `.ai/hermes.md`, `.ai/filament.md`, `docs/PHASE3.md`, `docs/REQUIREMENTS.md`, `app/Filament/Pages/Dashboard.php`, `app/Filament/Widgets/SipetaStatsOverview.php`, `app/Filament/Widgets/PendudukPerRTChart.php`, `app/Filament/Widgets/PendudukPerLingkunganChart.php`, `app/Filament/Widgets/PendudukPerPekerjaanChart.php`, `app/Filament/Widgets/RecentActivityWidget.php`, `app/Filament/Widgets/QuickActionsWidget.php` |
 
 ---
 
@@ -276,3 +276,83 @@ Tailwind classes in the new view, no `resources/css` / `resources/js` /
 ### 4.4.6 Commit
 
 `feat(dashboard): Phase 4.4 — recent activity widget`
+
+---
+
+## Phase 4.5
+
+### 4.5.1 Objective
+
+Add a Quick Actions section to the dashboard with shortcuts to the
+existing Kartu Keluarga / Penduduk resource routes. Exactly one widget
+(`app/Filament/Widgets/QuickActionsWidget.php`) plus its Blade view; no
+new resources, pages, migrations, models, controllers, or Livewire
+components.
+
+### 4.5.2 Deliverables
+
+- **`app/Filament/Widgets/QuickActionsWidget.php`** — extends
+  `Filament\Widgets\Widget` (eager-rendered like the other dashboard
+  widgets, `$isLazy = false`). Exposes four actions via `getViewData()`,
+  each a statically defined link generated from the existing resource
+  routes (no queries at all):
+  - `Tambah Kartu Keluarga` — `heroicon-o-plus-circle` →
+    `KartuKeluargaResource::getUrl('create')`
+    (`filament.admin.resources.kartu-keluargas.create`);
+  - `Tambah Penduduk` — `heroicon-o-user-plus` →
+    `PendudukResource::getUrl('create')`
+    (`filament.admin.resources.penduduks.create`);
+  - `Data Kartu Keluarga` — `heroicon-o-rectangle-stack` →
+    `KartuKeluargaResource::getUrl('index')`
+    (`filament.admin.resources.kartu-keluargas.index`);
+  - `Data Penduduk` — `heroicon-o-users` →
+    `PendudukResource::getUrl('index')`
+    (`filament.admin.resources.penduduks.index`).
+  Each action carries `label`, `description`, `icon`, and `url`.
+- **`resources/views/filament/widgets/quick-actions-widget.blade.php`** —
+  new Blade view. Wraps Filament's `x-filament::section` (heading "Aksi
+  Cepat"); the four actions render as link cards in a responsive CSS grid
+  (`repeat(auto-fit, minmax(11rem, 1fr))`). As in Phase 4.4, the panel does
+  not compile arbitrary Tailwind utilities (no custom Vite theme), so the
+  cards are styled by a small scoped `<style>` block
+  (`fi-wi-quick-actions-*` classes, light + dark variants).
+- **Dashboard page** (`app/Filament/Pages/Dashboard.php`) — the widget is
+  mounted AFTER `RecentActivityWidget` in `getWidgets()`; no previous
+  widget was reordered or modified.
+
+### 4.5.3 Not done (explicitly out of scope for 4.5)
+
+- No new resources, pages, migrations, models, controllers, or Livewire
+  components — every shortcut reuses the existing resource routes.
+- No custom action buttons, forms, modals, or permission logic — the
+  widget is a static link grid only.
+- No changes to `SipetaStatsOverview`, the chart widgets,
+  `RecentActivityWidget`, Resources, or prior-phase code (only the mount
+  line and docblock in `Dashboard.php`).
+
+### 4.5.4 Files changed (4.5 only)
+
+| File | Change |
+| --- | --- |
+| `app/Filament/Widgets/QuickActionsWidget.php` | New — quick actions widget (4 static links to existing resource routes). |
+| `resources/views/filament/widgets/quick-actions-widget.blade.php` | New — widget Blade view with scoped styling and responsive grid. |
+| `app/Filament/Pages/Dashboard.php` | Modified — `QuickActionsWidget` appended after `RecentActivityWidget` (no reordering). |
+| `tests/Feature/Phase4/QuickActionsWidgetTest.php` | New — renders, four actions exposed, all four visible, every action points to an existing Filament route (4 tests). |
+| `docs/PHASE4.md` | Updated — this section; metadata Version 1.3.0 → 1.4.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 4.5 entry; Version 1.5.0 → 1.6.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-10 (dashboard quick actions) added, status Implemented. |
+
+### 4.5.5 Verification
+
+```text
+php artisan test       101 passed (481 assertions), 3 skipped
+./vendor/bin/pint --test  PASS (126 files)
+```
+
+`npm run build` not applicable — no frontend build asset changed (no
+Tailwind classes in the new view, no `resources/css` / `resources/js` /
+`vite.config` edits; the panel does not load the app Vite bundle).
+
+### 4.5.6 Commit
+
+`feat(dashboard): Phase 4.5 — quick actions widget`
