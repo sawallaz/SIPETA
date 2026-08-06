@@ -3,9 +3,9 @@
 | **Title** | SIPETA Features Catalog |
 | **Purpose** | Categorize and track every feature by priority and implementation status. |
 | **Scope** | KKN-deliverable features plus future backlog references. |
-| **Version** | 1.0.0 |
+| **Version** | 1.1.0 |
 | **Status** | Approved |
-| **Last Updated** | 2026-08-03 |
+| **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/BACKLOG.md`, `.ai/roadmap.md`, `.ai/architecture.md`, `.ai/ocr.md` |
 
 ---
@@ -61,6 +61,7 @@ Feature status legend:
 | F-HIGH-14 | OCR image preprocessing (validation, EXIF orientation, grayscale, resize, quality tracking) | Implemented | Phase 5 |
 | F-HIGH-15 | OCR engine integration (Tesseract extraction, raw text + confidence persistence, failure/timeout handling) | Implemented | Phase 5 |
 | F-HIGH-16 | OCR parsing and mapping (structured extraction of KK number, address, RT/RW/lingkungan, member rows; confidence handling; required-field validation) | Implemented | Phase 5 |
+| F-HIGH-17 | OCR review and validation (operator review page, parsed-field display, missing-required + low-confidence highlighting, manual correction, pre-approval validation gate) | Implemented | Phase 5 |
 
 ## 3. Medium Priority
 

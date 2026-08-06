@@ -125,6 +125,34 @@ final class OcrParsingService
     ];
 
     /**
+     * Select options for the operator review form (Phase 5.6), derived from
+     * the same vocabularies the parser uses so the review choices can never
+     * drift from what parsing emits. Key and value are the canonical label.
+     *
+     * @return array<string, string>
+     */
+    public static function religionOptions(): array
+    {
+        return array_combine(array_keys(self::RELIGIONS), array_keys(self::RELIGIONS));
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function educationOptions(): array
+    {
+        return array_combine(array_keys(self::EDUCATIONS), array_keys(self::EDUCATIONS));
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function occupationOptions(): array
+    {
+        return array_combine(array_keys(self::OCCUPATIONS), array_keys(self::OCCUPATIONS));
+    }
+
+    /**
      * Parse raw OCR text into a structured result.
      *
      * @param  string  $rawText  raw extracted text (OcrResult::rawText)

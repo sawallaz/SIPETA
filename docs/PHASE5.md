@@ -2,11 +2,11 @@
 | --- | --- |
 | **Title** | SIPETA Phase 5 — OCR |
 | **Purpose** | Track Phase 5 (OCR) sub-phase progress. |
-| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking); 5.4 OCR engine integration (Tesseract invocation, raw text extraction, confidence aggregation, failure/timeout handling, job status update, raw extracted text persistence); 5.5 OCR parsing and mapping (structured DTO, raw-text parsing into project-defined fields, confidence handling, required-field validation). Review UI, confidence highlighting, and duplicate detection land in later 5.x sub-phases. |
-| **Version** | 1.4.0 |
+| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking); 5.4 OCR engine integration (Tesseract invocation, raw text extraction, confidence aggregation, failure/timeout handling, job status update, raw extracted text persistence); 5.5 OCR parsing and mapping (structured DTO, raw-text parsing into project-defined fields, confidence handling, required-field validation); 5.6 OCR review and validation (resource page, operator-facing review form, parsed-field display, missing-required and low-confidence highlighting, manual correction, pre-approval validation gate — no persistence, no import). |
+| **Version** | 1.5.0 |
 | **Status** | Active |
-| **Last Updated** | 2026-08-06 |
-| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/OcrParsingService.php`, `app/Services/ParsedOcrResult.php`, `app/Services/ParsedResident.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Services/OcrEngine.php`, `app/Services/TesseractOcrEngine.php`, `app/Services/OcrResult.php`, `app/Models/OcrJob.php`, `config/ocr.php` |
+| **Last Updated** | 2026-08-07 |
+| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/OcrParsingService.php`, `app/Services/ParsedOcrResult.php`, `app/Services/ParsedResident.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Services/OcrEngine.php`, `app/Services/TesseractOcrEngine.php`, `app/Services/OcrResult.php`, `app/Services/OcrReviewService.php`, `app/Services/OcrReviewResult.php`, `app/Models/OcrJob.php`, `config/ocr.php`, `app/Filament/Resources/OcrJobs/OcrJobResource.php`, `app/Filament/Resources/OcrJobs/Pages/ReviewOcrJob.php` |
 
 ---
 
@@ -534,3 +534,124 @@ and gated real-binary smoke all unchanged).
 ### 5.5.6 Commit
 
 `feat(ocr): Phase 5.5 — OCR parsing and mapping`
+
+---
+
+## 5.6 OCR Review and Validation
+
+### 5.6.1 Objective
+
+Expose the parsed OCR result (Phase 5.5) to the operator through a Filament
+review page: display every parsed field for inspection, highlight missing
+required fields and low-confidence values (`.ai/ocr.md` §5), let the operator
+correct them, and run the pre-approval validation gate. Per ADR-009 the review
+is an **assistant** — nothing is ever written to the database here; accepting
+and importing the validated data is a later phase.
+
+### 5.6.2 Deliverables
+
+- **Review service** (`app/Services/OcrReviewService.php`, new — the operator
+  validation layer over the Phase 5.5 `ParsedOcrResult`):
+  - `validate(ParsedOcrResult $parsed, array $corrections = []): OcrReviewResult`
+    — merges the parsed baseline with operator corrections into one effective
+    dataset, validates it against the schema-grounded rule set, and returns an
+    in-memory result. No database writes, no Kk/Penduduk creation, no job
+    mutation.
+  - `missingRequiredFields(array $data): array` — the labels of required
+    fields still empty, used by the page's "Wajib diisi" highlight.
+  - `isReviewable(OcrJob $job): bool` — gates review to terminal OCR states
+    (`SUCCESS` / `LOW_CONFIDENCE`) that carry raw text to re-parse.
+  - `confidenceBand(float $confidence): ?string` — `.ai/ocr.md` §5: `≥ 90`
+    normal (null), `70–90` subtle yellow (`warning`), `< 70` red (`danger`,
+    "Harap periksa").
+  - `REQUIRED_FIELDS` constant — field path ⇒ required-field label, grounded
+    in the actual schema (kk_number 16 digits, address, the NOT NULL penduduk
+    columns) so a passing result is importable without surprises.
+- **Review resource** (`app/Filament/Resources/OcrJobs/`, new) — the operator
+  entry point:
+  - `OcrJobResource` — index table (ID, status badge, confidence, started/finished),
+    a `review` action linking to the Review page, and routes `index` (`/`) and
+    `review` (`/{record}/review`). Navigation group `Kependudukan`, label
+    "Review OCR".
+  - `ListOcrJobs` — lists finished jobs for the operator to pick one.
+  - `ReviewOcrJob` (page) — loads the job record via `InteractsWithRecord`,
+    re-parses its raw text in-memory (`OcrParsingService`), and renders the
+    review form. Implements the canonical Filament v4 form-state pattern
+    (`public ?array $data = []` bound via `statePath('data')` in a
+    `defaultForm()`), mapping parsed fields into `kk_number`, `address`, `rt`,
+    `rw`, `lingkungan`, and a `members` Repeater (nama, nik, gender, place/date
+    of birth, religion, education, occupation, marital status, family
+    relation). A `validateReview()` action runs the pre-approval validation
+    gate and reports the outcome as a notification ("Validasi berhasil" /
+    "Validasi gagal" / "Belum dapat divalidasi") — it never imports.
+- **Detail status sections** (`statusComponents()`): the page shows conditional
+  Filament Sections for parse problems, missing required fields, and
+  low-confidence members — the `.ai/ocr.md` §5 highlighting requirement, driven
+  by `currentData()` (which falls back to the parsed baseline while the schema
+  is being built and normalizes Repeater UUID keys back to a numeric list for
+  the service).
+- **Blade view**
+  (`resources/views/filament/resources/ocr-jobs/review-ocr-job.blade.php`):
+  renders the form, the "Validasi Data" button, and the "belum dapat direview"
+  rejection panel for non-reviewable jobs.
+- **Tests**:
+  - `tests/Feature/Phase5/OcrReviewServiceTest.php` (11 tests) — complete parse
+    validates; missing kk_number rejected; more than one member required;
+    operator malformed NIK correction breaks validation; invalid gender /
+    marital-status corrections rejected; corrections fix a parse problem;
+    corrections override parsed values in the effective data; missing-required
+    returned as labels; complete result has none; confidence band matches
+    `.ai/ocr.md` §5 boundaries (90, 70); `isReviewable` gates terminal states
+    with raw text.
+  - `tests/Feature/Phase5/OcrReviewPageTest.php` (9 tests) — review page
+    loads; parsed fields are displayed (asserted against the Livewire
+    component state via canonical Filament/Livewire testing practice, since
+    Filament renders deferred form values in partials rather than the initial
+    HTTP shell); missing-required fields highlighted; low-confidence values
+    highlighted; high confidence not flagged; validation succeeds + reports
+    ready-to-import; validation fails on a malformed operator correction
+    (surfacing a field error); non-reviewable job rejected without the form;
+    review never writes to the database (asserts KK and Penduduk tables remain
+    unchanged).
+
+### 5.6.3 Not done (deferred)
+
+- **No persistence / import** — no KartuKeluarga, Penduduk, or KkAnggota rows
+  are created or updated, and the `ocr_jobs` row is never mutated. The review
+  validation is purely in-memory (ADR-009). Accepting and importing the
+  validated data is the Save / import sub-phase.
+- **Duplicate-upload detection** (FR-OCR-05, image hash + KK number) — deferred
+  to a later sub-phase; the `source_image_hash` seed is already persisted at
+  upload (Phase 5.1).
+- **Field-level confidence** per `.ai/ocr.md` §4.4 (minimum word confidence per
+  field) — still approximated by carrying the engine's aggregate onto each
+  member. Per-field word confidence needs a per-token stream from the engine
+  and remains deferred.
+- No dashboard changes, no export, no analytics, no schema changes or
+  migrations — the review uses the existing `ocr_jobs` schema.
+
+### 5.6.4 Files changed (5.6 only)
+
+| File | Change |
+| --- | --- |
+| `app/Services/OcrReviewService.php` | New — operator validation layer (`validate()`, `missingRequiredFields()`, `isReviewable()`, `confidenceBand()`). |
+| `app/Services/OcrReviewResult.php` | New — in-memory validation result DTO (isValid, errors, correctedData, duration). |
+| `app/Filament/Resources/OcrJobs/OcrJobResource.php` | New — OCR review resource (nav, index table, Review action, routes). |
+| `app/Filament/Resources/OcrJobs/Pages/ListOcrJobs.php` | New — index page listing candidate jobs. |
+| `app/Filament/Resources/OcrJobs/Pages/ReviewOcrJob.php` | New — review page (form, status highlights, validate gate). |
+| `resources/views/filament/resources/ocr-jobs/review-ocr-job.blade.php` | New — review page blade. |
+| `tests/Feature/Phase5/OcrReviewServiceTest.php` | New — 11 review-service tests. |
+| `tests/Feature/Phase5/OcrReviewPageTest.php` | New — 9 page tests (Livewire-aware assertions, no-persistence guard). |
+| `docs/PHASE5.md` | Updated — this §5.6 section; Version 1.4.0 → 1.5.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 5.6 entry; Version 1.12.0 → 1.13.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-17 (OCR review and validation) added, status Implemented. |
+
+### 5.6.5 Verification
+
+```text
+php artisan test        175 passed (818 assertions), 4 skipped (3 MySQL + 1 Tesseract, env-gated)
+./vendor/bin/pint --test  PASS (155 files)
+```
+
+`npm run build` not applicable — no compiled frontend asset changed (a Blade
+view + Filament resource; the panel has no custom Vite theme).
