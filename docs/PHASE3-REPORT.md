@@ -272,3 +272,71 @@ php artisan test        75 passed (359 assertions), 3 skipped
 ### Commit
 
 `feat(filament): Phase 3.4 — KK ↔ Penduduk relation`
+
+## Phase 3.5 — Final Phase 3 polish
+
+### Verdict
+
+**COMPLETE.** Review pass over navigation, icons, labels, authorization, empty
+states, notifications, page titles, translations and UX consistency. No
+redesign — existing layouts, columns and flows are unchanged.
+
+### Reviewed and changed
+
+**Authorization (real gap closed).** `User` now implements
+`Filament\Models\Contracts\FilamentUser` with `canAccessPanel()` returning true
+(single admin, ADR-005). Previously the panel was reachable *only* because
+`app.env` was `local` — Filament's Authenticate middleware 403s a non-FilamentUser
+outside local. That meant the panel would have refused the operator in any
+non-local environment. A regression test now loads the panel with
+`app.env=production`.
+
+`KartuKeluargaPolicy` and `PendudukPolicy` added per `.ai/filament.md` §10, all
+abilities returning true, auto-discovered by Laravel's convention.
+
+**Page titles.** All six resource pages now return explicit Indonesian titles:
+Kartu Keluarga / Tambah Kartu Keluarga / Ubah Kartu Keluarga, Penduduk / Tambah
+Penduduk / Ubah Data Penduduk.
+
+**Notifications.** Indonesian success messages on create, save and delete for
+both resources, plus Indonesian delete confirmation modals ("Data yang dihapus
+tidak dapat dikembalikan. Lanjutkan?").
+
+**Labels.** Row and bulk actions labelled Lihat / Ubah / Hapus / Hapus yang
+dipilih. Header create actions labelled Tambah Kartu Keluarga / Tambah Penduduk.
+
+**Navigation.** Both resources sit in the "Kependudukan" group (already declared
+in `AdminPanelProvider`), ordered KK (10) before Penduduk (20), each with a
+distinct outlined Heroicon.
+
+### Reviewed, deliberately unchanged
+
+- **Empty states** — already Indonesian on both tables and the relation manager
+  (added in 3.2.3, 3.3, 3.4). Asserted, not modified.
+- **Translations** — Filament v4.12.5 ships a complete `id` locale, so framework
+  chrome needs no custom translation files. `APP_LOCALE` is read from `.env`
+  (currently `en`); switching it is a deployment/config decision, not a code
+  change, so it was left alone rather than silently altering runtime behaviour.
+- **Icons, columns, layout, sort and pagination defaults** — no redesign.
+
+Also removed a now-false comment in `MysqlPanelVerificationTest` that claimed
+implementing `FilamentUser` was out of scope; the test no longer pins
+`app.env=local`.
+
+### Tests
+
+`Phase3PolishTest` — 12 tests: shared navigation group, navigation order, icons
+present, Indonesian non-pluralised model labels, all six page titles, create and
+edit notifications, empty-state headings, `FilamentUser` contract, panel
+reachable in production, guests redirected to login, policies discovered.
+
+### Verification
+
+```
+php artisan test        87 passed (397 assertions), 3 skipped
+./vendor/bin/pint --test  PASS (114 files)
+```
+
+### Commit
+
+`feat(filament): Phase 3.5 — final Phase 3 polish`

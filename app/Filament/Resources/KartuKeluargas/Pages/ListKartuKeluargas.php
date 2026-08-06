@@ -10,10 +10,16 @@ class ListKartuKeluargas extends ListRecords
 {
     protected static string $resource = KartuKeluargaResource::class;
 
+    public function getTitle(): string
+    {
+        return 'Kartu Keluarga';
+    }
+
     protected function getHeaderActions(): array
     {
         return [
-            CreateAction::make(),
+            CreateAction::make()
+                ->label('Tambah Kartu Keluarga'),
         ];
     }
 }

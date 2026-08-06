@@ -62,15 +62,9 @@ class MysqlPanelVerificationTest extends TestCase
 
     public function test_dashboard_loads_for_authenticated_admin(): void
     {
-        // The real operator runtime is APP_ENV=local (.env). Filament 4's
-        // Authenticate middleware (vendor/filament/.../Middleware/Authenticate.php:35)
-        // only permits panel access when User does NOT implement FilamentUser if
-        // config('app.env') === 'local'. phpunit.xml forces APP_ENV=testing, which
-        // would yield 403. Mirror the real runtime so this proves the dashboard
-        // renders for the operator. Implementing FilamentUser on User is a Phase 3.2
-        // task and is intentionally out of scope here.
-        Config::set('app.env', 'local');
-
+        // Phase 3.5 implemented FilamentUser::canAccessPanel() on User, so panel
+        // access no longer depends on config('app.env') === 'local'. The explicit
+        // env pin previously required here has been removed.
         $user = User::where('email', 'admin@sipeta.test')->firstOrFail();
 
         $this->actingAs($user)->get('/admin')->assertOk();

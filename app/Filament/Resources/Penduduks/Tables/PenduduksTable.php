@@ -112,13 +112,23 @@ class PenduduksTable
                 //
             ])
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
-                DeleteAction::make(),
+                ViewAction::make()
+                    ->label('Lihat'),
+                EditAction::make()
+                    ->label('Ubah'),
+                DeleteAction::make()
+                    ->label('Hapus')
+                    ->modalHeading('Hapus Data Penduduk')
+                    ->modalDescription('Data yang dihapus tidak dapat dikembalikan. Lanjutkan?')
+                    ->successNotificationTitle('Data penduduk berhasil dihapus'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()
+                        ->label('Hapus yang dipilih')
+                        ->modalHeading('Hapus data penduduk terpilih')
+                        ->modalDescription('Data yang dihapus tidak dapat dikembalikan. Lanjutkan?')
+                        ->successNotificationTitle('Data penduduk terpilih berhasil dihapus'),
                 ]),
             ])
             ->defaultSort('full_name')

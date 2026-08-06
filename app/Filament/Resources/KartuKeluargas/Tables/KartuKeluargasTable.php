@@ -55,13 +55,23 @@ class KartuKeluargasTable
                 //
             ])
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
-                DeleteAction::make(),
+                ViewAction::make()
+                    ->label('Lihat'),
+                EditAction::make()
+                    ->label('Ubah'),
+                DeleteAction::make()
+                    ->label('Hapus')
+                    ->modalHeading('Hapus Kartu Keluarga')
+                    ->modalDescription('Data yang dihapus tidak dapat dikembalikan. Lanjutkan?')
+                    ->successNotificationTitle('Kartu Keluarga berhasil dihapus'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()
+                        ->label('Hapus yang dipilih')
+                        ->modalHeading('Hapus Kartu Keluarga terpilih')
+                        ->modalDescription('Data yang dihapus tidak dapat dikembalikan. Lanjutkan?')
+                        ->successNotificationTitle('Kartu Keluarga terpilih berhasil dihapus'),
                 ]),
             ])
             ->defaultSort('created_at', 'desc')

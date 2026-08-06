@@ -9,6 +9,16 @@ class CreatePenduduk extends CreateRecord
 {
     protected static string $resource = PendudukResource::class;
 
+    public function getTitle(): string
+    {
+        return 'Tambah Penduduk';
+    }
+
+    protected function getCreatedNotificationTitle(): ?string
+    {
+        return 'Data penduduk berhasil disimpan';
+    }
+
     /**
      * Pre-select the Kartu Keluarga when arriving from the KK relation manager
      * ("Tambah Anggota"), so the new resident lands in the right family.
