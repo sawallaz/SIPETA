@@ -9,11 +9,12 @@ use Illuminate\Filesystem\FilesystemManager;
 use InvalidArgumentException;
 
 /**
- * OCR processing pipeline foundation (Phase 5.2).
+ * OCR processing pipeline (Phase 5.2 + 5.3).
  *
  * Starts processing a PENDING OCR job: validates the job, transitions it to
  * the PROCESSING runtime state, loads the uploaded source image from the
- * private kk_uploads disk, and validates processing prerequisites.
+ * private kk_uploads disk, validates processing prerequisites, and runs the
+ * image preprocessing stage (Phase 5.3 — ImagePreprocessor) on it.
  *
  * PROCESSING is an in-memory state only: the ocr_jobs.status column
  * constraint (SQLite CHECK / MySQL ENUM, from the Phase 2 migration) predates
@@ -22,7 +23,8 @@ use InvalidArgumentException;
  * error_message and finished_at when processing cannot continue.
  *
  * Actual OCR extraction is a later sub-phase; this service only prepares the
- * job for it.
+ * job for it. The preprocessing result of the last run is exposed via
+ * preprocessResult() (in-memory only, never persisted).
  */
 class OcrProcessingService
 {
@@ -32,14 +34,21 @@ class OcrProcessingService
     /** PNG magic bytes (89 50 4E 47 0D 0A 1A 0A). */
     private const PNG_SIGNATURE = "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A";
 
-    public function __construct(private readonly FilesystemManager $filesystem) {}
+    private ?PreprocessResult $preprocessResult = null;
+
+    public function __construct(
+        private readonly FilesystemManager $filesystem,
+        private readonly ImagePreprocessor $preprocessor,
+    ) {}
 
     /**
-     * Start processing a PENDING OCR job.
+     * Start processing a PENDING OCR job: load the source image, validate
+     * processing prerequisites, and run image preprocessing.
      *
      * @throws InvalidArgumentException when the job is not in PENDING state
-     * @throws OcrProcessingException when the source image cannot be loaded;
-     *                                the job is persisted as FAILED first
+     * @throws OcrProcessingException when the source image cannot be loaded
+     *                                or preprocessed; the job is persisted as
+     *                                FAILED first
      */
     public function start(OcrJob $job): OcrJob
     {
@@ -48,7 +57,8 @@ class OcrProcessingService
         $job->status = OcrJobStatus::PROCESSING;
 
         try {
-            $this->loadUploadedImage($job);
+            $bytes = $this->loadUploadedImage($job);
+            $this->preprocessResult = $this->preprocessor->preprocess($bytes, $job->source_image_path);
         } catch (OcrProcessingException $e) {
             $this->markFailed($job, $e->getMessage());
 
@@ -56,6 +66,16 @@ class OcrProcessingService
         }
 
         return $job;
+    }
+
+    /**
+     * Preprocessing result of the last start() run — tracking metadata only
+     * (path, dimensions, brightness, transforms, warnings, duration). Never
+     * persisted; null until start() has run successfully.
+     */
+    public function preprocessResult(): ?PreprocessResult
+    {
+        return $this->preprocessResult;
     }
 
     /**

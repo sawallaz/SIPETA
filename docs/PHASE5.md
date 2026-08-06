@@ -2,11 +2,11 @@
 | --- | --- |
 | **Title** | SIPETA Phase 5 — OCR |
 | **Purpose** | Track Phase 5 (OCR) sub-phase progress. |
-| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions). OCR extraction, parsing, review UI, confidence highlighting, and duplicate detection land in later 5.x sub-phases. |
-| **Version** | 1.1.0 |
+| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking). OCR extraction, parsing, review UI, confidence highlighting, and duplicate detection land in later 5.x sub-phases. |
+| **Version** | 1.2.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
-| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Models/OcrJob.php` |
+| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Models/OcrJob.php` |
 
 ---
 
@@ -179,3 +179,108 @@ php artisan test        117 passed (535 assertions), 3 skipped
 ### 5.2.6 Commit
 
 `feat(ocr): Phase 5.2 — processing pipeline`
+
+---
+
+## 5.3 OCR Image Preprocessing
+
+### 5.3.1 Objective
+
+Run image preprocessing before OCR extraction: validate the uploaded image
+(decode + resolution bounds), correct orientation, convert to grayscale,
+resize/normalize, and track the preprocessing result for the caller and the
+logs. No OCR recognition, Tesseract, AI vision, or parsing yet — the stage
+ends with a preprocessed image ready for the OCR engine sub-phase.
+
+### 5.3.2 Deliverables
+
+- **Preprocessing stage** (`app/Services/ImagePreprocessor.php`, new —
+  GD-based; GD + exif are the only image-processing libraries available in
+  this repository, so no new dependency was introduced):
+  - `preprocess(string $bytes, string $sourcePath): PreprocessResult` —
+    decodes the image, enforces the resolution gate, corrects EXIF
+    orientation, converts to grayscale, downscales past the dimension cap,
+    measures sampled mean brightness, stores a lossless PNG on the private
+    `ocr_temp` disk, and logs a `pipeline_stage=preprocess` line
+    (`.ai/ocr.md` §9).
+  - **Image validation** — the resolution gate explicitly deferred from 5.1
+    to preprocessing (`docs/PHASE5.md` §5.1.3; `.ai/ocr.md` §4.1):
+    - Minimum 800×600: images below it are rejected (`OcrProcessingException`
+      → job persisted `FAILED`), matching `.ai/ocr.md` §4.9 "Resolution too
+      low → Reject".
+    - Maximum 4000×4000: larger images are downscaled proportionally (bicubic
+      `imagecopyresampled`) to control downstream processing time.
+    - Undecodable content (valid image signature but corrupt body) is
+      rejected at the same gate.
+  - **Orientation correction** — EXIF orientation tags 2–8 applied with GD's
+    native `imageflip` / `imagerotate`. This is the orientation correction
+    form supported by the current libraries; automatic skew-angle detection
+    is not (see §5.3.3).
+  - **Grayscale conversion** — `IMG_FILTER_GRAYSCALE`, `.ai/ocr.md` §4.2
+    step 1.
+  - **Resize/normalization** — proportional downscale to the 4000×4000 cap
+    (`.ai/ocr.md` §4.1); aspect ratio preserved.
+  - **Preprocessing result tracking** (`app/Services/PreprocessResult.php`,
+    new readonly DTO — in-memory only, never persisted, matching the
+    stateless-pipeline design of `.ai/ocr.md` §8):
+    - processed image path on `ocr_temp`, processed width/height,
+    - sampled mean brightness (quality metric, `.ai/ocr.md` §4.10),
+    - skew angle (`null` — auto-deskew not implemented yet),
+    - ordered `appliedTransforms` list (`exif_orientation`, `grayscale`,
+      `resize`) — the transform pipeline later stages slot into,
+    - non-blocking quality `warnings` (brightness outside the acceptable
+      100–200 band, `.ai/ocr.md` §4.10),
+    - `durationMs` wall time.
+- **Pipeline integration** (`app/Services/OcrProcessingService.php`):
+  - `start()` now runs the preprocessing stage after loading the source
+    image; preprocessing failures follow the same `FAILED` persistence path
+    as load failures.
+  - `preprocessResult(): ?PreprocessResult` — exposes the result of the last
+    `start()` run to the caller (the future extraction sub-phase consumes
+    the preprocessed path).
+- **No schema changes** — preprocessing tracking is a DTO + log line; the
+  `ocr_jobs` table is untouched (roadmap requires no preprocessing fields).
+
+### 5.3.3 Not done (explicitly out of scope for 5.3)
+
+- No OCR extraction, Tesseract invocation, AI recognition, or parsing.
+- No denoise (bilateral filter), adaptive binarization, border removal, or
+  automatic deskew (`.ai/ocr.md` §4.2 steps 2–5): GD has no bilateral filter,
+  adaptive threshold, or projection-profiling primitives, and no image
+  library providing them (intervention/image, OpenCV) is present in the
+  repository. The `appliedTransforms` pipeline structure is ready for them;
+  they land with the OCR engine phase, per the "implement the pipeline
+  structure only and document what remains" instruction.
+- No persisted preprocessing fields, no migrations, no schema changes —
+  tracking stays in-memory + logs (`.ai/ocr.md` §8 stateless pipeline).
+- No temp-file GC (24-hour cycle), no queue workers, no dashboard changes;
+  Phase 4, 5.1, and 5.2 remain frozen except for the 5.2 test fixture
+  adjustment below.
+- No `SUCCESS` / `LOW_CONFIDENCE` transitions — still the extraction
+  sub-phase's job. `PROCESSING` remains a runtime-only state.
+
+### 5.3.4 Files changed (5.3 only)
+
+| File | Change |
+| --- | --- |
+| `app/Services/ImagePreprocessor.php` | New — preprocessing stage (decode + resolution gate, EXIF orientation, grayscale, resize, brightness, `ocr_temp` output, logging). |
+| `app/Services/PreprocessResult.php` | New — in-memory preprocessing result DTO (path, dimensions, brightness, skew, transforms, warnings, duration). |
+| `app/Services/OcrProcessingService.php` | Updated — `start()` runs the preprocessing stage; `preprocessResult()` accessor added. |
+| `tests/Feature/Phase5/ImagePreprocessorTest.php` | New — 7 tests: valid flow, output generated, corrupt image rejected, low resolution fails, oversized downscaled, EXIF orientation applied, brightness warning non-blocking. |
+| `tests/Feature/Phase5/OcrProcessingServiceTest.php` | Updated — fixtures raised to 800×600 and `ocr_temp` faked, so the 5.2 transition tests keep exercising the pipeline under the new resolution gate. |
+| `docs/PHASE5.md` | Updated — this §5.3 section; Version 1.1.0 → 1.2.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 5.3 entry; Version 1.9.0 → 1.10.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-14 (OCR image preprocessing) added, status Implemented. |
+
+### 5.3.5 Verification
+
+```text
+php artisan test        124 passed (581 assertions), 3 skipped
+./vendor/bin/pint --test  PASS (135 files)
+```
+
+`npm run build` not applicable — no frontend asset changed (pure PHP + docs).
+
+### 5.3.6 Commit
+
+`feat(ocr): Phase 5.3 — image preprocessing`

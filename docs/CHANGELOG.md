@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.9.0 |
+| **Version** | 1.10.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -145,6 +145,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Notes
 - Verification: `php artisan test` 117 passed / 535 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (132 files). `npm run build` not applicable — no frontend build asset changed.
+
+### Added (Phase 5.3 — Image Preprocessing — 2026-08-06)
+- **Preprocessing stage** (`app/Services/ImagePreprocessor.php`, new — GD-based; GD + exif are the only image-processing libraries in the repo, so no new dependency was introduced):
+  - `preprocess(string $bytes, string $sourcePath): PreprocessResult` — decodes and validates the image, corrects EXIF orientation (tags 2–8 via `imageflip` / `imagerotate`), converts to grayscale (`IMG_FILTER_GRAYSCALE`, `.ai/ocr.md` §4.2 step 1), downscales past the 4000×4000 cap (`.ai/ocr.md` §4.1), measures sampled mean brightness, stores a lossless PNG on the private `ocr_temp` disk, and logs a `pipeline_stage=preprocess` line (`.ai/ocr.md` §9).
+  - **Resolution gate** (deferred from 5.1 per `docs/PHASE5.md` §5.1.3): minimum 800×600 enforced — below it the job is persisted `FAILED`; maximum 4000×4000 downscaled proportionally. Undecodable content (valid signature, corrupt body) is rejected at the same gate.
+  - **Result tracking** (`app/Services/PreprocessResult.php`, new readonly DTO, in-memory only): processed path, width/height, sampled mean brightness, skew angle (`null` — auto-deskew not implemented), ordered applied transforms (`exif_orientation`, `grayscale`, `resize`), non-blocking quality warnings, and duration.
+  - **Quality warnings** (`.ai/ocr.md` §4.10): brightness outside the acceptable 100–200 band is recorded as a warning; processing still continues.
+- **Pipeline integration** (`app/Services/OcrProcessingService.php`): `start()` now runs the preprocessing stage after loading the source image; `preprocessResult()` exposes the last result. Preprocessing failures share the same `FAILED` persistence path as load failures.
+- **Phase 5.3 tests** (`tests/Feature/Phase5/ImagePreprocessorTest.php`, 7 tests): valid flow (PROCESSING + full result metadata), output generated on `ocr_temp` (PNG signature + round-trip dimensions), corrupt image rejected → FAILED, below-minimum resolution → FAILED with no output written, oversized image downscaled with aspect preserved, EXIF orientation 6 applied (800×600 → 600×800), dark image records a brightness warning but still processes.
+- `tests/Feature/Phase5/OcrProcessingServiceTest.php` fixtures raised to 800×600 and `ocr_temp` faked: the new resolution gate would otherwise reject the old 10×10 fakes before the 5.2 transitions under test could run.
+
+### Notes
+- No OCR recognition, Tesseract, AI vision, parsing, migrations, schema changes, dashboard changes, or frontend assets. Denoise, adaptive binarization, border removal, and automatic deskew (`.ai/ocr.md` §4.2 steps 2–5) need an image-processing library absent from the repo; the `appliedTransforms` pipeline structure is ready for them in the OCR engine phase (`docs/PHASE5.md` §5.3.3).
+- Verification: `php artisan test` 124 passed / 581 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (135 files). `npm run build` not applicable — no frontend build asset changed.
 
 ## [1.3.0] - 2026-08-03
 

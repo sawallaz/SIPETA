@@ -6,6 +6,7 @@ use App\Enums\OcrJobStatus;
 use App\Exceptions\OcrProcessingException;
 use App\Models\OcrJob;
 use App\Models\User;
+use App\Services\ImagePreprocessor;
 use App\Services\KkDocumentUploadService;
 use App\Services\OcrProcessingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -15,16 +16,22 @@ use InvalidArgumentException;
 use Tests\TestCase;
 
 /**
- * Phase 5.2 — OCR processing pipeline foundation.
+ * Phase 5.2 — OCR processing pipeline foundation (extended by Phase 5.3).
  *
  * Proves the OcrProcessingService starts a PENDING job (transitioning it to
  * the PROCESSING runtime state), loads and validates the uploaded source
- * image, persists the terminal FAILED state when processing cannot continue,
- * and rejects jobs that are not startable.
+ * image, runs the image preprocessing stage, persists the terminal FAILED
+ * state when processing cannot continue, and rejects jobs that are not
+ * startable.
  *
  * PROCESSING is deliberately an in-memory state (the ocr_jobs.status column
  * constraint predates it — see OcrJobStatus::persistable()); the DB records
  * PENDING and the terminal FAILED state.
+ *
+ * Fixtures use 800×600 images: since Phase 5.3 the preprocessing stage
+ * enforces the minimum resolution from .ai/ocr.md §4.1, so smaller fixtures
+ * would be rejected as too low-resolution rather than exercising the
+ * pipeline transitions under test here.
  */
 class OcrProcessingServiceTest extends TestCase
 {
@@ -38,12 +45,13 @@ class OcrProcessingServiceTest extends TestCase
 
         $this->service = app(OcrProcessingService::class);
         Storage::fake(KkDocumentUploadService::DISK);
+        Storage::fake(ImagePreprocessor::DISK);
     }
 
     public function test_pending_job_transitions_to_processing(): void
     {
         $operator = User::factory()->create();
-        $file = UploadedFile::fake()->image('kk-scan.jpg');
+        $file = UploadedFile::fake()->image('kk-scan.jpg', 800, 600);
         $job = app(KkDocumentUploadService::class)->upload($file, $operator);
 
         $result = $this->service->start($job);
@@ -54,7 +62,7 @@ class OcrProcessingServiceTest extends TestCase
 
     public function test_pending_job_stays_pending_in_database_during_processing(): void
     {
-        $job = app(KkDocumentUploadService::class)->upload(UploadedFile::fake()->image('kk-scan.png'));
+        $job = app(KkDocumentUploadService::class)->upload(UploadedFile::fake()->image('kk-scan.png', 800, 600));
 
         $this->service->start($job);
 
