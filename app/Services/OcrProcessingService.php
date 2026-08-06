@@ -22,15 +22,20 @@ use InvalidArgumentException;
  *                     persist the outcome: SUCCESS / LOW_CONFIDENCE with
  *                     confidence + raw_text + finished_at, or FAILED with
  *                     error_message when the engine fails or times out (5.4).
+ *   parse(OcrJob)   — convert the extracted raw text into a structured
+ *                     ParsedOcrResult (KK number, address, RT/RW/lingkungan,
+ *                     member rows). Strictly in-memory: nothing is persisted
+ *                     (5.5).
  *
  * PROCESSING is an in-memory state only: the ocr_jobs.status column
  * constraint (SQLite CHECK / MySQL ENUM, from the Phase 2 migration) predates
  * the PROCESSING value, so it cannot be persisted — the DB row stays PENDING
  * until a terminal state (SUCCESS / LOW_CONFIDENCE / FAILED) is persisted.
  *
- * The preprocessing and engine results of the last run are exposed via
- * preprocessResult() / ocrResult() (in-memory only, never persisted). No
- * parsing or database mapping happens here — that is a later sub-phase.
+ * The preprocessing, engine, and parse results of the last run are exposed
+ * via preprocessResult() / ocrResult() / parsedResult() (in-memory only,
+ * never persisted). No database mapping happens here — the review sub-phase
+ * consumes the parsed result and persists only after the operator saves.
  */
 class OcrProcessingService
 {
@@ -44,10 +49,13 @@ class OcrProcessingService
 
     private ?OcrResult $ocrResult = null;
 
+    private ?ParsedOcrResult $parsedResult = null;
+
     public function __construct(
         private readonly FilesystemManager $filesystem,
         private readonly ImagePreprocessor $preprocessor,
         private readonly OcrEngine $engine,
+        private readonly OcrParsingService $parsingService,
     ) {}
 
     /**
@@ -116,6 +124,31 @@ class OcrProcessingService
     }
 
     /**
+     * Parse the extracted raw text into a structured result (Phase 5.5).
+     *
+     * A job must already be in a terminal extracted state (SUCCESS or
+     * LOW_CONFIDENCE) with an engine result (i.e. extract() must have run on
+     * this instance). Parsing is strictly in-memory: nothing is persisted —
+     * the review sub-phase consumes the returned ParsedOcrResult to
+     * pre-populate the operator form (ADR-009: OCR is an assistant).
+     *
+     * @throws InvalidArgumentException when the job is not in a terminal
+     *                                  extracted state or extraction has not
+     *                                  run
+     */
+    public function parse(OcrJob $job): ParsedOcrResult
+    {
+        $this->assertParsable($job);
+
+        $this->parsedResult = $this->parsingService->parse(
+            $this->ocrResult->rawText,
+            $this->ocrResult->confidence,
+        );
+
+        return $this->parsedResult;
+    }
+
+    /**
      * OCR result of the last extract() run — raw text + mean confidence +
      * word count + duration (in-memory only). Null until extract() has run
      * successfully.
@@ -123,6 +156,15 @@ class OcrProcessingService
     public function ocrResult(): ?OcrResult
     {
         return $this->ocrResult;
+    }
+
+    /**
+     * Structured parse result of the last parse() run (in-memory only, never
+     * persisted). Null until parse() has run successfully.
+     */
+    public function parsedResult(): ?ParsedOcrResult
+    {
+        return $this->parsedResult;
     }
 
     /**
@@ -156,6 +198,27 @@ class OcrProcessingService
         if ($this->preprocessResult === null) {
             throw new InvalidArgumentException(
                 sprintf('OCR job %d cannot be extracted: preprocessing has not run (call start() first).', $job->id)
+            );
+        }
+    }
+
+    /**
+     * Reject jobs that are not parsable (must be in a terminal extracted
+     * state with an engine result available).
+     *
+     * @throws InvalidArgumentException
+     */
+    private function assertParsable(OcrJob $job): void
+    {
+        if ($job->status !== OcrJobStatus::SUCCESS && $job->status !== OcrJobStatus::LOW_CONFIDENCE) {
+            throw new InvalidArgumentException(
+                sprintf('OCR job %d cannot be parsed: status must be SUCCESS or LOW_CONFIDENCE, got %s.', $job->id, $job->status->value)
+            );
+        }
+
+        if ($this->ocrResult === null) {
+            throw new InvalidArgumentException(
+                sprintf('OCR job %d cannot be parsed: extraction has not run (call extract() first).', $job->id)
             );
         }
     }

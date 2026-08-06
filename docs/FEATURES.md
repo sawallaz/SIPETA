@@ -60,6 +60,7 @@ Feature status legend:
 | F-HIGH-13 | OCR processing pipeline (PENDING → PROCESSING → FAILED transitions, source image load + prerequisites) | Implemented | Phase 5 |
 | F-HIGH-14 | OCR image preprocessing (validation, EXIF orientation, grayscale, resize, quality tracking) | Implemented | Phase 5 |
 | F-HIGH-15 | OCR engine integration (Tesseract extraction, raw text + confidence persistence, failure/timeout handling) | Implemented | Phase 5 |
+| F-HIGH-16 | OCR parsing and mapping (structured extraction of KK number, address, RT/RW/lingkungan, member rows; confidence handling; required-field validation) | Implemented | Phase 5 |
 
 ## 3. Medium Priority
 

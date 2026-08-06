@@ -2,11 +2,11 @@
 | --- | --- |
 | **Title** | SIPETA Phase 5 — OCR |
 | **Purpose** | Track Phase 5 (OCR) sub-phase progress. |
-| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking); 5.4 OCR engine integration (Tesseract invocation, raw text extraction, confidence aggregation, failure/timeout handling, job status update, raw extracted text persistence). Parsing, review UI, confidence highlighting, and duplicate detection land in later 5.x sub-phases. |
-| **Version** | 1.3.0 |
+| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking); 5.4 OCR engine integration (Tesseract invocation, raw text extraction, confidence aggregation, failure/timeout handling, job status update, raw extracted text persistence); 5.5 OCR parsing and mapping (structured DTO, raw-text parsing into project-defined fields, confidence handling, required-field validation). Review UI, confidence highlighting, and duplicate detection land in later 5.x sub-phases. |
+| **Version** | 1.4.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
-| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Services/OcrEngine.php`, `app/Services/TesseractOcrEngine.php`, `app/Services/OcrResult.php`, `app/Models/OcrJob.php`, `config/ocr.php` |
+| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/OcrParsingService.php`, `app/Services/ParsedOcrResult.php`, `app/Services/ParsedResident.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Services/OcrEngine.php`, `app/Services/TesseractOcrEngine.php`, `app/Services/OcrResult.php`, `app/Models/OcrJob.php`, `config/ocr.php` |
 
 ---
 
@@ -406,3 +406,131 @@ the integration layer extracts a rendered NIK end to end.
 ### 5.4.6 Commit
 
 `feat(ocr): Phase 5.4 — OCR engine integration`
+
+---
+
+## 5.5 OCR Parsing and Mapping
+
+### 5.5.1 Objective
+
+Convert the raw OCR text produced in 5.4 into a structured, in-memory result
+object that maps onto the project's defined fields — without persisting
+anything (ADR-009: OCR is an assistant). A single admin later reviews and
+saves; this phase builds the mapping layer that pre-populates that review
+form.
+
+Only project-defined fields are extracted (FR-OCR-02, `.ai/ocr.md` §4.5) —
+nothing is invented:
+
+- **KK level**: nomor KK, alamat, RT, RW, lingkungan.
+- **Member**: nama, NIK, jenis kelamin, tempat lahir, tanggal lahir, agama,
+  pendidikan, pekerjaan, status perkawinan, status hubungan keluarga.
+
+### 5.5.2 Deliverables
+
+- **Parsing service** (`app/Services/OcrParsingService.php`, new — rule-based
+  per ADR-017): `parse(string $rawText, float $confidence): ParsedOcrResult`,
+  a pure function of the raw text with **no database access** (constructor-less,
+  stateless, trivially testable).
+  - **Header scan** — recognizes `NOMOR KARTU KELUARGA` / `NOMOR KK` / `NO KK`,
+    `ALAMAT`, `RT/RW`, `RT`, `RW`, `LINGKUNGAN` labels with `:` or space
+    separators (longest label first); the address may wrap to a following
+    non-label line. Required labels resolved from the member table (nomor KK)
+    and place-holder header fields (kelurahan/kecamatan/etc.) are intentionally
+    left to the review/save sub-phases.
+  - **Member-table scan** — finds the `NIK`/`NAMA` column header row, then
+    reads rows that carry a valid 16-digit NIK (also recovered when Tesseract
+    splits the number across spaced tokens). After-NIK tokens are attributed
+    in column order (gender → place of birth → date of birth → religion →
+    education → occupation → marital status → relation) via longest-match
+    against the curated vocabularies (religions, educations, occupations,
+    marital statuses, family relations).
+  - **Confidence handling** — aggregate engine confidence (5.4) is carried onto
+    every extracted member; `lowConfidence = confidence < ocr.confidence_threshold`;
+    `< 30` adds an `Gambar tidak terbaca` warning (`.ai/ocr.md` §4.9).
+  - **Required-field validation** (`.ai/ocr.md` §4.7) — nomor KK present and 16
+    digits, at least one member NIK, sane birth dates (1900..today). Problems
+    land in `validationErrors` on the result — never thrown exceptions.
+  - **Graceful degradation** for every failure mode: missing values stay null;
+    duplicated labels keep the first occurrence (conflicting duplicates warn);
+    duplicate NIKs keep the first row; malformed rows are skipped with a
+    warning; empty input yields an empty result with a clear warning.
+  - **Stage logging** — a `pipeline_stage=parse` log line matching the
+    preprocess convention (`.ai/ocr.md` §9).
+- **Structured DTOs** (new, both `final readonly`, in-memory only):
+  - `ParsedOcrResult` — confidence, lowConfidence, kkNumber, address, rt, rw,
+    lingkungan, `ParsedResident[]` members, warnings[], validationErrors[],
+    durationMs; `isEmpty()` and `memberCount()` helpers.
+  - `ParsedResident` — nama, nik, gender, birthPlace, birthDate (normalized
+    `Y-m-d`), religion, education, occupation, maritalStatus, familyRelation,
+    confidence, lowConfidence.
+- **Pipeline stage** (`app/Services/OcrProcessingService.php`, updated):
+  `parse(OcrJob)` runs the parsing service over the in-memory `OcrResult`
+  (extract must have run), publishes `parsedResult()`, and persists **nothing**
+  — the `ocr_jobs` row keeps its extracted state untouched.
+- **Tests**:
+  - `tests/Feature/Phase5/OcrParsingServiceTest.php` (11 tests) — covers all six
+    required scenarios plus robustness: valid full parse; missing optional
+    fields stay null; missing required fields reported; malformed OCR (bad NIK,
+    impossible date, junk lines); duplicate labels + duplicate NIK; low
+    confidence (`< threshold` and `< 30` warning); threshold boundary (70.0);
+    empty / whitespace input; RT/RW/lingkungan variants; wrapped KK number and
+    spaced NIK recovery.
+  - `tests/Feature/Phase5/OcrParsingPipelineTest.php` (6 tests,
+    `FakeOcrEngine`) — parse is a pure in-memory stage: SUCCESS and
+    LOW_CONFIDENCE both parse; `parse()` without extraction rejected;
+    non-terminal (PENDING/FAILED) rejected; a SUCCESS job with no extraction on
+    this instance rejected; parsing persists nothing (row unmutated, no
+    `extracted_data`).
+
+### 5.5.3 Not done (deferred)
+
+- **No persistence** — no `KartuKeluarga`, `Penduduk`, or `KkAnggota` rows are
+  created or updated, and nothing is written to the `ocr_jobs` row. This phase
+  only maps.
+- No review UI, no confidence highlighting, no duplicate-upload detection, no
+  dashboard changes (as in 5.1–5.4).
+- **Field-level confidence** (`.ai/ocr.md` §4.4 minimum word confidence per
+  field): the engine exposes only an aggregated mean, so the aggregate is
+  carried onto every member. Word-level attribution requires a per-token
+  confidence stream from the engine and is deferred until confidence
+  highlighting.
+- **Enum/lookup resolution** — religion, education, occupation, marital
+  status, and family relation are extracted into canonical labels (reliability per
+  `.ai/ocr.md` §4.5) but their mapping to seed `religions` / `educations` /
+  `occupations` rows and to `Gender`/`MaritalStatus`/`FamilyRelation` enum
+  values is the save sub-phase's job. Religion, education, and occupation are
+  lookup-table backed (not PHP enums, confirmed in §4.5-conformant audit).
+- The character-whitelist note from 5.4.3 remains open; parsed text is kept
+  verbatim (case preserved) for free-text fields.
+
+### 5.5.4 Files changed (5.5 only)
+
+| File | Change |
+| --- | --- |
+| `app/Services/OcrParsingService.php` | New — rule-based parsing service (vocabularies, header + member-table scan, confidence, validation). |
+| `app/Services/ParsedOcrResult.php` | New — structured parse-result DTO (KK level + members + warnings + validation errors). |
+| `app/Services/ParsedResident.php` | New — per-member DTO. |
+| `app/Services/OcrProcessingService.php` | Updated — `parse()` stage + `parsedResult()` accessor + `assertParsable()`; `start()`/`extract()` untouched. |
+| `tests/Feature/Phase5/OcrParsingServiceTest.php` | New — 11 service tests (six scenarios + variants). |
+| `tests/Feature/Phase5/OcrParsingPipelineTest.php` | New — 6 pipeline tests (no-persistence, stage ordering, status guards). |
+| `docs/PHASE5.md` | Updated — this §5.5 appendix; Version 1.3.0 → 1.4.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 5.5 entry; Version 1.11.0 → 1.12.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-16 (OCR parsing and mapping) added, status Implemented. |
+
+### 5.5.5 Verification
+
+```text
+php artisan test        155 passed (753 assertions), 4 skipped (3 MySQL + 1 Tesseract, env-gated)
+./vendor/bin/pint --test  PASS (148 files)
+```
+
+`npm run build` not applicable — no frontend asset changed (pure PHP + docs).
+
+Phase 5.5 scope is a net additive change: the entire Phase 5.4 pipeline and
+its tests are untouched (`start()`/`extract()` behavior, status transitions,
+and gated real-binary smoke all unchanged).
+
+### 5.5.6 Commit
+
+`feat(ocr): Phase 5.5 — OCR parsing and mapping`

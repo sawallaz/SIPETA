@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.11.0 |
+| **Version** | 1.12.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -175,6 +175,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 - No parsing, no KartuKeluarga / Penduduk creation, no review UI, no confidence highlighting, no dashboard changes, no migrations. The `.ai/ocr.md` §4.3 character whitelist is deliberately deferred — a digits/uppercase whitelist would mangle lowercase name/address text before the parsing stage exists (`docs/PHASE5.md` §5.4.3).
 - Verification: `php artisan test` 138 passed / 628 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (143 files). `npm run build` not applicable — no frontend build asset changed. Real-binary smoke (`RUN_TESSERACT_TESTS=1`) passes on this host.
+
+### Added (Phase 5.5 — OCR Parsing and Mapping — 2026-08-06)
+- **Parsing service** (`app/Services/OcrParsingService.php`, new — rule-based per ADR-017): `parse(string $rawText, float $confidence): ParsedOcrResult`, a pure function of the raw text with no database access.
+  - Header scan recognizes `NOMOR KARTU KELUARGA` / `NOMOR KK` / `NO KK`, `ALAMAT`, `RT/RW`, `RT`, `RW`, `LINGKUNGAN` labels (`:` or space separator, longest label first); wrapped addresses and KK numbers on their own line are recovered.
+  - Member-table scan finds the `NIK`/`NAMA` column header and reads rows with a valid 16-digit NIK (spaced NIK runs merged); remaining tokens are attributed in column order by longest-match against curated vocabularies (religions, educations, occupations, marital statuses, family relations).
+  - Confidence handling: aggregate engine confidence carried onto every member; `lowConfidence` below `ocr.confidence_threshold`; `< 30` adds a `Gambar tidak terbaca` warning.
+  - Required-field validation (`.ai/ocr.md` §4.7): nomor KK present + 16 digits, at least one member NIK, sane birth dates (1900..today) — problems land in `validationErrors`, never thrown.
+  - Graceful degradation: missing values stay null; duplicate labels keep the first occurrence (conflicting duplicates warn); duplicate NIKs keep the first row; malformed rows skipped with a warning; empty input yields an empty result. Stage log line `pipeline_stage=parse` matches the preprocess convention (`.ai/ocr.md` §9).
+- **Structured DTOs** (new, `final readonly`, in-memory only): `ParsedOcrResult` (confidence, lowConfidence, kkNumber, address, rt, rw, lingkungan, `ParsedResident[]` members, warnings, validationErrors, durationMs, `isEmpty()`/`memberCount()`) and `ParsedResident` (nama, nik, gender, birthPlace, birthDate `Y-m-d`, religion, education, occupation, maritalStatus, familyRelation, confidence, lowConfidence).
+- **Pipeline stage** (`app/Services/OcrProcessingService.php`): new `parse(OcrJob)` stage after `extract()` — parses the in-memory `OcrResult`, publishes `parsedResult()`, persists **nothing** (the `ocr_jobs` row stays untouched; no `KartuKeluarga`/`Penduduk`/`KkAnggota` writes). `start()`/`extract()` untouched — the Phase 5.1–5.4 tests were not rewritten.
+- **Phase 5.5 tests**:
+  - `tests/Feature/Phase5/OcrParsingServiceTest.php` (11 tests): valid full parse (all defined fields, case preserved); missing optional fields stay null; missing required fields reported; malformed OCR (15-digit NIK skipped with warning, impossible date flagged, junk lines ignored); duplicate labels + duplicate NIK keep first occurrence with warnings; low confidence flags result and members; threshold boundary 70.0; very-low confidence warning; empty / whitespace-only input; RT/RW/lingkungan variants; wrapped KK number and spaced NIK recovery.
+  - `tests/Feature/Phase5/OcrParsingPipelineTest.php` (6 tests, `FakeOcrEngine`): parse after extract returns the structured result; parse persists nothing (row unmutated, `extracted_data` null); parse without extract rejected; non-terminal (PENDING/FAILED) rejected; SUCCESS job without extraction on the instance rejected; low-confidence extraction parses into a low-confidence result.
+
+### Notes (Phase 5.5)
+- No persistence, no KK/Penduduk creation, no review UI, no confidence highlighting, no dashboard changes, no migrations — parsing is a pure in-memory mapping layer (ADR-009: OCR is an assistant).
+- Field-level confidence (`.ai/ocr.md` §4.4) is approximated by carrying the engine's aggregate onto each member; per-field word confidence needs a per-token stream from the engine and is deferred to confidence highlighting.
+- Verification: `php artisan test` 155 passed / 753 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (148 files). `npm run build` not applicable — no frontend build asset changed.
 
 ## [1.3.0] - 2026-08-03
 
