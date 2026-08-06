@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.13.0 |
+| **Version** | 1.14.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -212,6 +212,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No persistence / import — no KartuKeluarga, Penduduk, or KkAnggota rows created or updated, and `ocr_jobs` is never mutated. Accepting and importing the validated data is the Save / import sub-phase (ADR-009).
 - Duplicate-upload detection (FR-OCR-05, image hash + KK number) and per-field word confidence remain deferred.
 - No migrations, no schema changes, no dashboard changes, no frontend build asset. `php artisan test` 175 passed / 818 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (155 files).
+
+### Added (Phase 5.7 — Import Kartu Keluarga — 2026-08-07)
+- **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*` per ADR-016):
+  - `import(OcrJob $job, array $correctedData, ?User $operator = null): OcrImportResult` — the operator-triggered "SIMPAN" write (ADR-009). Consumes the Phase 5.6 approved review data and persists **only** a `KartuKeluarga` record (`kk_number` + `address`); **no Penduduk / KkAnggota creation**.
+  - Re-runs the supplied corrections through `OcrReviewService::validate()` (the existing schema-grounded gate) before writing — an un-validated/tampered payload returns an `invalid` result with zero writes.
+  - **Duplicate KK detection** (FR-OCR-05, KK-number rule): `kk_number` is unique; existence is pre-checked and the insert is wrapped in `DB::transaction`, so a concurrent insert that wins the race also resolves to `duplicate` (never a partial write).
+  - **Transactional write**: KK insert + job update in one transaction; a failed job update rolls the KK creation back (no orphan row).
+  - **OCR job updated on success**: `outcome` = SAVED, `kk_id` linked, `reviewed_at`, `operator_id`, and the approved data snapshot persisted to `extracted_data` (audit). `status` is left untouched (it records the extraction outcome, not the save).
+  - **Guards**: non-reviewable jobs (not SUCCESS/LOW_CONFIDENCE with raw text) throw `InvalidArgumentException` (pipeline convention); an already-saved job (`kk_id` set / `outcome` SAVED) returns `already_saved` and writes nothing.
+- **Import result DTO** (`app/Services/OcrImportResult.php`, new — `final readonly`, in-memory only): status `saved` / `duplicate` / `invalid` / `already_saved` with `kartuKeluargaId`, `kkNumber`, validation `errors`; `isSaved()` / `isDuplicate()` / `isInvalid()` / `isAlreadySaved()`.
+- **Phase 5.7 tests** (`tests/Feature/Phase5/OcrImportServiceTest.php`, 8 tests): successful import creates exactly one KK (no penduduk/kk_anggota rows); duplicate KK number rejected with zero writes; transaction rolls back when the job-update step fails (KK insert rolled back, job untouched); OCR job updated after success (outcome SAVED, kk_id, reviewed_at, data snapshot); operator recorded when provided; invalid data fails import with zero writes; already-saved job refused; non-reviewable job rejected by the guard.
+
+### Notes (Phase 5.7)
+- No Penduduk / KkAnggota creation — importing the approved `members` rows is a later sub-phase. No review-page UI wiring (service-layer contract only). No migrations / schema changes (the reviewed `rt` / `rw` / `lingkungan` fields still have no persistable columns).
+- No changes to OCR parsing, the OCR engine, preprocessing, the dashboard, or Phase 5.1–5.6 code. Two pre-existing quirks were noted but deliberately left untouched: the `OcrJob` model has no `outcome` cast, and the `OcrJob` factory definition eagerly creates a backing `KartuKeluarga` when the table is empty.
+- No migrations, no frontend build asset. `php artisan test` 183 passed / 853 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (158 files).
 
 ## [1.3.0] - 2026-08-03
 

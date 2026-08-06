@@ -2,11 +2,11 @@
 | --- | --- |
 | **Title** | SIPETA Phase 5 — OCR |
 | **Purpose** | Track Phase 5 (OCR) sub-phase progress. |
-| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking); 5.4 OCR engine integration (Tesseract invocation, raw text extraction, confidence aggregation, failure/timeout handling, job status update, raw extracted text persistence); 5.5 OCR parsing and mapping (structured DTO, raw-text parsing into project-defined fields, confidence handling, required-field validation); 5.6 OCR review and validation (resource page, operator-facing review form, parsed-field display, missing-required and low-confidence highlighting, manual correction, pre-approval validation gate — no persistence, no import). |
-| **Version** | 1.5.0 |
+| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking); 5.4 OCR engine integration (Tesseract invocation, raw text extraction, confidence aggregation, failure/timeout handling, job status update, raw extracted text persistence); 5.5 OCR parsing and mapping (structured DTO, raw-text parsing into project-defined fields, confidence handling, required-field validation); 5.6 OCR review and validation (resource page, operator-facing review form, parsed-field display, missing-required and low-confidence highlighting, manual correction, pre-approval validation gate — no persistence, no import); 5.7 Import Kartu Keluarga (import service persisting a validated review result, duplicate KK-number detection, transactional write, OCR job marked saved on success, import result DTO). |
+| **Version** | 1.6.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
-| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/OcrParsingService.php`, `app/Services/ParsedOcrResult.php`, `app/Services/ParsedResident.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Services/OcrEngine.php`, `app/Services/TesseractOcrEngine.php`, `app/Services/OcrResult.php`, `app/Services/OcrReviewService.php`, `app/Services/OcrReviewResult.php`, `app/Models/OcrJob.php`, `config/ocr.php`, `app/Filament/Resources/OcrJobs/OcrJobResource.php`, `app/Filament/Resources/OcrJobs/Pages/ReviewOcrJob.php` |
+| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/OcrParsingService.php`, `app/Services/ParsedOcrResult.php`, `app/Services/ParsedResident.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Services/OcrEngine.php`, `app/Services/TesseractOcrEngine.php`, `app/Services/OcrResult.php`, `app/Services/OcrReviewService.php`, `app/Services/OcrReviewResult.php`, `app/Services/OcrImportService.php`, `app/Services/OcrImportResult.php`, `app/Models/OcrJob.php`, `config/ocr.php`, `app/Filament/Resources/OcrJobs/OcrJobResource.php`, `app/Filament/Resources/OcrJobs/Pages/ReviewOcrJob.php` |
 
 ---
 
@@ -655,3 +655,86 @@ php artisan test        175 passed (818 assertions), 4 skipped (3 MySQL + 1 Tess
 
 `npm run build` not applicable — no compiled frontend asset changed (a Blade
 view + Filament resource; the panel has no custom Vite theme).
+
+---
+
+## 5.7 Import Kartu Keluarga
+
+### 5.7.1 Objective
+
+Persist a validated OCR review result into the Kartu Keluarga domain — the
+operator-triggered "SIMPAN" write (ADR-009: OCR is an assistant; the Service
+layer writes only after the operator explicitly approves). This phase
+creates **only** the `KartuKeluarga` record. Penduduk membership (the
+review `members` rows) is **not** created here — that is a later sub-phase.
+
+### 5.7.2 Deliverables
+
+- **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*`
+  per ADR-016):
+  - `import(OcrJob $job, array $correctedData, ?User $operator = null): OcrImportResult`
+    — consumes the Phase 5.6 approved review data and persists a
+    `KartuKeluarga` record (`kk_number` + `address`, the only importable
+    fields on the existing `kartu_keluarga` schema).
+  - **Existing validation** — the supplied corrections are re-run through
+    `OcrReviewService::validate()` (the same schema-grounded gate the review
+    page uses) before anything is written, so an un-validated or tampered
+    payload is rejected up front (returns an `invalid` result, zero writes).
+  - **Duplicate KK detection** (FR-OCR-05, KK-number rule) — `kk_number` is a
+    unique column; existence is pre-checked and the insert is wrapped in
+    `DB::transaction`, so a concurrent insert that wins the race also resolves
+    to a `duplicate` result rather than a partial write.
+  - **Transactional write** — the KK insert and the OCR-job update happen in
+    one transaction; a failed job update rolls the KK creation back (no orphan
+    KK row).
+  - **OCR job updated on success** — the job is marked saved: `outcome` =
+    SAVED, `kk_id` linked, `reviewed_at`, `operator_id`, and the approved data
+    snapshot persisted to `extracted_data` for audit. The `status` column is
+    left untouched (it records the OCR extraction outcome, not the save action).
+  - **Mutation guards** — non-reviewable jobs (not SUCCESS/LOW_CONFIDENCE with
+    raw text) throw `InvalidArgumentException` (programmer error, matching the
+    pipeline conventions); an already-saved job (`kk_id` set or `outcome`
+    SAVED) returns an `already_saved` result and writes nothing.
+- **Import result DTO** (`app/Services/OcrImportResult.php`, new — `final
+  readonly`, in-memory only): status `saved` / `duplicate` / `invalid` /
+  `already_saved` with `kartuKeluargaId`, `kkNumber` and (for invalid) the
+  validation `errors`; convenience `isSaved()` / `isDuplicate()` /
+  `isInvalid()` / `isAlreadySaved()`.
+
+### 5.7.3 Not done (explicitly out of scope for 5.7)
+
+- **No Penduduk / KkAnggota creation** — this phase creates only the
+  `KartuKeluarga` record. Importing the approved `members` rows into
+  `Penduduk` (+ `kk_anggota` membership) is a later sub-phase.
+- **No review-page UI wiring** — no SIMPAN action is added to the Phase 5.6
+  `ReviewOcrJob` page; this phase delivers the service-layer contract the UI
+  will call.
+- **No migrations / schema changes** — the existing `kartu_keluarga` and
+  `ocr_jobs` tables fully cover the import. The reviewed `rt` / `rw` /
+  `lingkungan` fields still have no persistable columns (unchanged).
+- **No image-hash duplicate-upload detection beyond the KK-number rule** —
+  FR-OCR-05 image-hash matching remains deferred.
+- No changes to OCR parsing, the OCR engine, preprocessing, the dashboard,
+  or the Phase 5.1–5.6 code (the `OcrJob` model's missing `outcome` cast and
+  the factory's eager-KK default are pre-existing and left untouched).
+
+### 5.7.4 Files changed (5.7 only)
+
+| File | Change |
+| --- | --- |
+| `app/Services/OcrImportService.php` | New — import service (validation, duplicate KK detection, transactional write, job marked saved). |
+| `app/Services/OcrImportResult.php` | New — import result DTO (saved / duplicate / invalid / already_saved). |
+| `tests/Feature/Phase5/OcrImportServiceTest.php` | New — 8 tests covering the required scenarios. |
+| `docs/PHASE5.md` | Updated — this §5.7 section; Version 1.5.0 → 1.6.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 5.7 entry; Version 1.13.0 → 1.14.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-18 (OCR import of Kartu Keluarga) added, status Implemented. |
+
+### 5.7.5 Verification
+
+```text
+php artisan test        183 passed (853 assertions), 4 skipped (3 MySQL + 1 Tesseract, env-gated)
+./vendor/bin/pint --test  PASS (158 files)
+```
+
+`npm run build` not applicable — no compiled frontend asset changed (pure PHP
+service + tests + docs; the panel has no custom Vite theme).

@@ -62,6 +62,7 @@ Feature status legend:
 | F-HIGH-15 | OCR engine integration (Tesseract extraction, raw text + confidence persistence, failure/timeout handling) | Implemented | Phase 5 |
 | F-HIGH-16 | OCR parsing and mapping (structured extraction of KK number, address, RT/RW/lingkungan, member rows; confidence handling; required-field validation) | Implemented | Phase 5 |
 | F-HIGH-17 | OCR review and validation (operator review page, parsed-field display, missing-required + low-confidence highlighting, manual correction, pre-approval validation gate) | Implemented | Phase 5 |
+| F-HIGH-18 | OCR import Kartu Keluarga (persist validated review result, duplicate KK-number detection, transactional write, OCR job marked saved) | Implemented | Phase 5 |
 
 ## 3. Medium Priority
 
