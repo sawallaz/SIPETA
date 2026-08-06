@@ -204,3 +204,71 @@ php artisan test        64 passed (340 assertions), 3 skipped
 ### Commit
 
 `feat(filament): Phase 3.3 — Penduduk resource`
+
+## Phase 3.4 — KK ↔ Penduduk relation
+
+### Verdict
+
+**COMPLETE.** The KK edit page now carries an "Anggota Keluarga" relation
+manager listing that family's residents, with a member-count badge and
+two-way navigation between the KK and Penduduk resources.
+
+### Files
+
+- `app/Filament/Resources/KartuKeluargas/RelationManagers/PenduduksRelationManager.php` (new)
+- `app/Filament/Resources/KartuKeluargas/KartuKeluargaResource.php` (registered the relation)
+- `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php` (KK column links back)
+- `app/Filament/Resources/Penduduks/Pages/CreatePenduduk.php` (pre-selects KK)
+- `tests/Feature/Phase3/KartuKeluargaPendudukRelationTest.php` (new)
+
+### Relation manager
+
+Built on the model's existing `KartuKeluarga::penduduks()` HasMany relation — no
+model, migration or relation code was changed. Columns: NIK, Nama Lengkap,
+Hubungan Keluarga (badge), Jenis Kelamin, Tanggal Lahir, Usia (computed), Status
+(colour-coded badge). Sorted by `family_relation` so the Kepala Keluarga leads.
+Indonesian title "Anggota Keluarga" and empty state.
+
+### Member count
+
+Two independent surfaces, both derived from the real relation:
+
+- `getBadge()` on the relation manager returns `penduduks()->count()`, shown on
+  the relation tab.
+- The KK list table already had a "Jumlah Anggota" column via
+  `counts('kkAnggotas')` (membership-history aggregate, from 3.2.3) — left as is.
+
+### Family navigation
+
+`$relatedResource = PendudukResource::class` links the relation manager to the
+Penduduk resource, so View / Edit / Create open the full Penduduk pages instead
+of reduced modals. Consequence: header and row actions become URL links rather
+than modal actions — this is Filament's documented linked-resource behaviour,
+verified against the vendor source (`RelationManager::getDefaultActionUrl`).
+
+Because a linked CreateAction navigates away, the owning KK would otherwise be
+lost. "Tambah Anggota" therefore points at
+`PendudukResource::getUrl('create', ['kk_id' => <owner>])`, and `CreatePenduduk`
+pre-selects that KK in an `afterFill()` hook using `fillPartially()` — chosen over
+overriding `fillForm()` so component defaults still apply.
+
+The reverse direction: the Penduduk table's "Nomor KK" column is now a link to
+that KK's edit page.
+
+### Tests
+
+11 tests: relation registered, correct relation name, members scoped to the
+owner KK, badge count (populated and zero), relation-to-resource link, relation
+manager present on the edit page, title, "Tambah Anggota" URL carries `kk_id`,
+create page pre-selects the KK, Penduduk table links back to the KK.
+
+### Verification
+
+```
+php artisan test        75 passed (359 assertions), 3 skipped
+./vendor/bin/pint --test  PASS (111 files)
+```
+
+### Commit
+
+`feat(filament): Phase 3.4 — KK ↔ Penduduk relation`

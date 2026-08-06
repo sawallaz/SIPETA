@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Penduduks\Tables;
 
 use App\Enums\Gender;
 use App\Enums\ResidentStatus;
+use App\Filament\Resources\KartuKeluargas\KartuKeluargaResource;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -36,6 +37,10 @@ class PenduduksTable
                     ->searchable()
                     ->sortable()
                     ->placeholder('-')
+                    ->url(fn ($record): ?string => $record->kk_id
+                        ? KartuKeluargaResource::getUrl('edit', ['record' => $record->kk_id])
+                        : null)
+                    ->tooltip('Buka Kartu Keluarga')
                     ->toggleable(isToggledHiddenByDefault: false),
                 TextColumn::make('gender')
                     ->label('Jenis Kelamin')

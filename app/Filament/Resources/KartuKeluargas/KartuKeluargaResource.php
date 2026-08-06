@@ -5,6 +5,7 @@ namespace App\Filament\Resources\KartuKeluargas;
 use App\Filament\Resources\KartuKeluargas\Pages\CreateKartuKeluarga;
 use App\Filament\Resources\KartuKeluargas\Pages\EditKartuKeluarga;
 use App\Filament\Resources\KartuKeluargas\Pages\ListKartuKeluargas;
+use App\Filament\Resources\KartuKeluargas\RelationManagers\PenduduksRelationManager;
 use App\Filament\Resources\KartuKeluargas\Schemas\KartuKeluargaForm;
 use App\Filament\Resources\KartuKeluargas\Tables\KartuKeluargasTable;
 use App\Models\KartuKeluarga;
@@ -46,7 +47,7 @@ class KartuKeluargaResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            PenduduksRelationManager::class,
         ];
     }
 
