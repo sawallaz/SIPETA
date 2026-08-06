@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.7.0 |
+| **Version** | 1.8.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -120,6 +120,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 - Polish only — no new widgets, charts, resources, migrations, models, controllers, or Livewire components; no widget views or Vite assets changed. KPI values, chart data, quick-action routes, and recent-activity queries are unchanged. Loading/empty states already existed (all widgets `$isLazy = false`, charts + recent activity have empty states); Indonesian number formatting already present.
 - Verification: `php artisan test` 104 passed / 491 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (127 files). `npm run build` not applicable — no frontend build asset changed.
+
+### Added (Phase 5.1 — OCR Upload Foundation — 2026-08-06)
+- **Upload service** (`app/Services/KkDocumentUploadService.php`, new — first `App\Services\*` business-logic class per ADR-016):
+  - `upload(UploadedFile $file, ?User $operator = null): OcrJob` — validates, stores, and registers the upload.
+  - `validate(UploadedFile $file): void` — throws `ValidationException` on rejection; nothing is persisted on failure (no file, no job row).
+  - `rules(): array` — static reusable rules for the future upload UI.
+- **Upload validation** (NFR-SEC-05; `.ai/ocr.md` §4.1): accepted types JPG/JPEG/PNG enforced by extension (`mimes`) AND content MIME sniff (`mimetypes`, rejects disguised files); maximum size 5 MB (`max:5120`).
+- **Secure storage**: files stored on the private local `kk_uploads` disk (`storage/app/kk_uploads`, `visibility = private`) under a UUID filename; the client's original filename is never used for storage.
+- **Upload status handling**: accepted uploads create an `ocr_jobs` row with `status = PENDING`, `kk_id = null` (KK record does not exist at upload time), `operator_id`, `started_at`, and `source_image_hash` (SHA-256 of the stored file — the seed for FR-OCR-05 duplicate detection in a later sub-phase). No schema changes: the existing `ocr_jobs` table covers upload recording.
+- **Phase 5.1 tests** (`tests/Feature/Phase5/KkDocumentUploadServiceTest.php`, 6 tests): valid JPEG accepted (PENDING job, operator, hash, no kk), valid PNG accepted, upload stored correctly on the private disk (content hash round-trip, `visibility = private`, root under `storage/app/kk_uploads`), invalid extension rejected, oversized file rejected, and wrong content with an allowed extension rejected (all rejections leave zero job rows and an empty disk).
+
+### Notes
+- OCR extraction, parsing, resolution validation, duplicate warning, upload UI, queue workers, and temp-file GC are explicitly NOT part of 5.1 — they land in later 5.x sub-phases (see `docs/PHASE5.md` §5.1.3).
+- Verification: `php artisan test` 110 passed / 514 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (129 files). `npm run build` not applicable — no frontend build asset changed.
 
 ## [1.3.0] - 2026-08-03
 
