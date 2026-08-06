@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.14.0 |
+| **Version** | 1.15.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -212,6 +212,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No persistence / import — no KartuKeluarga, Penduduk, or KkAnggota rows created or updated, and `ocr_jobs` is never mutated. Accepting and importing the validated data is the Save / import sub-phase (ADR-009).
 - Duplicate-upload detection (FR-OCR-05, image hash + KK number) and per-field word confidence remain deferred.
 - No migrations, no schema changes, no dashboard changes, no frontend build asset. `php artisan test` 175 passed / 818 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (155 files).
+
+### Added (Phase 5.8 — Import Penduduk — 2026-08-07)
+- **Penduduk import service** (`app/Services/PendudukImportService.php`, new — `App\Services\*` per ADR-016):
+  - `import(OcrJob $job, ?User $operator = null): PendudukImportResult` — the second half of the operator-triggered "SIMPAN" write (ADR-009). Consumes the Phase 5.7 SAVED state (`kk_id`, `outcome` SAVED, `raw_text`, `extracted_data` snapshot) and persists every approved member as a `Penduduk` row linked to the KK, plus one ACTIVE `KkAnggota` membership row per member (ADR-008 membership baseline).
+  - Re-runs the approved snapshot through `OcrReviewService::validate()` (re-parsing `raw_text`, re-applying the snapshot as corrections) before any write — a tampered/incomplete dataset returns `invalid` with zero writes.
+  - **Domain mapping**: gender / marital_status / family_relation from their enums; `blood_type` defaults to `TIDAK_DIKETAHUI`, `resident_status` to `ACTIVE`; religion / education / occupation resolve case-insensitively to the lookup masters (created title-cased when absent); `birth_date` normalized to `Y-m-d`; reviewed `rt` resolved to an existing `Rt` by number (`"001"` → `"01"`), else `invalid` with a clear message.
+  - **Duplicate NIK detection** (FR-OCR-05 / `penduduk.nik` unique): intra-list repeats and existing `penduduk` rows are pre-checked, and the insert is wrapped in `DB::transaction` so a concurrent NIK race also resolves to `duplicate` (never a partial family).
+  - **Transactional write**: every Penduduk + KkAnggota insert and the job update in one transaction; a failed job update rolls the whole family back (no orphan residents).
+  - **OCR job updated on success**: `extracted_data` augmented with `penduduk_imported_at`, `penduduk_ids`, `penduduk_operator_id` (audit); `status` / `outcome` / `kk_id` untouched.
+  - **Guards**: jobs without a Phase 5.7-imported KK throw `InvalidArgumentException`; a job already carrying the `penduduk_imported_at` marker returns `already_imported` and writes nothing.
+- **Import result DTO** (`app/Services/PendudukImportResult.php`, new — `final readonly`, in-memory only): status `saved` / `duplicate` / `invalid` / `already_imported` with `kartuKeluargaId`, `kkNumber`, `importedCount`, `duplicateNik`, validation `errors`; `isSaved()` / `isDuplicate()` / `isInvalid()` / `isAlreadyImported()`.
+- **Phase 5.8 tests** (`tests/Feature/Phase5/PendudukImportServiceTest.php`, 12 tests, fixtures built by running the real Phase 5.7 import): successful import creates all family members (3 penduduk + 3 kk_anggota); every member linked to the imported KK (kk_id, rt); parsed family relation preserved on penduduk and kk_anggota (KEPALA_KELUARGA / ISTRI / ANAK); member fields map onto the existing domain (enums, defaults, lookups created, birth date); duplicate NIK against an existing penduduk rejected with zero writes; duplicate NIK inside the approved list rejected with zero writes; transaction rolls back when the job-update step fails (family rolled back, job untouched); OCR job updated after success (marker + ids + operator); already-imported job refused; invalid snapshot fails with zero writes; missing RT fails `invalid`; not-yet-imported job rejected by the guard.
+
+### Notes (Phase 5.8)
+- No review-page UI wiring (service-layer contract only, same as 5.7). No migrations / schema changes — the reviewed `rt` / `rw` / `lingkungan` fields still have no persistable columns; RT resolves to an existing `rts` row by number (area-unit disambiguation out of scope).
+- No changes to OCR parsing, the OCR engine, preprocessing, the review page, the dashboard, or Phase 5.1–5.7 code.
+- No migrations, no frontend build asset. `php artisan test` 195 passed / 924 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (161 files).
 
 ### Added (Phase 5.7 — Import Kartu Keluarga — 2026-08-07)
 - **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*` per ADR-016):

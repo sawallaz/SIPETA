@@ -2,11 +2,11 @@
 | --- | --- |
 | **Title** | SIPETA Phase 5 — OCR |
 | **Purpose** | Track Phase 5 (OCR) sub-phase progress. |
-| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking); 5.4 OCR engine integration (Tesseract invocation, raw text extraction, confidence aggregation, failure/timeout handling, job status update, raw extracted text persistence); 5.5 OCR parsing and mapping (structured DTO, raw-text parsing into project-defined fields, confidence handling, required-field validation); 5.6 OCR review and validation (resource page, operator-facing review form, parsed-field display, missing-required and low-confidence highlighting, manual correction, pre-approval validation gate — no persistence, no import); 5.7 Import Kartu Keluarga (import service persisting a validated review result, duplicate KK-number detection, transactional write, OCR job marked saved on success, import result DTO). |
-| **Version** | 1.6.0 |
+| **Scope** | 5.1 OCR upload foundation (upload validation, accepted file types, size limit, secure storage, upload status handling); 5.2 OCR processing pipeline foundation (start processing, load uploaded image, validate prerequisites, PENDING → PROCESSING → FAILED transitions); 5.3 OCR image preprocessing (image validation, EXIF orientation correction, grayscale conversion, resize/normalization, preprocessing result tracking); 5.4 OCR engine integration (Tesseract invocation, raw text extraction, confidence aggregation, failure/timeout handling, job status update, raw extracted text persistence); 5.5 OCR parsing and mapping (structured DTO, raw-text parsing into project-defined fields, confidence handling, required-field validation); 5.6 OCR review and validation (resource page, operator-facing review form, parsed-field display, missing-required and low-confidence highlighting, manual correction, pre-approval validation gate — no persistence, no import); 5.7 Import Kartu Keluarga (import service persisting a validated review result, duplicate KK-number detection, transactional write, OCR job marked saved on success, import result DTO); 5.8 Import Penduduk (import service persisting the approved review members as Penduduk rows + active KkAnggota membership under the Phase 5.7 KK, duplicate NIK detection, transactional write, OCR job marked penduduk-imported on success, import result DTO). |
+| **Version** | 1.7.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
-| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/OcrParsingService.php`, `app/Services/ParsedOcrResult.php`, `app/Services/ParsedResident.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Services/OcrEngine.php`, `app/Services/TesseractOcrEngine.php`, `app/Services/OcrResult.php`, `app/Services/OcrReviewService.php`, `app/Services/OcrReviewResult.php`, `app/Services/OcrImportService.php`, `app/Services/OcrImportResult.php`, `app/Models/OcrJob.php`, `config/ocr.php`, `app/Filament/Resources/OcrJobs/OcrJobResource.php`, `app/Filament/Resources/OcrJobs/Pages/ReviewOcrJob.php` |
+| **Related Documents** | `.ai/ocr.md`, `.ai/decisions.md` (ADR-009, ADR-016, ADR-017), `docs/PHASE4.md`, `docs/REQUIREMENTS.md` (§2.4, §5.4), `app/Services/KkDocumentUploadService.php`, `app/Services/OcrProcessingService.php`, `app/Services/OcrParsingService.php`, `app/Services/ParsedOcrResult.php`, `app/Services/ParsedResident.php`, `app/Services/ImagePreprocessor.php`, `app/Services/PreprocessResult.php`, `app/Services/OcrEngine.php`, `app/Services/TesseractOcrEngine.php`, `app/Services/OcrResult.php`, `app/Services/OcrReviewService.php`, `app/Services/OcrReviewResult.php`, `app/Services/OcrImportService.php`, `app/Services/OcrImportResult.php`, `app/Services/PendudukImportService.php`, `app/Services/PendudukImportResult.php`, `app/Models/OcrJob.php`, `config/ocr.php`, `app/Filament/Resources/OcrJobs/OcrJobResource.php`, `app/Filament/Resources/OcrJobs/Pages/ReviewOcrJob.php` |
 
 ---
 
@@ -734,6 +734,109 @@ review `members` rows) is **not** created here — that is a later sub-phase.
 ```text
 php artisan test        183 passed (853 assertions), 4 skipped (3 MySQL + 1 Tesseract, env-gated)
 ./vendor/bin/pint --test  PASS (158 files)
+```
+
+`npm run build` not applicable — no compiled frontend asset changed (pure PHP
+service + tests + docs; the panel has no custom Vite theme).
+
+---
+
+## 5.8 Import Penduduk
+
+### 5.8.1 Objective
+
+Persist the approved OCR review members as `Penduduk` records under the
+`KartuKeluarga` that Phase 5.7 already created — the second half of the
+operator-triggered "SIMPAN" write (ADR-009: OCR is an assistant; nothing is
+persisted until the operator has reviewed and approved). The approved
+dataset is Phase 5.7's `extracted_data` snapshot (the Phase 5.6 corrected
+review data), so this sub-phase needs no new UI: it completes the family
+import at the service layer.
+
+### 5.8.2 Deliverables
+
+- **Penduduk import service** (`app/Services/PendudukImportService.php`, new
+  — `App\Services\*` per ADR-016):
+  - `import(OcrJob $job, ?User $operator = null): PendudukImportResult` —
+    consumes the job's Phase 5.7 SAVED state (`kk_id`, `outcome` SAVED,
+    `raw_text`, `extracted_data`) and persists every approved member as a
+    `Penduduk` row linked to the KK, plus one ACTIVE `KkAnggota` membership
+    row per member (the membership-history baseline, ADR-008).
+  - **Existing validation** — the approved snapshot is re-run through
+    `OcrReviewService::validate()` (re-parsing `raw_text` and re-applying
+    the snapshot as corrections — the same schema-grounded gate the review
+    page uses), so a tampered or incomplete dataset returns an `invalid`
+    result with zero writes.
+  - **Domain mapping** — enumerated fields map onto the existing domain:
+    `gender` / `marital_status` / `family_relation` from their enums;
+    `blood_type` defaults to `TIDAK_DIKETAHUI` and `resident_status` to
+    `ACTIVE` (the OCR review never captures them); `religion` / `education`
+    / `occupation` resolve case-insensitively to the evolving lookup
+    masters (`religions` / `educations` / `occupations`), creating a
+    title-cased master row when an approved label is absent; `birth_date`
+    is normalized to `Y-m-d` (the parser emits `Y-m-d`, operator
+    corrections may use `d/m/Y` / `d-m-Y`); the reviewed `rt` resolves to
+    an existing `Rt` by number (`"001"` → `"01"`, matching the seeded
+    `rts.number`), else the import fails `invalid` with a clear message —
+    nothing is fabricated.
+  - **Duplicate NIK detection** (FR-OCR-05 / `penduduk.nik` unique) — the
+    approved NIK set is checked for repeats inside the list and against
+    existing `penduduk` rows; a collision returns a `duplicate` result
+    (with the offending NIK) and nothing is written. The insert is wrapped
+    in `DB::transaction` so a concurrent insert that wins the NIK race also
+    resolves to `duplicate`, never a partial family.
+  - **Transactional write** — every Penduduk insert, KkAnggota insert and
+    the OCR-job update happen in one transaction; a failed job update rolls
+    the whole family back (no orphan residents).
+  - **OCR job updated on success** — the approved `extracted_data` snapshot
+    is augmented with `penduduk_imported_at`, the created `penduduk_ids`
+    and `penduduk_operator_id`, recording the completed family import for
+    audit. The `status` / `outcome` / `kk_id` columns are left untouched
+    (they already reflect the Phase 5.7 KK save).
+  - **Mutation guards** — jobs without a Phase 5.7-imported KK (no `kk_id`
+    or `outcome` ≠ SAVED) throw `InvalidArgumentException` (programmer
+    error, matching the pipeline conventions); a job whose snapshot already
+    carries the `penduduk_imported_at` marker returns `already_imported`
+    and writes nothing (idempotence).
+- **Import result DTO** (`app/Services/PendudukImportResult.php`, new —
+  `final readonly`, in-memory only): status `saved` / `duplicate` /
+  `invalid` / `already_imported` with `kartuKeluargaId`, `kkNumber`,
+  `importedCount`, `duplicateNik` and (for invalid) the validation `errors`;
+  convenience `isSaved()` / `isDuplicate()` / `isInvalid()` /
+  `isAlreadyImported()`.
+
+### 5.8.3 Not done (explicitly out of scope for 5.8)
+
+- **No review-page UI wiring** — no SIMPAN action is added to the Phase 5.6
+  `ReviewOcrJob` page; this sub-phase delivers the service-layer contract
+  the UI will call (same as 5.7).
+- **No migrations / schema changes** — the existing `penduduk`,
+  `kk_anggota` and `ocr_jobs` tables fully cover the import. The reviewed
+  `rt` / `rw` / `lingkungan` fields still have no persistable columns; `rt`
+  is resolved to an existing `rts` row by number, and RT-to-area-unit
+  disambiguation (a KK card carries no area unit) is deliberately out of
+  scope.
+- **No changes to OCR parsing, the OCR engine, preprocessing, the review
+  page, the dashboard, or Phase 5.1–5.7 code** — the `OcrJob` model's
+  missing `outcome` cast and the factory's eager-KK default remain
+  pre-existing and untouched.
+
+### 5.8.4 Files changed (5.8 only)
+
+| File | Change |
+| --- | --- |
+| `app/Services/PendudukImportService.php` | New — Penduduk import service (validation, duplicate NIK detection, domain mapping, transactional write, job marked penduduk-imported). |
+| `app/Services/PendudukImportResult.php` | New — import result DTO (saved / duplicate / invalid / already_imported). |
+| `tests/Feature/Phase5/PendudukImportServiceTest.php` | New — 12 tests covering the required scenarios. |
+| `docs/PHASE5.md` | Updated — this §5.8 section; Version 1.6.0 → 1.7.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 5.8 entry; Version 1.14.0 → 1.15.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-19 (OCR import of Penduduk) added, status Implemented. |
+
+### 5.8.5 Verification
+
+```text
+php artisan test        195 passed (924 assertions), 4 skipped (3 MySQL + 1 Tesseract, env-gated)
+./vendor/bin/pint --test  PASS (161 files)
 ```
 
 `npm run build` not applicable — no compiled frontend asset changed (pure PHP

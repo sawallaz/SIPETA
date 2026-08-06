@@ -3,7 +3,7 @@
 | **Title** | SIPETA Features Catalog |
 | **Purpose** | Categorize and track every feature by priority and implementation status. |
 | **Scope** | KKN-deliverable features plus future backlog references. |
-| **Version** | 1.1.0 |
+| **Version** | 1.2.0 |
 | **Status** | Approved |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/BACKLOG.md`, `.ai/roadmap.md`, `.ai/architecture.md`, `.ai/ocr.md` |
@@ -63,6 +63,7 @@ Feature status legend:
 | F-HIGH-16 | OCR parsing and mapping (structured extraction of KK number, address, RT/RW/lingkungan, member rows; confidence handling; required-field validation) | Implemented | Phase 5 |
 | F-HIGH-17 | OCR review and validation (operator review page, parsed-field display, missing-required + low-confidence highlighting, manual correction, pre-approval validation gate) | Implemented | Phase 5 |
 | F-HIGH-18 | OCR import Kartu Keluarga (persist validated review result, duplicate KK-number detection, transactional write, OCR job marked saved) | Implemented | Phase 5 |
+| F-HIGH-19 | OCR import Penduduk (persist approved review members as Penduduk + active KkAnggota membership under the imported KK, duplicate NIK detection, transactional write, OCR job marked penduduk-imported) | Implemented | Phase 5 |
 
 ## 3. Medium Priority
 
