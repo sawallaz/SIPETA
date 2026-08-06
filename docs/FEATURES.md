@@ -57,6 +57,7 @@ Feature status legend:
 | F-HIGH-10 | Dashboard quick actions (Tambah / Data KK & Penduduk) | Implemented | Phase 4 |
 | F-HIGH-11 | Dashboard polish (full-width layout, ordering, consistent colors) | Implemented | Phase 4 |
 | F-HIGH-12 | OCR upload foundation (validation, secure storage, pending OCR job) | Implemented | Phase 5 |
+| F-HIGH-13 | OCR processing pipeline (PENDING → PROCESSING → FAILED transitions, source image load + prerequisites) | Implemented | Phase 5 |
 
 ## 3. Medium Priority
 

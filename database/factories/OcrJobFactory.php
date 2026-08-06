@@ -20,7 +20,7 @@ class OcrJobFactory extends Factory
             'kk_id' => KartuKeluarga::inRandomOrder()->first()?->id ?? KartuKeluarga::factory()->create()->id,
             'source_image_hash' => fake()->sha256(),
             'source_image_path' => 'ocr/'.fake()->uuid().'.jpg',
-            'status' => fake()->randomElement(OcrJobStatus::cases())->value,
+            'status' => fake()->randomElement(OcrJobStatus::persistable())->value,
             'confidence' => fake()->randomFloat(2, 0, 100),
             'raw_text' => null,
             'corrected_text' => null,

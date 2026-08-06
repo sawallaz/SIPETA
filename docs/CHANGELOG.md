@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.8.0 |
+| **Version** | 1.9.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-06 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -134,6 +134,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 - OCR extraction, parsing, resolution validation, duplicate warning, upload UI, queue workers, and temp-file GC are explicitly NOT part of 5.1 — they land in later 5.x sub-phases (see `docs/PHASE5.md` §5.1.3).
 - Verification: `php artisan test` 110 passed / 514 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (129 files). `npm run build` not applicable — no frontend build asset changed.
+
+### Added (Phase 5.2 — OCR Processing Pipeline — 2026-08-06)
+- **Pipeline service** (`app/Services/OcrProcessingService.php`, new):
+  - `start(OcrJob $job): OcrJob` — rejects non-PENDING jobs (`InvalidArgumentException`, nothing persisted); transitions the job to the `PROCESSING` runtime state; loads the source image from the private `kk_uploads` disk; validates processing prerequisites (file exists, non-empty/readable, JPEG/PNG signature).
+  - On any prerequisite failure the job is persisted as `FAILED` with `error_message` and `finished_at`, then `OcrProcessingException` (new, `app/Exceptions/`) re-surfaces to the caller.
+- **Status transitions**: PENDING → PROCESSING → FAILED (when processing cannot continue). `PROCESSING` is added to the `OcrJobStatus` PHP enum as a **runtime state only** — the Phase 2 column constraint (SQLite CHECK / MySQL ENUM) predates the value, so it cannot be persisted yet (verified: `CHECK constraint failed`). `OcrJobStatus::persistable()` lists the five persistable statuses and the factory now samples from it so fixtures never write the illegal value. Widening the column is a deliberate future schema change, out of scope here.
+- **Phase 5.2 tests** (`tests/Feature/Phase5/OcrProcessingServiceTest.php`, 7 tests): pending → processing, DB row stays PENDING while processing, missing image fails the job, unreadable image fails, non-image content fails, non-PENDING job rejected without state change, and FAILED persisted with failure details.
+- No OCR recognition, Tesseract, AI vision, parsing, queue workers, new migrations, schema changes, resources, or dashboard changes — Phase 4 and 5.1 remain frozen.
+
+### Notes
+- Verification: `php artisan test` 117 passed / 535 assertions / 3 skipped; `./vendor/bin/pint --test` PASS (132 files). `npm run build` not applicable — no frontend build asset changed.
 
 ## [1.3.0] - 2026-08-03
 
