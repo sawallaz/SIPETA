@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.17.0 |
+| **Version** | 1.18.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `docs/PHASE1.md`, `docs/PHASE2.md`, `docs/PHASE3.md`, `docs/PHASE4.md`, `docs/PHASE5.md`, `docs/PHASE6.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -263,6 +263,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No migrations / schema changes (exports read existing columns; computed `age` never stored). No compiled frontend asset (actions reuse existing `heroicon-o-arrow-down-tray`; panel has no custom Vite theme) — `npm run build` N/A.
 - The two CSV-output tests that produced raw body bytes during the run were eliminated as PHPUnit `risky` (output during test); the XLSX round-trip + PDF view-text tests remain as the export-content proof. `exportQuery` live-filter wiring is exercised at the query level; a browser-level download assertion is deferred.
 - `php artisan test tests/Feature/Phase6` 14 passed (25 assertions); `php artisan test` 220 passed / 1008 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (168 files).
+
+### Added (Phase 6.2 — ZIP Backup — 2026-08-07)
+- **Backup service** (`app/Services/BackupService.php`, new — `App\Services\*` per ADR-016):
+  - `create(?User $operator = null): BackupResult` — assembles and persists a single ZIP archive, then appends the `backup_logs` row.
+  - `filename(?Carbon $now = null): string` — FR-BR-02 pattern `backup_YYYY-MM-DD_HHMMSS.zip`.
+  - **ZIP contents (FR-BR-01)**: `database.sql` (SQL dump via a `DatabaseDumper`), `settings.json` (the singleton settings row, `[]` when unseeded), and `kk/*` (every archived KK photo copied from its `storage_disk`; a photo whose stored file is missing is skipped without failing the backup).
+  - **FR-BR-03 no-overwrite**: an existing archive with the generated filename returns a `duplicate` result with zero writes.
+  - **FR-AUD-01 logging**: appends a `backup_logs` row (MANUAL type; SUCCESS with `backup_size`, or FAILED with the error message and `backup_size` = 0; `operator_id`; `started_at`/`finished_at`; message). On failure the service logs FAILED and rethrows `BackupException`.
+- **Dump abstraction** (mirrors the Phase 5.4 `OcrEngine` DI pattern): `app/Services/DatabaseDumper.php` (interface, `dump(): string`); `app/Services/MysqldumpDatabaseDumper.php` runs `mysqldump --single-transaction` via Symfony `Process` from the MySQL connection config (never hard-coded credentials, 120 s timeout, throws `DatabaseDumperException` on non-zero exit), bound in `AppServiceProvider` so the suite overrides it with a fake.
+- **Result DTO** (`app/Services/BackupResult.php`, `final readonly`) — status `success`/`duplicate` with `filename`/`size`, `isSuccess()`/`isDuplicate()`.
+- **Exceptions** (`app/Exceptions/BackupException.php`, `app/Exceptions/DatabaseDumperException.php`, new).
+- **Phase 6.2 tests** (`tests/Feature/Phase6/BackupServiceTest.php`, 6 tests, via `tests/Support/FakeDatabaseDumper.php`): FR-BR-02 filename; SQL + settings + KK-photo inclusion with a SUCCESS log; photo/settings packing with a missing-file skip; no-overwrite `duplicate`; FAILED log + thrown exception + no leftover file; operator recorded.
+
+### Notes (Phase 6.2)
+- Service-layer only — no restore (FR-BR-04..06), no Filament backup UI, and no scheduled backups / retention / integrity check in this sub-phase (all later Phase 6 work per `.ai/roadmap.md` §7). No migrations/schema changes — the existing `backup_logs` table and the `db_backups` disk cover persistence.
+- No compiled frontend asset touched. `php artisan test tests/Feature/Phase6/BackupServiceTest.php` 6 passed (31 assertions); `php artisan test` 226 passed / 1039 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (176 files); `npm run build` PASS.
 
 ### Added (Phase 5.7 — Import Kartu Keluarga — 2026-08-07)
 - **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*` per ADR-016):

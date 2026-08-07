@@ -3,7 +3,7 @@
 | **Title** | SIPETA Features Catalog |
 | **Purpose** | Categorize and track every feature by priority and implementation status. |
 | **Scope** | KKN-deliverable features plus future backlog references. |
-| **Version** | 1.4.0 |
+| **Version** | 1.5.0 |
 | **Status** | Approved |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/BACKLOG.md`, `.ai/roadmap.md`, `.ai/architecture.md`, `.ai/ocr.md` |
@@ -35,7 +35,7 @@ Feature status legend:
 | F-CORE-11 | Export PDF | Implemented | Phase 6 | `.ai/architecture.md` |
 | F-CORE-12 | Export Excel | Implemented | Phase 6 | `.ai/architecture.md` |
 | F-CORE-13 | Export CSV | Implemented | Phase 6 | `.ai/architecture.md` |
-| F-CORE-14 | Backup ZIP | Planned | Phase 6 | `.ai/architecture.md` §11 |
+| F-CORE-14 | Backup ZIP | Implemented | Phase 6 | `.ai/architecture.md` §11 |
 | F-CORE-15 | Restore from ZIP | Planned | Phase 6 | `.ai/workflow.md` |
 | F-CORE-16 | Settings (kelurahan identity, logo) | Planned | Phase 6 | `.ai/database.md` |
 | F-CORE-17 | Tauri desktop shell | Planned | Phase 7 | `.ai/architecture.md` |
@@ -46,7 +46,7 @@ Feature status legend:
 | ID | Feature | Status | Phase |
 |----|---------|--------|-------|
 | F-HIGH-01 | Dashboard charts (per RT, per Lingkungan, per Pekerjaan) | Implemented | Phase 4 |
-| F-HIGH-02 | Backup log table | Planned | Phase 6 |
+| F-HIGH-02 | Backup log table | Implemented | Phase 6 |
 | F-HIGH-03 | OCR confidence highlighting | Planned | Phase 4 |
 | F-HIGH-04 | OCR duplicate detection (image hash + KK number) | Planned | Phase 4 |
 | F-HIGH-05 | Reset Filter button | Planned | Phase 3 |

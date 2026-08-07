@@ -3,7 +3,7 @@
 | **Title** | SIPETA Phase 6 — Reporting & Export |
 | **Purpose** | Track Phase 6 (Reporting & Export) sub-phase progress. |
 | **Scope** | 6.1 Reporting & Export foundation: a `PendudukExportService` producing PDF (DomPDF), XLSX (OpenSpout), and CSV (OpenSpout) downloads via three Filament table toolbar actions; exports always respect the active filter criteria (FR-EX-02) and the generated filename always embeds the export date plus a human-readable filter summary (FR-EX-03). |
-| **Version** | 1.0.0 |
+| **Version** | 1.1.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `.ai/architecture.md`, `docs/REQUIREMENTS.md` (§ FR-EX-02, FR-EX-03), `docs/CHANGELOG.md`, `docs/FEATURES.md`, `app/Services/PendudukExportService.php`, `app/Enums/ExportFormat.php`, `resources/views/exports/penduduk-pdf.blade.php`, `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php` |
@@ -117,3 +117,101 @@ theme).
 ### 6.1.6 Commit
 
 `feat(export): Phase 6.1 — penduduk export`
+
+## 6.2 ZIP Backup (FR-BR-01 / FR-BR-02 / FR-BR-03 / FR-AUD-01)
+
+### 6.2.1 Objective
+
+Provide a `BackupService` that produces a single portable ZIP archive of the
+application data — a database SQL dump, the KK photo archive, and the settings
+singleton — on the private `db_backups` disk, with a timestamped filename and a
+permanent `backup_logs` record. This is the "create a backup" admin workflow
+(US-11, FR-CORE-14); restore is a later 6.x sub-phase. No operator UI ships in
+6.2 — the service API is the contract (same service-layer-first pattern as the
+Phase 5.7 / 5.8 imports).
+
+### 6.2.2 Deliverables
+
+- **Backup service** (`app/Services/BackupService.php`, new — `App\Services\*`
+  per ADR-016):
+  - `create(?User $operator = null): BackupResult` — assembles and persists the
+    archive, then appends the `backup_logs` row.
+  - `filename(?Carbon $now = null): string` — the FR-BR-02 pattern
+    `backup_YYYY-MM-DD_HHMMSS.zip`.
+  - ZIP contents (FR-BR-01): `database.sql` (SQL dump via a `DatabaseDumper`),
+    `settings.json` (the singleton settings row, or `[]` when unseeded), and
+    `kk/*` (every archived KK photo copied from its `storage_disk`; a photo whose
+    stored file is missing is skipped without failing the backup).
+  - **FR-BR-03 no-overwrite**: if an archive with the generated filename already
+    exists the call returns a `duplicate` result without writing anything.
+  - **FR-AUD-01 logging**: appends a `backup_logs` row — `backup_type` MANUAL,
+    `backup_status` SUCCESS (with `backup_size`) or FAILED (with the error
+    message and `backup_size` = 0), `backup_size`, `operator_id`,
+    `started_at` / `finished_at`, and the message. On failure the service logs
+    FAILED and rethrows `BackupException`.
+- **Dump abstraction** (mirrors the Phase 5.4 `OcrEngine` DI pattern):
+  - `app/Services/DatabaseDumper.php` (interface) — `dump(): string`.
+  - `app/Services/MysqldumpDatabaseDumper.php` (new) — runs
+    `mysqldump --single-transaction` via Symfony `Process` using the MySQL
+    connection settings from config (never hard-coded credentials), 120 s
+    timeout; throws `DatabaseDumperException` on a non-zero exit. Bound in
+    `AppServiceProvider` so tests override it with a fake (no real mysqldump
+    in the suite; the host keeps no running MySQL server). Recognised photo
+    bytes are read via `Storage::disk($photo->storage_disk)->get(...)` —
+    photos are bounded (≤5 MB uploads) so in-memory reads are acceptable.
+- **Result DTO** (`app/Services/BackupResult.php`, new — `final readonly`):
+  status `success` / `duplicate` with `filename` and `size`; `isSuccess()`,
+  `isDuplicate()`.
+- **Exceptions** (`app/Exceptions/BackupException.php`,
+  `app/Exceptions/DatabaseDumperException.php`, new) — dedicated domain
+  exceptions, matching the OCR engine style.
+- **Tests** (`tests/Feature/Phase6/BackupServiceTest.php`, 6 tests) — FR-BR-02
+  filename; SQL + settings + photo inclusion in the archive with a SUCCESS log;
+  `kk_photos`/settings packing with a missing-file skip; no-overwrite
+  `duplicate`; FAILED log + thrown exception + no leftover file; operator
+  recorded. Supported by `tests/Support/FakeDatabaseDumper.php` holding a fake
+  dumper so the suite never invokes mysqldump.
+
+### 6.2.3 Not done (explicitly out of scope for 6.2)
+
+- **No restore** (FR-BR-04..06) — that is a later 6.x sub-phase; the backup
+  archive format is defined here so restore can consume it.
+- **No admin UI / Filament page or action** — backup is a service-layer
+  contract in this sub-phase; the operator-facing "Backup" control ships with
+  the UI sub-phase.
+- No scheduled backups (BackupType::SCHEDULED is recorded by schema but only
+  MANUAL is produced here), no retention/rotation, no backup integrity check or
+  dry-run.
+- No migrations / schema changes — the existing `backup_logs` table and the
+  `db_backups` disk (Phase 1.5 storage layout) fully cover persistence.
+- No compiled frontend asset touched — `npm run build` is a courtesy gate.
+
+### 6.2.4 Files changed (6.2 only)
+
+| File | Change |
+| --- | --- |
+| `app/Services/BackupService.php` | New — ZIP backup service (filename, create, archive assembly, logging). |
+| `app/Services/BackupResult.php` | New — readable backup result DTO. |
+| `app/Services/DatabaseDumper.php` | New — dump contract. |
+| `app/Services/MysqldumpDatabaseDumper.php` | New — mysqldump implementation. |
+| `app/Exceptions/BackupException.php` | New — backup domain exception. |
+| `app/Exceptions/DatabaseDumperException.php` | New — dump domain exception. |
+| `app/Providers/AppServiceProvider.php` | Updated — bind `DatabaseDumper` → `MysqldumpDatabaseDumper`. |
+| `tests/Support/FakeDatabaseDumper.php` | New — deterministic dump fake for the suite. |
+| `tests/Feature/Phase6/BackupServiceTest.php` | New — 6 tests. |
+| `docs/PHASE6.md` | Updated — this §6.2 section; Version 1.0.0 → 1.1.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 6.2 entry; Version 1.17.0 → 1.18.0. |
+| `docs/FEATURES.md` | Updated — F-CORE-14 'backup log table' moved to Implemented. |
+
+### 6.2.5 Verification
+
+```text
+php artisan test tests/Feature/Phase6/BackupServiceTest.php   6 passed (31 assertions)
+php artisan test                                               226 passed (1039 assertions), 4 skipped (3 MySQL + 1 Tesseract, env-gated)
+./vendor/bin/pint --test                                       PASS (176 files)
+npm run build                                                  PASS (vite exit 0; no tracked frontend path changed)
+```
+
+### 6.2.6 Commit
+
+`feat(backup): Phase 6.2 — data backup`
