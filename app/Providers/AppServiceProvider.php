@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Services\DatabaseDumper;
+use App\Services\DatabaseImporter;
+use App\Services\MysqlClientDatabaseImporter;
 use App\Services\MysqldumpDatabaseDumper;
 use App\Services\OcrEngine;
 use App\Services\TesseractOcrEngine;
@@ -22,6 +24,10 @@ class AppServiceProvider extends ServiceProvider
         // Database dump for ZIP backups (Phase 6.2). Tests override this binding
         // with a fake so the real mysqldump client is never invoked by the suite.
         $this->app->bind(DatabaseDumper::class, MysqldumpDatabaseDumper::class);
+
+        // Database import for restores (Phase 6.3). Tests override this binding
+        // with a fake so the real mysql client is never invoked by the suite.
+        $this->app->bind(DatabaseImporter::class, MysqlClientDatabaseImporter::class);
     }
 
     /**

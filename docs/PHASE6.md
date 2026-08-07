@@ -3,10 +3,10 @@
 | **Title** | SIPETA Phase 6 — Reporting & Export |
 | **Purpose** | Track Phase 6 (Reporting & Export) sub-phase progress. |
 | **Scope** | 6.1 Reporting & Export foundation: a `PendudukExportService` producing PDF (DomPDF), XLSX (OpenSpout), and CSV (OpenSpout) downloads via three Filament table toolbar actions; exports always respect the active filter criteria (FR-EX-02) and the generated filename always embeds the export date plus a human-readable filter summary (FR-EX-03). |
-| **Version** | 1.1.0 |
+| **Version** | 1.2.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
-| **Related Documents** | `.ai/architecture.md`, `docs/REQUIREMENTS.md` (§ FR-EX-02, FR-EX-03), `docs/CHANGELOG.md`, `docs/FEATURES.md`, `app/Services/PendudukExportService.php`, `app/Enums/ExportFormat.php`, `resources/views/exports/penduduk-pdf.blade.php`, `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php` |
+| **Related Documents** | `.ai/architecture.md`, `docs/REQUIREMENTS.md` (§ FR-EX-02, FR-EX-03), `docs/CHANGELOG.md`, `docs/FEATURES.md`, `app/Services/PendudukExportService.php`, `app/Enums/ExportFormat.php`, `resources/views/exports/penduduk-pdf.blade.php`, `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php`, `app/Services/BackupService.php`, `app/Services/RestoreService.php` |
 
 ---
 
@@ -215,3 +215,103 @@ npm run build                                                  PASS (vite exit 0
 ### 6.2.6 Commit
 
 `feat(backup): Phase 6.2 — data backup`
+
+## 6.3 Restore from ZIP (FR-BR-04 / FR-BR-05 / FR-BR-06)
+
+### 6.3.1 Objective
+
+Provide a `RestoreService` that applies a backup archive produced by the 6.2
+`BackupService` (the FR-BR-01 format — `database.sql` + `settings.json` +
+`kk/*`) to bring the application back to a backed-up state. This is the
+"restore from backup" half of the Backup admin workflow (FR-CORE-15). As with
+the other Phase 6.x sub-phases it is service-layer only: no operator UI ships
+here — the service API is the contract, and the caller/UI sub-phase provides
+the confirmation prompt and the restart notice.
+
+### 6.3.2 Deliverables
+
+- **Restore service** (`app/Services/RestoreService.php`, new — `App\\Services\\*`
+  per ADR-016):
+  - `restore(string $filename, ?User $operator = null, bool $confirmed = false): RestoreResult`
+    — reads and applies the archive on the `db_backups` disk.
+  - **FR-BR-05 explicit confirmation**: when `$confirmed` is `false` the call
+    returns a `confirmation_required` result and applies nothing.
+  - **FR-BR-04 integrity validation BEFORE applying**: the archive must open as
+    a valid ZIP and `database.sql` + `settings.json` must both be present and
+    readable; otherwise the restore throws `RestoreException` with **zero** state
+    changes.
+  - **Apply order**: the SQL dump is applied first via the injected
+    `DatabaseImporter` — a dump failure aborts the restore before any
+    settings/photo change — then the `settings.json` singleton is upserted into
+    the `settings` table (only the `Setting` fillable fields; ignored when the
+    archive carries no settings row, i.e. `[]` / `{}`), then every `kk/*` photo
+    is written back to the `kk_uploads` disk.
+  - **FR-BR-06 restart advice**: a successful restore returns
+    `RestoreResult::restored($filename)` with `restartRequired = true` so the
+    awaiting UI can prompt the operator to restart the application.
+- **Import abstraction** (mirrors the Phase 6.2 `DatabaseDumper` DI pattern):
+  - `app/Services/DatabaseImporter.php` (interface) — `apply(string $sql): void`.
+  - `app/Services/MysqlClientDatabaseImporter.php` (new) — pipes the dump to the
+    `mysql` client over stdin using the MySQL connection settings from config
+    (never hard-coded credentials), 180 s timeout; throws
+    `DatabaseImporterException` on a non-zero exit. Bound in
+    `AppServiceProvider` so tests override it with a fake (no real `mysql`
+    client in the suite; the host keeps no running MySQL server).
+- **Result DTO** (`app/Services/RestoreResult.php`, new — `final readonly`):
+  status `restored` / `confirmation_required` with `filename`,
+  `restartRequired`; `isRestored()`, `isConfirmationRequired()`.
+- **Exceptions** (`app/Exceptions/RestoreException.php`,
+  `app/Exceptions/DatabaseImporterException.php`, new) — dedicated domain
+  exceptions, matching the backup/OCR engine style.
+- **Tests** (`tests/Feature/Phase6/RestoreServiceTest.php`, 7 tests) — FR-BR-05
+  confirmation gate; archive-not-found; corrupt archive; missing mandatory
+  `database.sql`; successful restore applies SQL + settings + photos (asserts
+  `restartRequired`, FR-BR-06); empty `settings.json` skips the settings upsert;
+  importer failure aborts before settings/photos. Supported by
+  `tests/Support/FakeDatabaseImporter.php` holding a fake importer so the suite
+  never invokes the real `mysql` client (it records every applied dump).
+
+### 6.3.3 Not done (explicitly out of scope for 6.3)
+
+- **No operator UI / Filament page or action** — restore is a service-layer
+  contract in this sub-phase (same pattern as 6.2 backup and the 5.7/5.8
+  imports); the operator-facing restore control ships with the later UI
+  sub-phase.
+- **No restore dry-run (FR-MED-05) and no backup integrity check on launch
+  (FR-MED-04)** — both are later Phase 6 work.
+- No migrations / schema changes — restore reuses the existing `backup_logs`
+  table, the `db_backups` and `kk_uploads` disks (Phase 1.5 storage layout).
+  The `backup_logs` table records backup *creation* (FR-AUD-01); restore
+  attempts are surfaced to the operator via the returned `RestoreResult` and
+  logged with `Log::info`, not by misusing the backup-only log schema.
+- No compiled frontend asset touched — `npm run build` is a courtesy gate.
+
+### 6.3.4 Files changed (6.3 only)
+
+| File | Change |
+| --- | --- |
+| `app/Services/RestoreService.php` | New — restore service (confirmation gate, integrity validation, apply order, restart advice). |
+| `app/Services/RestoreResult.php` | New — readable restore result DTO. |
+| `app/Services/DatabaseImporter.php` | New — restore apply contract. |
+| `app/Services/MysqlClientDatabaseImporter.php` | New — `mysql` client implementation. |
+| `app/Exceptions/RestoreException.php` | New — restore domain exception. |
+| `app/Exceptions/DatabaseImporterException.php` | New — import domain exception. |
+| `app/Providers/AppServiceProvider.php` | Updated — bind `DatabaseImporter` → `MysqlClientDatabaseImporter`. |
+| `tests/Support/FakeDatabaseImporter.php` | New — deterministic import fake for the suite. |
+| `tests/Feature/Phase6/RestoreServiceTest.php` | New — 7 tests. |
+| `docs/PHASE6.md` | Updated — this §6.3 section; Version 1.1.0 → 1.2.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 6.3 entry; Version 1.18.0 → 1.19.0. |
+| `docs/FEATURES.md` | Updated — F-CORE-15 'Restore from ZIP' moved to Implemented. |
+
+### 6.3.5 Verification
+
+```text
+php artisan test tests/Feature/Phase6/RestoreServiceTest.php   7 passed
+php artisan test                                               233 passed (1063 assertions), 4 skipped (3 MySQL + 1 Tesseract, env-gated)
+./vendor/bin/pint --test                                     PASS (184 files)
+npm run build                                                PASS (vite exit 0; no tracked frontend path changed)
+```
+
+### 6.3.6 Commit
+
+`feat(restore): Phase 6.3 — data restore`

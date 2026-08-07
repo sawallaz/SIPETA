@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.18.0 |
+| **Version** | 1.19.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `docs/PHASE1.md`, `docs/PHASE2.md`, `docs/PHASE3.md`, `docs/PHASE4.md`, `docs/PHASE5.md`, `docs/PHASE6.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -279,6 +279,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes (Phase 6.2)
 - Service-layer only — no restore (FR-BR-04..06), no Filament backup UI, and no scheduled backups / retention / integrity check in this sub-phase (all later Phase 6 work per `.ai/roadmap.md` §7). No migrations/schema changes — the existing `backup_logs` table and the `db_backups` disk cover persistence.
 - No compiled frontend asset touched. `php artisan test tests/Feature/Phase6/BackupServiceTest.php` 6 passed (31 assertions); `php artisan test` 226 passed / 1039 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (176 files); `npm run build` PASS.
+
+### Added (Phase 6.3 — Restore from ZIP backup — 2026-08-07)
+- **Restore service** (`app/Services/RestoreService.php`, new — `App\\Services\\*` per ADR-016; reads the FR-BR-01 archive format produced by BackupService):
+  - `restore(string $filename, ?User $operator = null, bool $confirmed = false): RestoreResult`.
+  - **FR-BR-05 explicit confirmation**: without `confirmed: true` returns a `confirmation_required` result and applies nothing.
+  - **FR-BR-04 integrity validation BEFORE applying**: the `database.sql` + `settings.json` entries must both be present and readable and the archive must open as a valid ZIP, or `RestoreException` is thrown with zero state changes.
+  - **Apply order**: the SQL dump (`database.sql`) is applied first via the injected `DatabaseImporter`; a dump failure aborts the restore before any settings/photo change; then the `settings.json` singleton is upserted (fields only; ignored when the archive carries `[]`/`{}`); then every `kk/*` photo is written back to the `kk_uploads` disk.
+  - **FR-BR-06 restart advice**: a successful restore returns a `restartRequired: true` result so the caller can prompt the operator to restart.
+- **Import abstraction** (mirrors the Phase 6.2 `DatabaseDumper` DI pattern): `app/Services/DatabaseImporter.php` (interface, `apply(string $sql): void`); `app/Services/MysqlClientDatabaseImporter.php` pipes the dump to the `mysql` client over stdin from the MySQL connection config (never hard-coded credentials, 180 s timeout, throws `DatabaseImporterException` on non-zero exit), bound in `AppServiceProvider` so the suite overrides it with a fake.
+- **Result DTO** (`app/Services/RestoreResult.php`, `final readonly`) — status `restored` / `confirmation_required`, `filename`, `restartRequired`; `isRestored()` / `isConfirmationRequired()`.
+- **Exceptions** (`app/Exceptions/RestoreException.php`, `app/Exceptions/DatabaseImporterException.php`, new).
+- **Phase 6.3 tests** (`tests/Feature/Phase6/RestoreServiceTest.php`, 7 tests, via `tests/Support/FakeDatabaseImporter.php`): confirmation required; archive-not-found; corrupt archive; missing mandatory `database.sql`; successful restore applies SQL + settings + photos (with `restartRequired`); empty `settings.json` skips the settings upsert; importer failure applies nothing else.
+
+### Notes (Phase 6.3)
+- Restore is service-layer only — no Filament backup UI and no restore dry-run / integrity-check-on-launch (FR-MED-04/05) in this sub-phase (both are later Phase 6 work per `.ai/roadmap.md` §7). No migrations/schema changes — restore reuses the existing `backup_logs` table, `db_backups` and `kk_uploads` disks.
+- No compiled frontend asset touched. `php artisan test tests/Feature/Phase6` 27 passed (80 assertions); `php artisan test` 233 passed / 1063 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (184 files); `npm run build` PASS.
 
 ### Added (Phase 5.7 — Import Kartu Keluarga — 2026-08-07)
 - **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*` per ADR-016):

@@ -36,7 +36,7 @@ Feature status legend:
 | F-CORE-12 | Export Excel | Implemented | Phase 6 | `.ai/architecture.md` |
 | F-CORE-13 | Export CSV | Implemented | Phase 6 | `.ai/architecture.md` |
 | F-CORE-14 | Backup ZIP | Implemented | Phase 6 | `.ai/architecture.md` §11 |
-| F-CORE-15 | Restore from ZIP | Planned | Phase 6 | `.ai/workflow.md` |
+| F-CORE-15 | Restore from ZIP | Implemented | Phase 6 | `.ai/workflow.md` |
 | F-CORE-16 | Settings (kelurahan identity, logo) | Planned | Phase 6 | `.ai/database.md` |
 | F-CORE-17 | Tauri desktop shell | Planned | Phase 7 | `.ai/architecture.md` |
 | F-CORE-18 | Windows installer (.exe) | Planned | Phase 7 | `.ai/deployment.md` |
