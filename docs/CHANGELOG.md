@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.19.0 |
+| **Version** | 1.20.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `docs/PHASE1.md`, `docs/PHASE2.md`, `docs/PHASE3.md`, `docs/PHASE4.md`, `docs/PHASE5.md`, `docs/PHASE6.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -295,6 +295,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes (Phase 6.3)
 - Restore is service-layer only — no Filament backup UI and no restore dry-run / integrity-check-on-launch (FR-MED-04/05) in this sub-phase (both are later Phase 6 work per `.ai/roadmap.md` §7). No migrations/schema changes — restore reuses the existing `backup_logs` table, `db_backups` and `kk_uploads` disks.
 - No compiled frontend asset touched. `php artisan test tests/Feature/Phase6` 27 passed (80 assertions); `php artisan test` 233 passed / 1063 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (184 files); `npm run build` PASS.
+
+### Added (Phase 6.4 — Backup & Restore page — 2026-08-07)
+- **Backup & Restore page** (`app/Filament/Pages/Backup.php`, new — the "Backup" menu of the five-menu navigation per `.ai/workflow.md` §1; auto-discovered by `AdminPanelProvider::discoverPages`):
+  - **§14 create**: header action "Buat Backup" → `BackupService::create(auth()->user())`; success / duplicate notifications carrying the archive filename.
+  - **Archive list**: every ZIP on the `db_backups` disk, newest first, showing filename, size and modified time; each row has a "Pulihkan" button.
+  - **§15 two-step restore**: choose the archive → explicit "Konfirmasi Pemulihan" step → `RestoreService::restore($filename, $operator, confirmed: true)`. FR-BR-04 integrity failures surface as "Pemulihan gagal" notifications (nothing applied); the confirmation step satisfies FR-BR-05; a successful restore sends the "Pemulihan selesai" restart-advice notification (FR-BR-06); non-ZIP selections are rejected.
+- **Page view** (`resources/views/filament/pages/backup.blade.php`, new) — `x-filament-panels::page` with three `x-filament::section` blocks; Livewire `wire:click` methods, matching the existing ReviewOcrJob custom-page pattern (no business logic in the view).
+- **Phase 6.4 tests** (`tests/Feature/Phase6/BackupPageTest.php`, 5 tests): page lists stored archives; create-backup action builds an FR-BR-02-named archive; restore requires confirmation then applies SQL + settings + photos (with restart-advice notification); corrupt archive surfaces danger without applying anything; non-ZIP selection rejected. The container binds `FakeDatabaseDumper` / `FakeDatabaseImporter` so no real mysqldump / mysql client runs in the suite.
+
+### Notes (Phase 6.4)
+- No new feature flags — the page wires the existing 6.2 `BackupService` and 6.3 `RestoreService`; those services are untouched and no schema changes were made (the `backup_logs` table plus the `db_backups` and `kk_uploads` disks are reused).
+- Restore stays two-step (choose → confirm) exactly per workflow §15; the FR-BR-05 confirmation lives in the page, not the service.
+- Still out of scope: the "Pengaturan" (Settings) page (F-CORE-16, later Phase 6 work), scheduled backups, retention, FR-MED-04 launch integrity check, and FR-MED-05 restore dry-run.
+- `npm run build` regenerated only gitignored `public/build` artifacts — no tracked frontend file changed. `php artisan test tests/Feature/Phase6/BackupPageTest.php` 5 passed (30 assertions); `php artisan test` 238 passed / 1093 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (186 files); `npm run build` PASS.
 
 ### Added (Phase 5.7 — Import Kartu Keluarga — 2026-08-07)
 - **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*` per ADR-016):

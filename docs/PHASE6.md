@@ -3,10 +3,10 @@
 | **Title** | SIPETA Phase 6 — Reporting & Export |
 | **Purpose** | Track Phase 6 (Reporting & Export) sub-phase progress. |
 | **Scope** | 6.1 Reporting & Export foundation: a `PendudukExportService` producing PDF (DomPDF), XLSX (OpenSpout), and CSV (OpenSpout) downloads via three Filament table toolbar actions; exports always respect the active filter criteria (FR-EX-02) and the generated filename always embeds the export date plus a human-readable filter summary (FR-EX-03). |
-| **Version** | 1.2.0 |
+| **Version** | 1.3.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
-| **Related Documents** | `.ai/architecture.md`, `docs/REQUIREMENTS.md` (§ FR-EX-02, FR-EX-03), `docs/CHANGELOG.md`, `docs/FEATURES.md`, `app/Services/PendudukExportService.php`, `app/Enums/ExportFormat.php`, `resources/views/exports/penduduk-pdf.blade.php`, `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php`, `app/Services/BackupService.php`, `app/Services/RestoreService.php` |
+| **Related Documents** | `.ai/architecture.md`, `.ai/workflow.md` (§14, §15), `docs/REQUIREMENTS.md` (§ FR-EX-02, FR-EX-03, FR-BR-04..06), `docs/CHANGELOG.md`, `docs/FEATURES.md`, `app/Services/PendudukExportService.php`, `app/Enums/ExportFormat.php`, `resources/views/exports/penduduk-pdf.blade.php`, `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php`, `app/Services/BackupService.php`, `app/Services/RestoreService.php`, `app/Filament/Pages/Backup.php` |
 
 ---
 
@@ -315,3 +315,88 @@ npm run build                                                PASS (vite exit 0; 
 ### 6.3.6 Commit
 
 `feat(restore): Phase 6.3 — data restore`
+
+## 6.4 Backup & Restore page (operator-facing)
+
+### 6.4.1 Objective
+
+Provide the operator-facing "Backup" menu page (the five-menu navigation,
+`.ai/workflow.md` §1) that wires the 6.2 `BackupService` and the 6.3
+`RestoreService` onto a single page, implementing workflow §14 (create) and
+§15 (restore). This is the deferred "later UI sub-phase" explicitly promised
+by the 6.2 and 6.3 scope notes. The page reuses the built services unchanged —
+it is the thin operator surface on top, keeping all domain logic in the
+service layer.
+
+### 6.4.2 Deliverables
+
+- **Backup & Restore page** (`app/Filament/Pages/Backup.php`, new — a
+  `Filament\\Pages\\Page` auto-discovered by `AdminPanelProvider`):
+  - Navigation: menu label "Backup", `heroicon-o-archive-box` icon, page
+    title "Backup & Restore".
+  - **§14 create**: a `Filament\\Actions\\Action` header button "Buat Backup"
+    that calls `app(BackupService::class)->create(auth()->user())` and reports
+    success or (FR-BR-03) duplicate via a notification carrying the archive
+    filename.
+  - **Archive list**: `backups()` returns every ZIP on the `db_backups` disk,
+    newest first (filename, size, `lastModified`), shown in the view; each row
+    exposes a "Pulihkan" button.
+  - **§15 two-step restore**: selecting "Pulihkan" sets `restoreCandidate`
+    (the confirmation step — this is where FR-BR-05 explicit confirmation is
+    satisfied, exactly once, in the page); "Konfirmasi" then calls
+    `app(RestoreService::class)->restore($filename, auth()->user(), true)`.
+    - FR-BR-04 integrity failures throw `RestoreException`, caught and shown
+      as a "Pemulihan gagal" notification (nothing applied; the candidate stays
+      so the operator can retry or cancel).
+    - FR-BR-06 a successful restore sends "Pemulihan selesai" with restart
+      advice.
+    - Non-ZIP selections are rejected up front.
+- **Page view** (`resources/views/filament/pages/backup.blade.php`, new) —
+  `x-filament-panels::page` with sections for the create hint, the archive
+  list, and the confirmation block (rendered only while
+  `$restoreCandidate !== null`). Interactions are Livewire `wire:click`
+  methods on the page class — the same custom-page pattern used by the
+  Phase 5.6 ReviewOcrJob page (no business logic in the view).
+- **Tests** (`tests/Feature/Phase6/BackupPageTest.php`, 5 tests) — page lists
+  stored archives; create-backup action produces an FR-BR-02-named archive;
+  restore requires confirmation then applies SQL + settings + photos with the
+  restart-advice notification; a corrupt archive surfaces danger without
+  applying anything; non-ZIP selection is rejected. The container binds
+  `FakeDatabaseDumper` / `FakeDatabaseImporter`, so no real mysqldump / mysql
+  client runs in the suite.
+
+### 6.4.3 Not done (explicitly out of scope for 6.4)
+
+- **No "Pengaturan" (Settings) page** — F-CORE-16 (kelurahan identity, logo,
+  backup path) is a separate later Phase 6 sub-phase; workflow §16.
+- **No scheduled backups, retention/rotation, FR-MED-04 launch integrity
+  check, or FR-MED-05 restore dry-run** — all later Phase 6 work.
+- No changes to `BackupService` / `RestoreService` (untouched), and no
+  migrations/schema changes — the existing `backup_logs` table, `db_backups`
+  and `kk_uploads` disks are reused.
+- `npm run build` regenerated only gitignored `public/build` artifacts — no
+  tracked frontend file changed.
+
+### 6.4.4 Files changed (6.4 only)
+
+| File | Change |
+| --- | --- |
+| `app/Filament/Pages/Backup.php` | New — "Backup" menu page (create + archive list + two-step restore). |
+| `resources/views/filament/pages/backup.blade.php` | New — page view (sections + Livewire wire:click wiring). |
+| `tests/Feature/Phase6/BackupPageTest.php` | New — 5 tests (list, create, restore-confirm-apply, corrupt, non-ZIP). |
+| `docs/PHASE6.md` | Updated — this §6.4 section; Version 1.2.0 → 1.3.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 6.4 entry; Version 1.19.0 → 1.20.0. |
+| `docs/FEATURES.md` | Updated — F-HIGH-22 'Backup & Restore operator page' added as Implemented. |
+
+### 6.4.5 Verification
+
+```text
+php artisan test tests/Feature/Phase6/BackupPageTest.php   5 passed (30 assertions)
+php artisan test                                           238 passed (1093 assertions), 4 skipped (3 MySQL + 1 Tesseract, env-gated)
+./vendor/bin/pint --test                                    PASS (186 files)
+npm run build                                               PASS (vite exit 0; no tracked frontend path changed)
+```
+
+### 6.4.6 Commit
+
+`feat(backup): Phase 6.4 — backup & restore page`

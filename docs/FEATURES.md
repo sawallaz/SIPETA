@@ -66,6 +66,7 @@ Feature status legend:
 | F-HIGH-19 | OCR import Penduduk (persist approved review members as Penduduk + active KkAnggota membership under the imported KK, duplicate NIK detection, transactional write, OCR job marked penduduk-imported) | Implemented | Phase 5 |
 | F-HIGH-20 | OCR workflow finalization (final COMPLETED status transition, completion timestamp, import summary + final processing metrics, transient-artifact cleanup, audit logging, centralized success/failure completion handler, idempotent completion) | Implemented | Phase 5 |
 | F-HIGH-21 | Reporting & export foundation (PDF/XLSX/CSV export service, Filament table toolbar actions, exports respect active filters, date + filter-summary filename) | Implemented | Phase 6 |
+| F-HIGH-22 | Backup & Restore operator page (Backup menu — "Buat Backup" action, backup archive list, two-step restore with explicit confirmation and restart advice) | Implemented | Phase 6 |
 
 ## 3. Medium Priority
 
