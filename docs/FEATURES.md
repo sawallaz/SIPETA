@@ -3,7 +3,7 @@
 | **Title** | SIPETA Features Catalog |
 | **Purpose** | Categorize and track every feature by priority and implementation status. |
 | **Scope** | KKN-deliverable features plus future backlog references. |
-| **Version** | 1.6.0 |
+| **Version** | 1.7.0 |
 | **Status** | Approved |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/BACKLOG.md`, `.ai/roadmap.md`, `.ai/architecture.md`, `.ai/ocr.md` |
@@ -76,7 +76,7 @@ Feature status legend:
 | F-MED-01 | Dashboard cache (5-min invalidation) | Planned | Phase 3 |
 | F-MED-02 | Application log rotation | Planned | Phase 6 |
 | F-MED-03 | OCR performance metrics (mean confidence, latency) | Planned | Phase 4 |
-| F-MED-04 | Backup integrity check on launch | Planned | Phase 6 |
+| F-MED-04 | Backup integrity check on launch | Implemented | Phase 6 |
 | F-MED-05 | Restore dry-run option | Planned | Phase 6 |
 | F-MED-06 | Keyboard shortcuts for common actions | Planned | Phase 3 |
 | F-MED-07 | KK photo replacement (when a clearer photo is obtained) | Planned | Phase 3 |

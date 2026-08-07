@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.21.0 |
+| **Version** | 1.22.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `docs/PHASE1.md`, `docs/PHASE2.md`, `docs/PHASE3.md`, `docs/PHASE4.md`, `docs/PHASE5.md`, `docs/PHASE6.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -309,6 +309,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restore stays two-step (choose → confirm) exactly per workflow §15; the FR-BR-05 confirmation lives in the page, not the service.
 - Still out of scope: the "Pengaturan" (Settings) page (F-CORE-16, later Phase 6 work), scheduled backups, retention, FR-MED-04 launch integrity check, and FR-MED-05 restore dry-run.
 - `npm run build` regenerated only gitignored `public/build` artifacts — no tracked frontend file changed. `php artisan test tests/Feature/Phase6/BackupPageTest.php` 5 passed (30 assertions); `php artisan test` 238 passed / 1093 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (186 files); `npm run build` PASS.
+
+### Added (Phase 6.6 — Backup integrity check — FR-MED-04 — 2026-08-07)
+- **Integrity check service** (`app/Services/BackupIntegrityService.php`, new — `App\Services\*` per ADR-016):
+  - `checkAll(): array` — inspects every `.zip` archive on the `db_backups` disk and returns one `BackupIntegrityResult` per archive; a non-`.zip` file is ignored (it is not a backup).
+  - `check(string $filename): BackupIntegrityResult` — a healthy archive must open as a valid ZIP **and** expose both required entries `database.sql` and `settings.json`; an unopenable ZIP, or a missing / unreadable required entry, yields a `corrupt` result carrying the human-readable issues.
+  - Strictly **read-only**: it never extracts, opens into the database, or mutates an archive — it is a health probe, not a restore (NFR-REL-01 — data integrity is the highest priority). Mirrors the FR-BR-04 validation `RestoreService` performs before any apply, but runs independently at launch.
+- **Result DTO** (`app/Services/BackupIntegrityResult.php`, `final readonly`) — status `ok`/`corrupt`, `filename`, `issues[]`; `isOk()` / `isCorrupt()`.
+- **Console command** (`app/Console/Commands/BackupIntegrityCheck.php`, new — `backup:integrity-check`) — the "on launch" entry point for the desktop-delivered app: prints one row per archive (`SEHAT` / `RUSAK` + note) plus a summary, and exits **non-zero** when any archive is corrupt so a launch script / scheduler can react.
+- **Phase 6.6 tests** (`tests/Feature/Phase6/BackupIntegrityTest.php`, 12 tests): no archives → empty; healthy archive → ok; non-ZIP bytes → corrupt; missing `database.sql` / missing `settings.json` / missing both (two issues each path); checkAll ignores non-ZIP files; checkAll mixes healthy + corrupt; missing archive throws `RuntimeException`; command exits 0 with no archives, exits 0 with a healthy archive, exits 1 when any archive is corrupt.
+
+### Notes (Phase 6.6)
+- Still out of scope: scheduled backups, retention/rotation, and the FR-MED-05 restore dry-run (remaining later Phase 6 work). FR-MED-04 launch integrity check is delivered by this sub-phase.
+- No migrations, no schema change, and no modification to the Phase 6.2 `BackupService` or Phase 6.3 `RestoreService` — the new service validates the same `db_backups` disk those phases already own.
+- `php artisan test` 256 passed (1163 assertions) / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (193 files); `npm run build` PASS (regenerated only gitignored `public/build` artifacts).
 
 ### Added (Phase 6.5 — Pengaturan — Settings page — 2026-08-07)
 - **Settings service** (`app/Services/SettingsService.php`, new — `App\Services\*` per ADR-016):

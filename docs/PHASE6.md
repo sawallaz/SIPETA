@@ -3,7 +3,7 @@
 | **Title** | SIPETA Phase 6 — Reporting & Export |
 | **Purpose** | Track Phase 6 (Reporting & Export) sub-phase progress. |
 | **Scope** | 6.1 Reporting & Export foundation: a `PendudukExportService` producing PDF (DomPDF), XLSX (OpenSpout), and CSV (OpenSpout) downloads via three Filament table toolbar actions; exports always respect the active filter criteria (FR-EX-02) and the generated filename always embeds the export date plus a human-readable filter summary (FR-EX-03). |
-| **Version** | 1.4.0 |
+| **Version** | 1.5.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `.ai/architecture.md`, `.ai/workflow.md` (§14, §15), `docs/REQUIREMENTS.md` (§ FR-EX-02, FR-EX-03, FR-BR-04..06), `docs/CHANGELOG.md`, `docs/FEATURES.md`, `app/Services/PendudukExportService.php`, `app/Enums/ExportFormat.php`, `resources/views/exports/penduduk-pdf.blade.php`, `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php`, `app/Services/BackupService.php`, `app/Services/RestoreService.php`, `app/Filament/Pages/Backup.php` |
@@ -494,3 +494,81 @@ npm run build                                               PASS (vite exit 0; n
 ### 6.5.6 Commit
 
 `feat(settings): Phase 6.5 — pengaturan page`
+
+## 6.6 Backup integrity check on launch (FR-MED-04 / F-MED-04)
+
+### 6.6.1 Objective
+
+Deferred in §6.2.3, §6.3.3, §6.4.3 and §6.5.3 as "later Phase 6 work", the
+**backup integrity check on launch** (FR-MED-04, feature `F-MED-04`) verifies
+that every backup archive stored on the `db_backups` disk is usable for a
+restore — a valid ZIP exposing both required entries (`database.sql` +
+`settings.json`), readable. It is a read-only health probe, independent of the
+restore flow, so a corrupted or incomplete backup is surfaced BEFORE the
+operator relies on it. This directly serves **NFR-REL-01** ("data integrity is
+the highest priority. No silent data loss."): a backup that can never restore
+is a silent data-loss risk the moment it is needed.
+
+### 6.6.2 Deliverables
+
+- `app/Services/BackupIntegrityService.php` — new service (`App\Services\*`
+  per ADR-016):
+  - `checkAll(): array` — inspects every `.zip` on the `db_backups` disk and
+    returns one `BackupIntegrityResult` per archive; non-`.zip` files are
+    ignored (they are not backups).
+  - `check(string $filename): BackupIntegrityResult` — healthy means the
+    archive opens via `ZipArchive::open()` AND `database.sql` and
+    `settings.json` are both present (`locateName()`) and readable
+    (`getFromName() !== false`). An unopenable ZIP, or any missing / unreadable
+    required entry, yields `corrupt` with the human-readable issues.
+  - Strictly read-only — no extraction, no DB access, no mutation of the
+    archive. This mirrors the FR-BR-04 validation `RestoreService` performs
+    before applying, but runs independently at launch.
+- `app/Services/BackupIntegrityResult.php` — `final readonly` DTO
+  (`ok`/`corrupt`, `filename`, `issues[]`, `isOk()` / `isCorrupt()`).
+- `app/Console/Commands/BackupIntegrityCheck.php` — `backup:integrity-check`
+  artisan command, the "on launch" entry point for the desktop-delivered
+  application: prints one row per archive (`SEHAT` / `RUSAK` + note) plus a
+  summary line, and exits non-zero when any archive is corrupt so a launch
+  script / scheduler can react.
+- `tests/Feature/Phase6/BackupIntegrityTest.php` — 12 tests (see §6.6.5).
+
+### 6.6.3 Not done (explicitly out of scope for 6.6)
+
+- **No scheduled backups, no retention/rotation** — `BackupType::SCHEDULED`
+  remains schema-recorded but unused; backup automation stays later Phase 6
+  work.
+- **No restore dry-run (FR-MED-05)** — still later Phase 6 work.
+- **No change to `BackupService` / `RestoreService`** — the integrity check is
+  a separate read-only service over the same `db_backups` disk; neither
+  completed phase is modified.
+- **No migrations / schema changes** — nothing new is persisted; the check is
+  in-memory only.
+- **No operator page change** — the check is exposed as the
+  `backup:integrity-check` command (the launch hook); the Phase 6.4 Backup
+  page is untouched.
+
+### 6.6.4 Files changed (6.6 only)
+
+| File | Change |
+| --- | --- |
+| `app/Services/BackupIntegrityService.php` | New — read-only integrity check over the `db_backups` disk (FR-MED-04). |
+| `app/Services/BackupIntegrityResult.php` | New — `final readonly` result DTO (`ok`/`corrupt` + issues). |
+| `app/Console/Commands/BackupIntegrityCheck.php` | New — `backup:integrity-check` command (launch hook; non-zero exit on corrupt). |
+| `tests/Feature/Phase6/BackupIntegrityTest.php` | New — 12 tests (service + command). |
+| `docs/PHASE6.md` | Updated — this §6.6 section; Version 1.4.0 → 1.5.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 6.6 entry; Version 1.21.0 → 1.22.0. |
+| `docs/FEATURES.md` | Updated — F-MED-04 'Backup integrity check on launch' → Implemented; Version 1.6.0 → 1.7.0. |
+
+### 6.6.5 Verification
+
+```text
+php artisan test tests/Feature/Phase6/BackupIntegrityTest.php   12 passed (29 assertions)
+php artisan test                                                256 passed (1163 assertions), 4 skipped (env-gated)
+./vendor/bin/pint --test                                        PASS (193 files)
+npm run build                                                   PASS (vite exit 0; only gitignored public/build regenerated)
+```
+
+### 6.6.6 Commit
+
+`feat(backup): Phase 6.6 — integrity check on launch`
