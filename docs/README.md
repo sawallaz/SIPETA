@@ -40,21 +40,22 @@ If you are new to the project, read in this order:
 2. `docs/REQUIREMENTS.md` — what SIPETA must do.
 3. `docs/FEATURES.md` — what is in scope.
 4. `docs/USER_GUIDE.md` — how the operator uses it.
-5. `docs/INSTALLATION.md` — how to install the development environment.
-6. `.ai/hermes.md` — AI agent constitution.
-7. `.ai/architecture.md` — runtime architecture.
-8. `.ai/database.md` — schema.
-9. `.ai/ocr.md` — OCR pipeline.
-10. `.ai/coding.md` — code style.
-11. `.ai/testing.md` — testing strategy.
-12. `.ai/deployment.md` — installer and deployment.
-13. `.ai/roadmap.md` — schedule.
-14. `.ai/decisions.md` — ADRs.
-15. `.ai/project-rules.md` — business rules.
-16. `.ai/workflow.md` — operator workflows.
-17. `.ai/ui-ux.md` — UI/UX guidelines.
-18. `docs/CHANGELOG.md` — what's changed.
-19. `docs/BACKLOG.md` — what's out of scope (for now).
+5. `docs/PRODUCT_DECISIONS.md` — product owner decisions, UI/UX & workflow contract for post-Phase-6 polish.
+6. `docs/INSTALLATION.md` — how to install the development environment.
+7. `.ai/hermes.md` — AI agent constitution.
+8. `.ai/architecture.md` — runtime architecture.
+9. `.ai/database.md` — schema.
+10. `.ai/ocr.md` — OCR pipeline.
+11. `.ai/coding.md` — code style.
+12. `.ai/testing.md` — testing strategy.
+13. `.ai/deployment.md` — installer and deployment.
+14. `.ai/roadmap.md` — schedule.
+15. `.ai/decisions.md` — ADRs.
+16. `.ai/project-rules.md` — business rules.
+17. `.ai/workflow.md` — operator workflows.
+18. `.ai/ui-ux.md` — UI/UX guidelines.
+19. `docs/CHANGELOG.md` — what's changed.
+20. `docs/BACKLOG.md` — what's out of scope (for now).
 
 ## Audience Map
 
@@ -92,6 +93,7 @@ SIPETA/
 │   ├── REQUIREMENTS.md
 │   ├── FEATURES.md
 │   ├── USER_GUIDE.md
+│   ├── PRODUCT_DECISIONS.md
 │   ├── CHANGELOG.md
 │   ├── BACKLOG.md
 │   ├── INSTALLATION.md
