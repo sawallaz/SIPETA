@@ -7,6 +7,8 @@ use App\Filament\Resources\KartuKeluargas\Pages\CreateKartuKeluarga;
 use App\Filament\Resources\KartuKeluargas\Pages\EditKartuKeluarga;
 use App\Filament\Resources\KartuKeluargas\Pages\ListKartuKeluargas;
 use App\Models\KartuKeluarga;
+use App\Models\KkAnggota;
+use App\Models\Penduduk;
 use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
 
@@ -155,6 +157,26 @@ class KartuKeluargaResourceTest extends Phase3ResourceTestCase
         Livewire::test(ListKartuKeluargas::class)
             ->sortTable('kk_number')
             ->assertCanSeeTableRecords([$first, $second], inOrder: true);
+    }
+
+    public function test_table_can_sort_by_jumlah_anggota_count(): void
+    {
+        // Regression: the count column must sort by Laravel's real withCount alias
+        // (kk_anggotas_count), never the invalid camelCase alias that threw
+        // "Unknown column 'kkAnggotas_count'". (Phase UI-1)
+        $empty = KartuKeluarga::factory()->create(['kk_number' => '1111111111111111']);
+        $full = KartuKeluarga::factory()->create(['kk_number' => '2222222222222222']);
+
+        $resident1 = Penduduk::factory()->create(['kk_id' => $full->id]);
+        $resident2 = Penduduk::factory()->create(['kk_id' => $full->id]);
+        KkAnggota::factory()->create(['kk_id' => $full->id, 'penduduk_id' => $resident1->id]);
+        KkAnggota::factory()->create(['kk_id' => $full->id, 'penduduk_id' => $resident2->id]);
+
+        // Ascending sort: the KK with 0 anggota (empty) precedes the KK with 2.
+        Livewire::test(ListKartuKeluargas::class)
+            ->sortTable('kk_anggotas_count')
+            ->assertCanSeeTableRecords([$empty, $full], inOrder: true)
+            ->assertHasNoErrors();
     }
 
     public function test_can_delete_via_bulk_action(): void

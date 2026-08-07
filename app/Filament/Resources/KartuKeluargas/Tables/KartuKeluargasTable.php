@@ -35,7 +35,7 @@ class KartuKeluargasTable
                     ->sortable()
                     ->placeholder('-')
                     ->toggleable(isToggledHiddenByDefault: false),
-                TextColumn::make('kkAnggotas_count')
+                TextColumn::make('kk_anggotas_count')
                     ->label('Jumlah Anggota')
                     ->counts('kkAnggotas')
                     ->sortable()
