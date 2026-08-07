@@ -2,9 +2,12 @@
 
 namespace App\Filament\Resources\Penduduks\Tables;
 
+use App\Enums\ExportFormat;
 use App\Enums\Gender;
 use App\Enums\ResidentStatus;
 use App\Filament\Resources\KartuKeluargas\KartuKeluargaResource;
+use App\Services\PendudukExportService;
+use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
@@ -12,6 +15,7 @@ use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 
 class PenduduksTable
@@ -130,6 +134,27 @@ class PenduduksTable
                         ->modalDescription('Data yang dihapus tidak dapat dikembalikan. Lanjutkan?')
                         ->successNotificationTitle('Data penduduk terpilih berhasil dihapus'),
                 ]),
+                Action::make('export_csv')
+                    ->label('CSV')
+                    ->icon(Heroicon::OutlinedArrowDownTray)
+                    ->color('gray')
+                    ->requiresConfirmation(false)
+                    ->action(fn (HasTable $livewire) => app(PendudukExportService::class)
+                        ->exportQuery($livewire->getFilteredTableQuery(), ExportFormat::CSV)),
+                Action::make('export_xlsx')
+                    ->label('Excel')
+                    ->icon(Heroicon::OutlinedArrowDownTray)
+                    ->color('gray')
+                    ->requiresConfirmation(false)
+                    ->action(fn (HasTable $livewire) => app(PendudukExportService::class)
+                        ->exportQuery($livewire->getFilteredTableQuery(), ExportFormat::XLSX)),
+                Action::make('export_pdf')
+                    ->label('PDF')
+                    ->icon(Heroicon::OutlinedArrowDownTray)
+                    ->color('gray')
+                    ->requiresConfirmation(false)
+                    ->action(fn (HasTable $livewire) => app(PendudukExportService::class)
+                        ->exportQuery($livewire->getFilteredTableQuery(), ExportFormat::PDF)),
             ])
             ->defaultSort('full_name')
             ->recordTitleAttribute('full_name')

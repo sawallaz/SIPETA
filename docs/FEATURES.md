@@ -3,7 +3,7 @@
 | **Title** | SIPETA Features Catalog |
 | **Purpose** | Categorize and track every feature by priority and implementation status. |
 | **Scope** | KKN-deliverable features plus future backlog references. |
-| **Version** | 1.3.0 |
+| **Version** | 1.4.0 |
 | **Status** | Approved |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/BACKLOG.md`, `.ai/roadmap.md`, `.ai/architecture.md`, `.ai/ocr.md` |
@@ -32,9 +32,9 @@ Feature status legend:
 | F-CORE-08 | KK photo upload and display | Planned | Phase 3 | `.ai/database.md` |
 | F-CORE-09 | OCR from KK photo | Planned | Phase 4 | `.ai/ocr.md` |
 | F-CORE-10 | OCR review and manual correction | Planned | Phase 4 | `.ai/ocr.md` |
-| F-CORE-11 | Export PDF | Planned | Phase 5 | `.ai/architecture.md` |
-| F-CORE-12 | Export Excel | Planned | Phase 5 | `.ai/architecture.md` |
-| F-CORE-13 | Export CSV | Planned | Phase 5 | `.ai/architecture.md` |
+| F-CORE-11 | Export PDF | Implemented | Phase 6 | `.ai/architecture.md` |
+| F-CORE-12 | Export Excel | Implemented | Phase 6 | `.ai/architecture.md` |
+| F-CORE-13 | Export CSV | Implemented | Phase 6 | `.ai/architecture.md` |
 | F-CORE-14 | Backup ZIP | Planned | Phase 6 | `.ai/architecture.md` §11 |
 | F-CORE-15 | Restore from ZIP | Planned | Phase 6 | `.ai/workflow.md` |
 | F-CORE-16 | Settings (kelurahan identity, logo) | Planned | Phase 6 | `.ai/database.md` |
@@ -50,7 +50,7 @@ Feature status legend:
 | F-HIGH-03 | OCR confidence highlighting | Planned | Phase 4 |
 | F-HIGH-04 | OCR duplicate detection (image hash + KK number) | Planned | Phase 4 |
 | F-HIGH-05 | Reset Filter button | Planned | Phase 3 |
-| F-HIGH-06 | Export filename includes filter summary | Planned | Phase 5 |
+| F-HIGH-06 | Export filename includes filter summary | Implemented | Phase 6 |
 | F-HIGH-07 | KK photo viewer with zoom | Planned | Phase 3 |
 | F-HIGH-08 | KK photo download | Planned | Phase 3 |
 | F-HIGH-09 | Dashboard recent activity (5 newest KK & Penduduk) | Implemented | Phase 4 |
@@ -65,6 +65,7 @@ Feature status legend:
 | F-HIGH-18 | OCR import Kartu Keluarga (persist validated review result, duplicate KK-number detection, transactional write, OCR job marked saved) | Implemented | Phase 5 |
 | F-HIGH-19 | OCR import Penduduk (persist approved review members as Penduduk + active KkAnggota membership under the imported KK, duplicate NIK detection, transactional write, OCR job marked penduduk-imported) | Implemented | Phase 5 |
 | F-HIGH-20 | OCR workflow finalization (final COMPLETED status transition, completion timestamp, import summary + final processing metrics, transient-artifact cleanup, audit logging, centralized success/failure completion handler, idempotent completion) | Implemented | Phase 5 |
+| F-HIGH-21 | Reporting & export foundation (PDF/XLSX/CSV export service, Filament table toolbar actions, exports respect active filters, date + filter-summary filename) | Implemented | Phase 6 |
 
 ## 3. Medium Priority
 

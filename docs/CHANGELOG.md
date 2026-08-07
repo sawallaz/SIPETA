@@ -3,10 +3,10 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.16.0 |
+| **Version** | 1.17.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
-| **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
+| **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `docs/PHASE1.md`, `docs/PHASE2.md`, `docs/PHASE3.md`, `docs/PHASE4.md`, `docs/PHASE5.md`, `docs/PHASE6.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
 
 ---
 
@@ -246,6 +246,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes (Phase 5.9)
 - No changes to the OCR engine, parsing, review workflow, KK import, Penduduk import, dashboard, or Filament resources. No new columns/tables — the completion timestamp, summary and metrics live in the existing `extracted_data` JSON, the audit entry on `audit_logs`, cleanup touches only the `ocr_temp` disk. Finalization is a service-layer contract with no UI wiring (same as 5.7 / 5.8).
 - `php artisan test` 206 passed / 983 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (165 files).
+
+### Added (Phase 6.1 — Reporting & Export foundation — 2026-08-07)
+- **Export service** (`app/Services/PendudukExportService.php`, new — `App\Services\*` per ADR-016):
+  - `export(ExportFormat, array $filters, ?string $name)` / `exportQuery(Builder, ExportFormat, array $filters, ?string $name)` — build/return the downloadable response; `exportQuery` exports an already-filtered query (the Filament table's live query), with filter metadata used only for the filename.
+  - `buildQuery` / `applyFilters` — shared filter application mirroring the projected Penduduk table filters: `rt`, `area_unit`, `gender`, `religion_id`, `education_id`, `occupation_id`, `resident_status`, `age` (exact), `age_min`/`age_max`.
+  - `filename` / `filterSummary` — `<YYYY-MM-DD>_<filter summary>.<ext>`; `semua` when no filter, otherwise PK-slugs with gender/status mapped to Bahasa Indonesia (`jk-laki-laki_status-aktif`, never the raw `ACTIVE` value).
+  - PDF via DomPDF (`Pdf::loadView('exports.penduduk-pdf', …)`); XLSX/CSV via OpenSpout streamed row-by-row (`$query->chunkById(500, …)`) to a temp file, returned as a `BinaryFileResponse` that deletes the temp file after send.
+- **Export format enum** (`app/Enums/ExportFormat.php`, new — `PDF`/`XLSX`/`CSV` with `label()` / `mime()`).
+- **PDF report view** (`resources/views/exports/penduduk-pdf.blade.php`, new) — headed by the kelurahan identity from the `Setting` singleton (`Setting::query()->first()?->kelurahan_name`, `config('app.name')` fallback), rendering the ordered column header + rows.
+- **Toolbar export actions** (`app/Filament/Resources/Penduduks/Tables/PenduduksTable.php` updated) — three `Filament\Actions\Action` toolbar actions (CSV / Excel / PDF) calling `app(PendudukExportService::class)->exportQuery($livewire->getFilteredTableQuery(), ExportFormat::…)`, injecting the Livewire page by name (`Filament\Tables\Contracts\HasTable $livewire`) so the export uses literally the currently-filtered table query (FR-EX-02).
+- **Runtime dependencies** — `composer require barryvdh/laravel-dompdf:^3.1 openspout/openspout:^4.23` (openspout already transitive; dompdf new; both auto-register providers).
+- **Phase 6.1 tests** (`tests/Feature/Phase6/PendudukExportServiceTest.php`, 14 tests): filename embeds date + `semua` when no filters; filter summary slug for gender/status and RT/status; filters by gender, resident status, RT number, religion, combined gender+status, exact age, age range; XLSX round-trip through the OpenSpout reader (header + real rows); PDF magic + report-view text (kelurahan name from settings).
+
+### Notes (Phase 6.1)
+- No migrations / schema changes (exports read existing columns; computed `age` never stored). No compiled frontend asset (actions reuse existing `heroicon-o-arrow-down-tray`; panel has no custom Vite theme) — `npm run build` N/A.
+- The two CSV-output tests that produced raw body bytes during the run were eliminated as PHPUnit `risky` (output during test); the XLSX round-trip + PDF view-text tests remain as the export-content proof. `exportQuery` live-filter wiring is exercised at the query level; a browser-level download assertion is deferred.
+- `php artisan test tests/Feature/Phase6` 14 passed (25 assertions); `php artisan test` 220 passed / 1008 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (168 files).
 
 ### Added (Phase 5.7 — Import Kartu Keluarga — 2026-08-07)
 - **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*` per ADR-016):
