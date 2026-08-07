@@ -3,7 +3,7 @@
 | **Title** | SIPETA Features Catalog |
 | **Purpose** | Categorize and track every feature by priority and implementation status. |
 | **Scope** | KKN-deliverable features plus future backlog references. |
-| **Version** | 1.5.0 |
+| **Version** | 1.6.0 |
 | **Status** | Approved |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/BACKLOG.md`, `.ai/roadmap.md`, `.ai/architecture.md`, `.ai/ocr.md` |
@@ -37,7 +37,7 @@ Feature status legend:
 | F-CORE-13 | Export CSV | Implemented | Phase 6 | `.ai/architecture.md` |
 | F-CORE-14 | Backup ZIP | Implemented | Phase 6 | `.ai/architecture.md` §11 |
 | F-CORE-15 | Restore from ZIP | Implemented | Phase 6 | `.ai/workflow.md` |
-| F-CORE-16 | Settings (kelurahan identity, logo) | Planned | Phase 6 | `.ai/database.md` |
+| F-CORE-16 | Settings (kelurahan identity, logo) | Implemented | Phase 6 | `.ai/database.md` |
 | F-CORE-17 | Tauri desktop shell | Planned | Phase 7 | `.ai/architecture.md` |
 | F-CORE-18 | Windows installer (.exe) | Planned | Phase 7 | `.ai/deployment.md` |
 
@@ -67,6 +67,7 @@ Feature status legend:
 | F-HIGH-20 | OCR workflow finalization (final COMPLETED status transition, completion timestamp, import summary + final processing metrics, transient-artifact cleanup, audit logging, centralized success/failure completion handler, idempotent completion) | Implemented | Phase 5 |
 | F-HIGH-21 | Reporting & export foundation (PDF/XLSX/CSV export service, Filament table toolbar actions, exports respect active filters, date + filter-summary filename) | Implemented | Phase 6 |
 | F-HIGH-22 | Backup & Restore operator page (Backup menu — "Buat Backup" action, backup archive list, two-step restore with explicit confirmation and restart advice) | Implemented | Phase 6 |
+| F-HIGH-23 | Pengaturan (Settings) operator page (identity, logo, backup path — "SIMPAN" persisted to the settings singleton) | Implemented | Phase 6 |
 
 ## 3. Medium Priority
 

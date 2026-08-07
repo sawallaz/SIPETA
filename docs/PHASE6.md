@@ -3,7 +3,7 @@
 | **Title** | SIPETA Phase 6 — Reporting & Export |
 | **Purpose** | Track Phase 6 (Reporting & Export) sub-phase progress. |
 | **Scope** | 6.1 Reporting & Export foundation: a `PendudukExportService` producing PDF (DomPDF), XLSX (OpenSpout), and CSV (OpenSpout) downloads via three Filament table toolbar actions; exports always respect the active filter criteria (FR-EX-02) and the generated filename always embeds the export date plus a human-readable filter summary (FR-EX-03). |
-| **Version** | 1.3.0 |
+| **Version** | 1.4.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `.ai/architecture.md`, `.ai/workflow.md` (§14, §15), `docs/REQUIREMENTS.md` (§ FR-EX-02, FR-EX-03, FR-BR-04..06), `docs/CHANGELOG.md`, `docs/FEATURES.md`, `app/Services/PendudukExportService.php`, `app/Enums/ExportFormat.php`, `resources/views/exports/penduduk-pdf.blade.php`, `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php`, `app/Services/BackupService.php`, `app/Services/RestoreService.php`, `app/Filament/Pages/Backup.php` |
@@ -400,3 +400,97 @@ npm run build                                               PASS (vite exit 0; n
 ### 6.4.6 Commit
 
 `feat(backup): Phase 6.4 — backup & restore page`
+
+## 6.5 Pengaturan — Settings page (FR-SET-01 / FR-SET-02 / F-CORE-16)
+
+### 6.5.1 Objective
+
+Deliver the fifth menu item of the five-menu navigation (`.ai/workflow.md` §1),
+the operator-facing "Pengaturan" (Settings) page promised by workflow §16 and
+explicitly deferred by §6.4.3. The page edits the singleton kelurahan identity
+(kelurahan, kecamatan, kabupaten, provinsi), the optional kelurahan logo, and
+the backup-path operator configuration (FR-SET-01), keeping the existing
+`settings` table row as a strict singleton — created on first access, never
+deleted (FR-SET-02).
+
+Two design decisions were fixed before implementation:
+
+1. **Logo storage** — the logo is stored with `Storage::disk('local')` under a
+   `logos/` prefix; only the relative path (`logos/<file>`) is persisted in
+   `logo_path`. **No new filesystem disk is added and `config/filesystems.php`
+   is not modified.**
+2. **`backup_path` is operator configuration for future phases only** — the
+   value is edited and persisted on the page, but the Phase 6.2 `BackupService`
+   is **not modified** and continues to use its existing implementation.
+
+### 6.5.2 Deliverables
+
+- **Settings service** (`app/Services/SettingsService.php`, new — an
+  `App\Services\*` class per the project service-layer convention):
+  - `get(): Setting` — the singleton row via `firstOrCreate(['id' => 1])`,
+    created with seeded defaults on first access (FR-SET-02; the singleton is
+    enforced here, never in the page).
+  - `update(array $data): Setting` — persists only the fillable fields
+    (identity, `logo_path`, `backup_path`); the row is never deleted.
+  - `LOGO_DIR = 'logos'` — the `local`-disk directory prefix used for the logo.
+- **Pengaturan page** (`app/Filament/Pages/Settings.php`, new — a
+  `Filament\Pages\Page` auto-discovered by `AdminPanelProvider`):
+  - Navigation: menu label "Pengaturan", `heroicon-o-cog-6-tooth` icon.
+  - A Filament form (`InteractsWithSchemas`, `statePath('data')`) with three
+    sections: **Identitas Kelurahan** (nama kelurahan, kecamatan, kabupaten,
+    provinsi — all required), **Logo Kelurahan** (a `FileUpload` on the `local`
+    disk in the `logos/` directory, image-only, ≤ 2 MB, optional) and
+    **Backup** (`backup_path`, required, with a helper text stating it does not
+    change current backup behavior).
+  - `mount()` fills the form from the service singleton; the **SIMPAN** button
+    (workflow §16) calls `save()`, which validates the form and persists via the
+    service, then sends a "Pengaturan tersimpan" success notification.
+- **Page view** (`resources/views/filament/pages/settings.blade.php`, new) —
+  `x-filament-panels::page` rendering `{{ $this->form }}` plus the SIMPAN
+  button — the same custom-page-with-form pattern used by the Phase 5.6
+  ReviewOcrJob page (no business logic in the view).
+- **Tests** (`tests/Feature/Phase6/SettingsPageTest.php`, 6 tests) — page
+  loads with identity/logo/backup sections and SIMPAN; the singleton is
+  created on first access; identity + backup fields persist on save without
+  duplicating the row; a logo upload is stored on the `local` disk under
+  `logos/` with only the relative path persisted; `backup_path` is recorded as
+  operator configuration; required identity fields produce validation errors.
+  The suite uses `Storage::fake('local')`, so no real filesystem writes occur.
+
+### 6.5.3 Not done (explicitly out of scope for 6.5)
+
+- **No change to `BackupService` / `RestoreService`** — the Phase 6.2 backup
+  implementation is untouched; `backup_path` is recorded for future phases
+  only (design decision #2).
+- **No new filesystem disk, no `config/filesystems.php` change** — the logo
+  lives on the existing `local` disk under `logos/` (design decision #1).
+- **No scheduled backups, retention/rotation, FR-MED-04 launch integrity
+  check, or FR-MED-05 restore dry-run** — still later Phase 6 work.
+- No migrations/schema changes — the existing `settings` table is reused.
+- `npm run build` regenerates only gitignored `public/build` artifacts — no
+  tracked frontend file changes.
+
+### 6.5.4 Files changed (6.5 only)
+
+| File | Change |
+| --- | --- |
+| `app/Services/SettingsService.php` | New — singleton settings service (FR-SET-01/02). |
+| `app/Filament/Pages/Settings.php` | New — "Pengaturan" menu page (identity + logo + backup path form, SIMPAN). |
+| `resources/views/filament/pages/settings.blade.php` | New — page view (form + SIMPAN button). |
+| `tests/Feature/Phase6/SettingsPageTest.php` | New — 6 tests (load, singleton, save, logo storage, backup_path, validation). |
+| `docs/PHASE6.md` | Updated — this §6.5 section; Version 1.3.0 → 1.4.0. |
+| `docs/CHANGELOG.md` | Updated — Phase 6.5 entry; Version 1.20.0 → 1.21.0. |
+| `docs/FEATURES.md` | Updated — F-CORE-16 'Settings (kelurahan identity, logo)' → Implemented; F-HIGH-23 added. |
+
+### 6.5.5 Verification
+
+```text
+php artisan test tests/Feature/Phase6/SettingsPageTest.php   6 passed (41 assertions)
+php artisan test                                            <full-suite result>
+./vendor/bin/pint --test                                    PASS
+npm run build                                               PASS (vite exit 0; no tracked frontend path changed)
+```
+
+### 6.5.6 Commit
+
+`feat(settings): Phase 6.5 — pengaturan page`

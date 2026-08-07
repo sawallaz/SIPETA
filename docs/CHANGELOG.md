@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.20.0 |
+| **Version** | 1.21.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `docs/PHASE1.md`, `docs/PHASE2.md`, `docs/PHASE3.md`, `docs/PHASE4.md`, `docs/PHASE5.md`, `docs/PHASE6.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -309,6 +309,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restore stays two-step (choose → confirm) exactly per workflow §15; the FR-BR-05 confirmation lives in the page, not the service.
 - Still out of scope: the "Pengaturan" (Settings) page (F-CORE-16, later Phase 6 work), scheduled backups, retention, FR-MED-04 launch integrity check, and FR-MED-05 restore dry-run.
 - `npm run build` regenerated only gitignored `public/build` artifacts — no tracked frontend file changed. `php artisan test tests/Feature/Phase6/BackupPageTest.php` 5 passed (30 assertions); `php artisan test` 238 passed / 1093 assertions / 4 skipped (3 MySQL + 1 Tesseract, env-gated); `./vendor/bin/pint --test` PASS (186 files); `npm run build` PASS.
+
+### Added (Phase 6.5 — Pengaturan — Settings page — 2026-08-07)
+- **Settings service** (`app/Services/SettingsService.php`, new — `App\Services\*` per ADR-016):
+  - `get(): Setting` — the singleton `settings` row via `firstOrCreate(['id' => 1])`, created with seeded defaults on first access and never deleted (FR-SET-02).
+  - `update(array $data): Setting` — persists only the fillable identity, `logo_path` and `backup_path` fields; the row is never deleted.
+  - `LOGO_DIR = 'logos'` — the `local`-disk directory prefix used for the logo.
+- **Pengaturan page** (`app/Filament/Pages/Settings.php`, new — the "Pengaturan" menu of the five-menu navigation per `.ai/workflow.md` §1; auto-discovered by `AdminPanelProvider::discoverPages`):
+  - A Filament form (`InteractsWithSchemas`, `statePath('data')`) with three sections: **Identitas Kelurahan** (nama kelurahan, kecamatan, kabupaten, provinsi — required), **Logo Kelurahan** (a `FileUpload` on the `local` disk in the `logos/` directory, image-only, ≤ 2 MB, optional) and **Backup** (`backup_path`, required).
+  - `mount()` fills the form from the service singleton; the **SIMPAN** button (workflow §16) calls `save()` → validates → persists via the service → "Pengaturan tersimpan" success notification.
+  - **Logo storage** (design decision): `Storage::disk('local')` with a `logos/` prefix; only the relative path is persisted in `logo_path`. No new filesystem disk; `config/filesystems.php` not modified.
+  - **`backup_path` is operator configuration for future phases only** (design decision): persisted on the page; the Phase 6.2 `BackupService` is **not modified** and keeps its existing implementation.
+- **Page view** (`resources/views/filament/pages/settings.blade.php`, new) — `x-filament-panels::page` rendering `{{ $this->form }}` plus the SIMPAN button (the same custom-page-with-form pattern as the Phase 5.6 ReviewOcrJob page; no business logic in the view).
+- **Phase 6.5 tests** (`tests/Feature/Phase6/SettingsPageTest.php`, 6 tests): page loads with identity/logo/backup sections and SIMPAN; the singleton row is created on first access; identity + backup fields persist on save without duplicating the row; a logo upload is stored on the `local` disk under `logos/` with only the relative path persisted; `backup_path` is recorded as operator configuration; required identity fields produce form validation errors. The suite uses `Storage::fake('local')`, so no real filesystem writes occur.
+- **Features catalog**: `F-CORE-16` 'Settings (kelurahan identity, logo)' moved to **Implemented**; `F-HIGH-23 'Pengaturan (Settings) operator page' added as Implemented.
+
+### Notes (Phase 6.5)
+- No change to `BackupService` / `RestoreService` — Phase 6.2 backup behavior is untouched; `backup_path` is recorded for future phases only.
+- No new filesystem disk and no `config/filesystems.php` change — the logo lives on the existing `local` disk under `logos/`.
+- Still out of scope: scheduled backups, retention/rotation, FR-MED-04 launch integrity check, and FR-MED-05 restore dry-run (later Phase 6 work).
+- No migrations/schema changes — the existing `settings` table is reused.
+- `npm run build` regenerated only gitignored `public/build` artifacts — no tracked frontend file changed. `php artisan test tests/Feature/Phase6/SettingsPageTest.php` 6 passed (41 assertions); full-suite, `pint --test` and `npm run build` results recorded in docs/PHASE6.md §6.5.5.
 
 ### Added (Phase 5.7 — Import Kartu Keluarga — 2026-08-07)
 - **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*` per ADR-016):
