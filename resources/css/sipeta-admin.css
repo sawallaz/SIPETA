@@ -1,0 +1,517 @@
+/*
+ * SIPETA admin panel overrides.
+ *
+ * Visual direction:
+ * - Forest / olive / ketupat green
+ * - Wide and breathable content
+ * - Compact but readable sidebar
+ * - Clear dashboard hierarchy
+ * - Consistent card dimensions
+ */
+
+/* ================================================================
+   1. SIPETA COLOR SYSTEM
+   ================================================================ */
+
+:root {
+    --sipeta-green-950: #183d2b;
+    --sipeta-green-900: #1f5138;
+    --sipeta-green-800: #276749;
+    --sipeta-green-700: #356b3d;
+    --sipeta-green-600: #4f6f3a;
+
+    --sipeta-olive: #6b8237;
+    --sipeta-ketupat: #8aa83b;
+
+    --sipeta-green-100: #e8f1e7;
+    --sipeta-green-50: #f4f8f2;
+
+    --sipeta-border: #dce5dc;
+    --sipeta-text: #26352a;
+}
+
+
+/* ================================================================
+   2. SIDEBAR
+   ================================================================ */
+
+.fi-sidebar {
+    border-right: 1px solid var(--sipeta-border);
+}
+
+.fi-sidebar-nav {
+    padding-inline: 0.75rem;
+    padding-block: 0.75rem;
+    gap: 0.5rem;
+}
+
+.fi-sidebar-group-items {
+    padding-inline: 0.25rem;
+}
+
+.fi-sidebar-item-btn,
+.fi-sidebar-group-btn,
+.fi-sidebar-group-dropdown-trigger-btn {
+    min-height: 2.625rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.625rem;
+
+    transition:
+        background-color 150ms ease,
+        color 150ms ease,
+        transform 150ms ease;
+}
+
+
+/* ================================================================
+   3. SIDEBAR GREEN IDENTITY STRIP
+   ================================================================ */
+
+.fi-sidebar::before {
+    content: '';
+
+    display: block;
+
+    height: 0.375rem;
+
+    background: linear-gradient(
+        90deg,
+        #1f5138 0%,
+        #4f6f3a 50%,
+        #8aa83b 100%
+    );
+}
+
+
+/* ================================================================
+   4. SIDEBAR ACTIVE ITEM
+   ================================================================ */
+
+.fi-sidebar-item.fi-active > .fi-sidebar-item-btn {
+    background-color: var(--sipeta-green-100);
+
+    color: var(--sipeta-green-900);
+
+    box-shadow:
+        inset 3px 0 0 var(--sipeta-green-700);
+}
+
+.fi-sidebar-item.fi-active
+    > .fi-sidebar-item-btn
+    > .fi-sidebar-item-label {
+    color: var(--sipeta-green-900);
+
+    font-weight: 600;
+}
+
+.fi-sidebar-item.fi-active
+    > .fi-sidebar-item-btn
+    > .fi-sidebar-item-icon {
+    color: var(--sipeta-green-700);
+}
+
+
+/* ================================================================
+   5. SIDEBAR HOVER
+   ================================================================ */
+
+.fi-sidebar-item-btn:hover,
+.fi-sidebar-group-btn:hover,
+.fi-sidebar-group-dropdown-trigger-btn:hover {
+    background-color: var(--sipeta-green-50);
+}
+
+
+/* ================================================================
+   6. SIDEBAR GROUP RAIL
+   ================================================================ */
+
+.fi-sidebar-item-grouped-border {
+    width: 1rem;
+}
+
+
+/* ================================================================
+   7. HEADER
+   ================================================================ */
+
+/*
+ * Keep the top header visually connected with the sidebar.
+ */
+.fi-main-header {
+    top: 0;
+
+    border-bottom: 1px solid var(--sipeta-border);
+}
+
+
+/*
+ * If the current Filament version exposes .fi-topbar,
+ * apply the green identity there.
+ */
+.fi-topbar {
+    background: linear-gradient(
+        90deg,
+        var(--sipeta-green-950),
+        var(--sipeta-green-900)
+    );
+}
+
+
+/* Header controls */
+.fi-topbar .fi-icon-btn,
+.fi-topbar .fi-user-menu-trigger,
+.fi-topbar a {
+    color: #ffffff;
+}
+
+.fi-topbar .fi-icon-btn:hover,
+.fi-topbar .fi-user-menu-trigger:hover {
+    background-color: rgb(255 255 255 / 0.12);
+}
+
+
+/* ================================================================
+   8. MAIN CONTENT — WIDE
+   ================================================================ */
+
+/*
+ * Use the available screen width.
+ *
+ * This is important for tables and dashboard cards.
+ */
+.fi-main-content {
+    width: 100%;
+
+    max-width: none;
+
+    padding-top: 1rem;
+    padding-bottom: 1.5rem;
+    padding-inline: 1.25rem;
+}
+
+
+/*
+ * Remove unnecessary narrow page constraint.
+ */
+.fi-page {
+    width: 100%;
+    max-width: none;
+
+    gap: 1rem;
+}
+
+
+/*
+ * Dashboard content should use the available width.
+ */
+.fi-page-content {
+    width: 100%;
+    max-width: none;
+}
+
+
+/* ================================================================
+   9. DASHBOARD GRID
+   ================================================================ */
+
+.fi-wi {
+    width: 100%;
+}
+
+
+/*
+ * Give dashboard sections consistent spacing.
+ */
+.fi-wi + .fi-wi {
+    margin-top: 0;
+}
+
+
+/* ================================================================
+   10. KPI CARDS
+   ================================================================ */
+
+.fi-wi-stats-overview {
+    width: 100%;
+}
+
+.fi-wi-stats-overview
+    .fi-wi-stats-overview-stats-ctn {
+    width: 100%;
+
+    gap: 0.875rem;
+}
+
+.fi-wi-stats-overview
+    .fi-wi-stats-overview-stat {
+    min-height: 8rem;
+
+    padding: 1.125rem;
+
+    border-radius: 0.875rem;
+}
+
+
+/*
+ * KPI label.
+ */
+.fi-wi-stats-overview
+    .fi-wi-stats-overview-stat-label {
+    font-weight: 600;
+}
+
+
+/*
+ * KPI value.
+ */
+.fi-wi-stats-overview
+    .fi-wi-stats-overview-stat-value {
+    font-size: 1.625rem;
+
+    line-height: 1.2;
+
+    letter-spacing: -0.015em;
+}
+
+
+/* ================================================================
+   11. CHART CARDS
+   ================================================================ */
+
+.fi-wi-chart {
+    width: 100%;
+
+    height: 100%;
+}
+
+.fi-wi-chart .fi-section {
+    width: 100%;
+
+    height: 100%;
+
+    border-radius: 0.875rem;
+}
+
+.fi-wi-chart .fi-section-content {
+    padding: 1rem;
+}
+
+.fi-wi-chart .fi-wi-chart-canvas-ctn {
+    padding: 0.5rem;
+}
+
+
+/*
+ * Give charts enough vertical breathing room.
+ */
+.fi-wi-chart canvas {
+    min-height: 260px;
+}
+
+
+/* ================================================================
+   12. TABLE WIDTH
+   ================================================================ */
+
+/*
+ * Tables should use the entire content area instead of becoming
+ * artificially narrow.
+ */
+.fi-ta {
+    width: 100%;
+}
+
+.fi-ta-content {
+    width: 100%;
+}
+
+.fi-ta-table {
+    min-width: 100%;
+}
+
+
+/*
+ * Long text such as addresses should not force the entire layout
+ * to become unreadable.
+ */
+.fi-ta-table td {
+    vertical-align: middle;
+}
+
+
+/* ================================================================
+   13. SECTIONS / FORMS
+   ================================================================ */
+
+.fi-section {
+    border-radius: 0.875rem;
+}
+
+.fi-section-header {
+    padding-inline: 1.125rem;
+}
+
+.fi-section-content {
+    padding-inline: 1.125rem;
+}
+
+
+/*
+ * Keep related fields visually grouped.
+ */
+.fi-fo-field-wrp {
+    margin-bottom: 0.25rem;
+}
+
+
+/* ================================================================
+   14. BUTTONS
+   ================================================================ */
+
+.fi-btn {
+    min-height: 2.625rem;
+
+    border-radius: 0.625rem;
+}
+
+
+/*
+ * Primary actions use the SIPETA green identity.
+ */
+.fi-btn-color-primary {
+    background-color: var(--sipeta-green-700);
+}
+
+.fi-btn-color-primary:hover {
+    background-color: var(--sipeta-green-800);
+}
+
+
+/* ================================================================
+   15. RESPONSIVE
+   ================================================================ */
+
+@media (max-width: 1280px) {
+    .fi-main-content {
+        padding-inline: 1rem;
+    }
+}
+
+@media (max-width: 1024px) {
+    .fi-main-content {
+        padding-inline: 0.75rem;
+    }
+
+    .fi-wi-stats-overview
+        .fi-wi-stats-overview-stat {
+        min-height: 7rem;
+    }
+}
+
+@media (max-width: 640px) {
+    .fi-main-content {
+        padding-inline: 0.5rem;
+        padding-block: 0.75rem;
+    }
+
+    .fi-wi-stats-overview
+        .fi-wi-stats-overview-stat {
+        min-height: auto;
+
+        padding: 0.875rem;
+    }
+
+    .fi-wi-chart .fi-section-content {
+        padding: 0.75rem;
+    }
+
+    .fi-wi-chart canvas {
+        min-height: 220px;
+    }
+}
+
+
+/* ================================================================
+   16. DARK MODE
+   ================================================================ */
+
+:where(.dark) .fi-sidebar {
+    border-color: rgb(255 255 255 / 0.08);
+}
+
+:where(.dark)
+    .fi-sidebar-item.fi-active
+    > .fi-sidebar-item-btn {
+    background-color: rgb(63 143 91 / 0.20);
+
+    box-shadow:
+        inset 3px 0 0 #8aa83b;
+}
+
+:where(.dark)
+    .fi-sidebar-item.fi-active
+    > .fi-sidebar-item-btn
+    > .fi-sidebar-item-label {
+    color: #d9f5df;
+}
+
+:where(.dark)
+    .fi-sidebar-item-btn:hover,
+:where(.dark)
+    .fi-sidebar-group-btn:hover,
+:where(.dark)
+    .fi-sidebar-group-dropdown-trigger-btn:hover {
+    background-color: rgb(63 143 91 / 0.12);
+}
+
+
+/* ================================================================
+   17. TABLE WIDTH — KARTU KELUARGA
+   ================================================================
+ *
+ * Let the KK table breathe. The Filament 4 table container is
+ * `.fi-ta-ctn` and the cells are `.fi-ta-cell`; the text column's
+ * inner wrapper is `.fi-ta-text` (there is no `.fi-ta-text-column`
+ * class in Filament 4, so the original proposal's selector matched
+ * nothing). We let the table grow to its content width and scroll
+ * horizontally on narrow screens instead of squashing columns.
+ */
+
+.fi-ta-ctn {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.fi-ta-table {
+    width: max-content;
+    min-width: 100%;
+}
+
+.fi-ta-table th,
+.fi-ta-table td {
+    white-space: nowrap;
+}
+
+/* Address column may wrap so long street names stay readable. */
+.fi-ta-text.fi-wrapped,
+.fi-ta-table td .fi-ta-text {
+    white-space: normal;
+}
+
+/*
+ * Foto KK column must not shrink.
+ */
+.fi-ta-table th:first-child,
+.fi-ta-table td:first-child {
+    min-width: 95px;
+}
+
+/*
+ * Action column stays comfortable.
+ */
+.fi-ta-table th:last-child,
+.fi-ta-table td:last-child {
+    min-width: 150px;
+}
+

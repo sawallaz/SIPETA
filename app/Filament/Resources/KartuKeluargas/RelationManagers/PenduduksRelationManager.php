@@ -5,7 +5,7 @@ namespace App\Filament\Resources\KartuKeluargas\RelationManagers;
 use App\Enums\FamilyRelation;
 use App\Enums\Gender;
 use App\Enums\ResidentStatus;
-use App\Filament\Resources\Penduduks\PendudukResource;
+use App\Filament\Resources\Penduduks\Schemas\PendudukForm;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
@@ -13,29 +13,41 @@ use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
 
 /**
  * Anggota keluarga (Penduduk) belonging to one Kartu Keluarga.
  *
- * Uses the model's existing `penduduks()` HasMany relation. Linked to
- * PendudukResource so create/edit/view open the full Penduduk pages
- * (family navigation) instead of reduced modals.
+ * Uses the model's existing `penduduks()` HasMany relation. Members are
+ * managed in place — create / edit / view open modals on the KK page and the
+ * KK of each new member is bound automatically via the relationship, so the
+ * operator never leaves the family screen (UI-5: no forced KK <-> Penduduk
+ * navigation).
  */
 class PenduduksRelationManager extends RelationManager
 {
     protected static string $relationship = 'penduduks';
-
-    protected static ?string $relatedResource = PendudukResource::class;
 
     protected static ?string $title = 'Anggota Keluarga';
 
     public static function getBadge(Model $ownerRecord, string $pageClass): ?string
     {
         return (string) $ownerRecord->penduduks()->count();
+    }
+
+    public function form(Schema $schema): Schema
+    {
+        return PendudukForm::configure($schema, ['hide_kk_id' => true]);
+    }
+
+    public function infolist(Schema $schema): Schema
+    {
+        return PendudukForm::configure($schema, ['hide_kk_id' => true]);
     }
 
     public function table(Table $table): Table
@@ -47,12 +59,15 @@ class PenduduksRelationManager extends RelationManager
                     ->label('NIK')
                     ->searchable()
                     ->sortable()
-                    ->copyable(),
+                    ->copyable()
+                    ->copyMessage('NIK disalin')
+                    ->width('180px'),
                 TextColumn::make('full_name')
                     ->label('Nama Lengkap')
                     ->searchable()
                     ->sortable()
-                    ->wrap(),
+                    ->wrap()
+                    ->width('240px'),
                 TextColumn::make('family_relation')
                     ->label('Hubungan Keluarga')
                     ->badge()
@@ -67,22 +82,27 @@ class PenduduksRelationManager extends RelationManager
                         FamilyRelation::FAMILI_LAIN => 'Famili Lain',
                         FamilyRelation::LAINNYA => 'Lainnya',
                     })
-                    ->sortable(),
+                    ->sortable()
+                    ->width('180px'),
                 TextColumn::make('gender')
                     ->label('Jenis Kelamin')
                     ->formatStateUsing(fn (Gender $state): string => match ($state) {
                         Gender::LAKI_LAKI => 'Laki-laki',
                         Gender::PEREMPUAN => 'Perempuan',
                     })
-                    ->sortable(),
+                    ->sortable()
+                    ->width('140px'),
                 TextColumn::make('birth_date')
                     ->label('Tanggal Lahir')
                     ->date('d M Y')
-                    ->sortable(),
+                    ->sortable()
+                    ->width('150px'),
                 TextColumn::make('age')
                     ->label('Usia')
-                    ->state(fn ($record): int => $record->age)
-                    ->suffix(' th'),
+                    ->state(fn ($record): int => (int) $record->age)
+                    ->suffix(' th')
+                    ->sortable()
+                    ->width('100px'),
                 TextColumn::make('resident_status')
                     ->label('Status')
                     ->badge()
@@ -96,29 +116,42 @@ class PenduduksRelationManager extends RelationManager
                         ResidentStatus::PINDAH => 'warning',
                         ResidentStatus::MENINGGAL => 'danger',
                     })
-                    ->sortable(),
+                    ->sortable()
+                    ->width('120px'),
             ])
             ->filters([
-                //
+                // Filter anggota keluarga by status kependudukan.
+                SelectFilter::make('resident_status')
+                    ->label('Status')
+                    ->options([
+                        ResidentStatus::ACTIVE->value => 'Aktif',
+                        ResidentStatus::PINDAH->value => 'Pindah',
+                        ResidentStatus::MENINGGAL->value => 'Meninggal',
+                    ]),
             ])
             ->headerActions([
                 CreateAction::make()
                     ->label('Tambah Anggota')
-                    ->url(fn (): string => PendudukResource::getUrl('create', [
-                        'kk_id' => $this->getOwnerRecord()->getKey(),
-                    ])),
+                    ->modalHeading('Tambah Anggota Keluarga'),
             ])
             ->recordActions([
-                ViewAction::make(),
-                EditAction::make(),
-                DeleteAction::make(),
+                ViewAction::make()
+                    ->modalHeading('Detail Anggota'),
+                EditAction::make()
+                    ->modalHeading('Ubah Anggota'),
+                DeleteAction::make()
+                    ->modalHeading('Hapus Anggota')
+                    ->modalDescription('Data anggota ini tidak dapat dikembalikan. Lanjutkan?'),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()
+                        ->label('Hapus terpilih'),
                 ]),
             ])
             ->defaultSort('family_relation')
+            ->paginated([10, 25, 50])
+            ->defaultPaginationPageOption(10)
             ->emptyStateHeading('Belum ada anggota keluarga')
             ->emptyStateDescription('Tambahkan anggota keluarga untuk Kartu Keluarga ini.')
             ->emptyStateIcon(Heroicon::OutlinedUserPlus);
