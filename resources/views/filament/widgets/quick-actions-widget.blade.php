@@ -29,7 +29,7 @@
         <style>
             .fi-wi-quick-actions-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+                grid-template-columns: repeat(4, minmax(0, 1fr));
                 gap: 0.75rem;
             }
 
@@ -37,16 +37,40 @@
                 display: flex;
                 align-items: center;
                 gap: 0.75rem;
-                padding: 0.75rem;
+                min-width: 0;
+                padding: 0.875rem;
                 border: 1px solid rgb(229 231 235);
-                border-radius: 0.5rem;
+                border-radius: 0.625rem;
                 text-decoration: none;
-                transition: background-color 0.15s, border-color 0.15s;
+                transition:
+                    background-color 0.15s ease,
+                    border-color 0.15s ease,
+                    transform 0.15s ease;
             }
 
             .fi-wi-quick-actions-item:hover {
-                background-color: rgb(249 250 251);
-                border-color: rgb(209 213 219);
+                background-color: rgb(247 249 247);
+                border-color: rgb(163 177 138);
+                transform: translateY(-1px);
+            }
+
+            .fi-wi-quick-actions-icon {
+                flex: none;
+                width: 1.5rem;
+                height: 1.5rem;
+                color: rgb(76 99 56);
+            }
+
+            @media (max-width: 1024px) {
+                .fi-wi-quick-actions-grid {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                }
+            }
+
+            @media (max-width: 640px) {
+                .fi-wi-quick-actions-grid {
+                    grid-template-columns: 1fr;
+                }
             }
 
             :where(.dark) .fi-wi-quick-actions-item {
@@ -54,19 +78,12 @@
             }
 
             :where(.dark) .fi-wi-quick-actions-item:hover {
-                background-color: rgb(39 39 42);
-                border-color: rgb(82 82 91);
-            }
-
-            .fi-wi-quick-actions-icon {
-                flex: none;
-                width: 1.5rem;
-                height: 1.5rem;
-                color: rgb(156 163 175);
+                background-color: rgb(39 49 35);
+                border-color: rgb(82 102 61);
             }
 
             :where(.dark) .fi-wi-quick-actions-icon {
-                color: rgb(113 113 122);
+                color: rgb(138 168 59);
             }
 
             .fi-wi-quick-actions-body {
