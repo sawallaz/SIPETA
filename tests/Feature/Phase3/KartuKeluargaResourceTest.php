@@ -2,14 +2,18 @@
 
 namespace Tests\Feature\Phase3;
 
+use App\Enums\FamilyRelation;
 use App\Filament\Resources\KartuKeluargas\KartuKeluargaResource;
 use App\Filament\Resources\KartuKeluargas\Pages\CreateKartuKeluarga;
 use App\Filament\Resources\KartuKeluargas\Pages\EditKartuKeluarga;
 use App\Filament\Resources\KartuKeluargas\Pages\ListKartuKeluargas;
+use App\Models\AreaUnit;
 use App\Models\KartuKeluarga;
-use App\Models\KkAnggota;
 use App\Models\Penduduk;
+use App\Models\Rt;
 use Filament\Actions\Testing\TestAction;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 /**
@@ -58,6 +62,8 @@ class KartuKeluargaResourceTest extends Phase3ResourceTestCase
                 'kk_number' => '7371010101010001',
                 'address' => 'Jl. Poros Tanete No. 1',
                 'postal_code' => '90811',
+                'area_unit_id' => AreaUnit::factory()->create()->id,
+                'rt_id' => Rt::factory()->create()->id,
                 'notes' => 'Data uji.',
             ])
             ->call('create')
@@ -71,7 +77,9 @@ class KartuKeluargaResourceTest extends Phase3ResourceTestCase
 
     public function test_can_edit_kartu_keluarga(): void
     {
-        $kk = KartuKeluarga::factory()->create();
+        $kk = KartuKeluarga::factory()->create([
+            'rt_id' => Rt::factory()->create()->id,
+        ]);
 
         Livewire::test(EditKartuKeluarga::class, ['record' => $kk->getKey()])
             ->fillForm(['address' => 'Jl. Baru No. 9'])
@@ -127,7 +135,9 @@ class KartuKeluargaResourceTest extends Phase3ResourceTestCase
 
     public function test_editing_a_record_ignores_its_own_kk_number_for_uniqueness(): void
     {
-        $kk = KartuKeluarga::factory()->create();
+        $kk = KartuKeluarga::factory()->create([
+            'rt_id' => Rt::factory()->create()->id,
+        ]);
 
         Livewire::test(EditKartuKeluarga::class, ['record' => $kk->getKey()])
             ->fillForm([
@@ -161,22 +171,205 @@ class KartuKeluargaResourceTest extends Phase3ResourceTestCase
 
     public function test_table_can_sort_by_jumlah_anggota_count(): void
     {
-        // Regression: the count column must sort by Laravel's real withCount alias
-        // (kk_anggotas_count), never the invalid camelCase alias that threw
-        // "Unknown column 'kkAnggotas_count'". (Phase UI-1)
+        // C-1 regression: "Jumlah Anggota" is sourced from penduduk.kk_id (the
+        // `penduduks` HasMany), NOT the kk_anggota history pivot. Sorting must
+        // use Laravel's real withCount alias `penduduks_count`; the camelCase
+        // alias `kkAnggotas_count` threw "Unknown column", and counting the
+        // pivot reported 0 for every household because not every write path
+        // populates it.
         $empty = KartuKeluarga::factory()->create(['kk_number' => '1111111111111111']);
         $full = KartuKeluarga::factory()->create(['kk_number' => '2222222222222222']);
 
-        $resident1 = Penduduk::factory()->create(['kk_id' => $full->id]);
-        $resident2 = Penduduk::factory()->create(['kk_id' => $full->id]);
-        KkAnggota::factory()->create(['kk_id' => $full->id, 'penduduk_id' => $resident1->id]);
-        KkAnggota::factory()->create(['kk_id' => $full->id, 'penduduk_id' => $resident2->id]);
+        Penduduk::factory()->create(['kk_id' => $full->id]);
+        Penduduk::factory()->create(['kk_id' => $full->id]);
 
         // Ascending sort: the KK with 0 anggota (empty) precedes the KK with 2.
         Livewire::test(ListKartuKeluargas::class)
-            ->sortTable('kk_anggotas_count')
+            ->sortTable('penduduks_count')
             ->assertCanSeeTableRecords([$empty, $full], inOrder: true)
             ->assertHasNoErrors();
+    }
+
+    public function test_jumlah_anggota_counts_penduduk_not_pivot(): void
+    {
+        // The pivot is deliberately left empty here: the displayed count must
+        // still be 2, proving penduduk.kk_id is the single source of truth.
+        $kk = KartuKeluarga::factory()->create();
+        Penduduk::factory()->count(2)->create(['kk_id' => $kk->id]);
+
+        $this->assertSame(0, $kk->kkAnggotas()->count());
+        $this->assertSame(2, $kk->jumlah_anggota);
+
+        Livewire::test(ListKartuKeluargas::class)
+            ->assertTableColumnStateSet('penduduks_count', 2, $kk);
+    }
+
+    /**
+     * Regression: SQLSTATE[42S22] Unknown column 'kepala_keluarga' in 'WHERE'.
+     *
+     * The "Kepala Keluarga" column is a virtual ->state() column; there is no
+     * `kartu_keluarga`.`kepala_keluarga` column. A bare ->searchable() made
+     * Filament guess the column name from the column key and emit
+     * `kepala_keluarga` LIKE ? inside the search WHERE group, so ANY search
+     * term — even a single "m" — blew up the list page on MySQL.
+     *
+     * This asserts on the GENERATED SQL, not merely on the absence of an
+     * exception: the test connection is SQLite, which silently treats the
+     * unknown double-quoted identifier as a string literal and therefore does
+     * NOT throw. Only MySQL does. Asserting the SQL makes the guard portable.
+     */
+    public function test_table_search_does_not_query_a_kepala_keluarga_column(): void
+    {
+        KartuKeluarga::factory()->create(['kk_number' => '7371010101010011']);
+
+        $statements = [];
+
+        DB::listen(function (QueryExecuted $query) use (&$statements): void {
+            $statements[] = $query->sql;
+        });
+
+        Livewire::test(ListKartuKeluargas::class)
+            ->searchTable('m')
+            ->assertOk()
+            ->assertHasNoErrors();
+
+        $searchStatements = array_filter(
+            $statements,
+            fn (string $sql): bool => str_contains($sql, 'kartu_keluarga') && str_contains($sql, 'like')
+        );
+
+        $this->assertNotEmpty($searchStatements, 'Expected the search to hit the kartu_keluarga table.');
+
+        foreach ($searchStatements as $sql) {
+            $this->assertStringNotContainsString(
+                'kepala_keluarga',
+                $sql,
+                'Search must not reference a non-existent kartu_keluarga.kepala_keluarga column.'
+            );
+        }
+
+        $this->assertTrue(
+            (bool) array_filter($searchStatements, fn (string $sql): bool => str_contains($sql, 'penduduk')),
+            'Kepala Keluarga search must resolve through the penduduk relation.'
+        );
+    }
+
+    public function test_table_can_search_by_kepala_keluarga_full_name(): void
+    {
+        $match = KartuKeluarga::factory()->create(['kk_number' => '7371010101010011']);
+        $other = KartuKeluarga::factory()->create(['kk_number' => '7371010101010012']);
+
+        Penduduk::factory()->create([
+            'kk_id' => $match->id,
+            'full_name' => 'FIRMAN HIDAYAT',
+            'family_relation' => FamilyRelation::KEPALA_KELUARGA->value,
+        ]);
+
+        Penduduk::factory()->create([
+            'kk_id' => $other->id,
+            'full_name' => 'SITI AMINAH',
+            'family_relation' => FamilyRelation::KEPALA_KELUARGA->value,
+        ]);
+
+        Livewire::test(ListKartuKeluargas::class)
+            ->searchTable('FIRMAN HIDAYAT')
+            ->assertCanSeeTableRecords([$match])
+            ->assertCanNotSeeTableRecords([$other]);
+    }
+
+    public function test_table_can_search_by_partial_kepala_keluarga_name(): void
+    {
+        $match = KartuKeluarga::factory()->create(['kk_number' => '7371010101010013']);
+        $other = KartuKeluarga::factory()->create(['kk_number' => '7371010101010014']);
+
+        Penduduk::factory()->create([
+            'kk_id' => $match->id,
+            'full_name' => 'FIRMAN HIDAYAT',
+            'family_relation' => FamilyRelation::KEPALA_KELUARGA->value,
+        ]);
+
+        Penduduk::factory()->create([
+            'kk_id' => $other->id,
+            'full_name' => 'SITI AMINAH',
+            'family_relation' => FamilyRelation::KEPALA_KELUARGA->value,
+        ]);
+
+        Livewire::test(ListKartuKeluargas::class)
+            ->searchTable('FIRMAN')
+            ->assertCanSeeTableRecords([$match])
+            ->assertCanNotSeeTableRecords([$other]);
+    }
+
+    /**
+     * Only the KEPALA_KELUARGA member feeds this column, so searching the name
+     * of a non-head member must NOT match the household through this path.
+     */
+    public function test_kepala_keluarga_search_ignores_non_head_members(): void
+    {
+        $kk = KartuKeluarga::factory()->create(['kk_number' => '7371010101010015']);
+
+        Penduduk::factory()->create([
+            'kk_id' => $kk->id,
+            'full_name' => 'FIRMAN HIDAYAT',
+            'family_relation' => FamilyRelation::KEPALA_KELUARGA->value,
+        ]);
+
+        Penduduk::factory()->create([
+            'kk_id' => $kk->id,
+            'full_name' => 'ZULKARNAIN ANAK',
+            'family_relation' => FamilyRelation::ANAK->value,
+        ]);
+
+        Livewire::test(ListKartuKeluargas::class)
+            ->searchTable('ZULKARNAIN')
+            ->assertCanNotSeeTableRecords([$kk]);
+    }
+
+    public function test_table_can_search_by_address(): void
+    {
+        $match = KartuKeluarga::factory()->create([
+            'kk_number' => '7371010101010016',
+            'address' => 'Jl. Dusun TANETE No. 12',
+        ]);
+
+        $other = KartuKeluarga::factory()->create([
+            'kk_number' => '7371010101010017',
+            'address' => 'Jl. Merdeka No. 5',
+        ]);
+
+        Livewire::test(ListKartuKeluargas::class)
+            ->searchTable('TANETE')
+            ->assertCanSeeTableRecords([$match])
+            ->assertCanNotSeeTableRecords([$other]);
+    }
+
+    public function test_table_can_search_by_postal_code(): void
+    {
+        $match = KartuKeluarga::factory()->create([
+            'kk_number' => '7371010101010018',
+            'postal_code' => '90552',
+        ]);
+
+        $other = KartuKeluarga::factory()->create([
+            'kk_number' => '7371010101010019',
+            'postal_code' => '10110',
+        ]);
+
+        Livewire::test(ListKartuKeluargas::class)
+            ->searchTable('90552')
+            ->assertCanSeeTableRecords([$match])
+            ->assertCanNotSeeTableRecords([$other]);
+    }
+
+    public function test_table_can_search_by_partial_kk_number(): void
+    {
+        $match = KartuKeluarga::factory()->create(['kk_number' => '7371001234567890']);
+        $other = KartuKeluarga::factory()->create(['kk_number' => '1234567890123456']);
+
+        Livewire::test(ListKartuKeluargas::class)
+            ->searchTable('737100')
+            ->assertCanSeeTableRecords([$match])
+            ->assertCanNotSeeTableRecords([$other]);
     }
 
     public function test_can_delete_via_bulk_action(): void

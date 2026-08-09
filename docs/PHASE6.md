@@ -3,7 +3,7 @@
 | **Title** | SIPETA Phase 6 — Reporting & Export |
 | **Purpose** | Track Phase 6 (Reporting & Export) sub-phase progress. |
 | **Scope** | 6.1 Reporting & Export foundation: a `PendudukExportService` producing PDF (DomPDF), XLSX (OpenSpout), and CSV (OpenSpout) downloads via three Filament table toolbar actions; exports always respect the active filter criteria (FR-EX-02) and the generated filename always embeds the export date plus a human-readable filter summary (FR-EX-03). |
-| **Version** | 1.5.0 |
+| **Version** | 1.5.1 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `.ai/architecture.md`, `.ai/workflow.md` (§14, §15), `docs/REQUIREMENTS.md` (§ FR-EX-02, FR-EX-03, FR-BR-04..06), `docs/CHANGELOG.md`, `docs/FEATURES.md`, `app/Services/PendudukExportService.php`, `app/Enums/ExportFormat.php`, `resources/views/exports/penduduk-pdf.blade.php`, `app/Filament/Resources/Penduduks/Tables/PenduduksTable.php`, `app/Services/BackupService.php`, `app/Services/RestoreService.php`, `app/Filament/Pages/Backup.php` |
@@ -572,3 +572,61 @@ npm run build                                                   PASS (vite exit 
 ### 6.6.6 Commit
 
 `feat(backup): Phase 6.6 — integrity check on launch`
+
+## 6.7 Hotfix 1 — Database & data integrity (PHASE 6 HOTFIX 1)
+
+### 6.7.1 Objective
+
+A read-only audit of the Phase 6.2/6.3 backup & restore data-integrity surface,
+fixing only confirmed defects with the smallest backward-compatible change.
+
+### 6.7.2 Findings fixed
+
+| # | Severity | File | Root cause | Fix |
+| --- | --- | --- | --- | --- |
+| 1 | High | `app/Services/BackupService.php` (`create()`) | The `db_backups` disk is configured `throw=false`, so `writeStream()` returns `false` (not throws) on a failed write (e.g. a full disk). The return value was ignored, so a backup that never landed was logged `SUCCESS` and reported "Backup berhasil" — a **false success**. | Check the `writeStream()` return (and disk existence); throw `BackupException` on failure so the normal catch records `FAILED` and surfaces the error (NFR-REL-01). |
+| 2 | High | `app/Services/BackupService.php` (`buildArchive()`) | `ZipArchive::close()` could fail leaving a truncated archive. | Throw `BackupException` (→ logged `FAILED`) when `close()` fails and clean up the temp file. |
+| 3 | High | `app/Services/RestoreService.php:79` | The `kk_uploads` disk is also `throw=false`, so `put()` returns `false` on a failed photo write. The return value was ignored, so a restore could report "Pemulihan selesai" while some/all photos never landed — a **false success** / silent photo loss against an already-restored DB. | Throw `RestoreException` when any photo `put()` returns `false`, so the restore surfaces as a failure instead of success. |
+
+### 6.7.3 Not fixed (intentionally)
+
+- **Atomicity of the SQL-dump restore** (partial restore / rollback safety). The
+  restore pipes a `mysqldump` dump through the `mysql` client; DDL statements
+  auto-commit in MySQL, so a mid-import failure can leave partial tables. Making
+  the restore atomic would require restoring into a fresh schema and swapping —
+  a redesign. A failed import already propagates as `RestoreException` (no false
+  success); this limitation is acknowledged, not silently hidden.
+- **`backup_path` setting unused** — `SettingsService` records it for a future
+  phase by design (documented in §6.5); `BackupService`/`RestoreService` keep
+  using the `db_backups` disk. Not a bug.
+- **`kk/` photo path prefix** — backup stores photos as `kk/<stored_filename>`
+  and restore writes them back under the same prefix. `KkPhoto` rows are not yet
+  written by any production path, so there is no `stored_path` to reconcile; left
+  for when photo archival ships. No behavior change.
+- **KK ↔ Penduduk / `kk_anggota` consistency** — no production code currently
+  reassigns a resident across KKs or closes a membership on resident-status
+  change, so no live inconsistency exists. FK `RESTRICT` already prevents orphan
+  deletes. Out of scope for a hotfix (a feature/design addition).
+- **Singleton settings, FK constraints, migration rollback, duplicate master
+  data** — audited and confirmed correct (singleton via `firstOrCreate(id=1)`;
+  lookup masters `name` unique; COMPLETED-status migration is rollback-remap-safe).
+
+### 6.7.4 Files changed (hotfix 1 only)
+
+- `app/Services/BackupService.php`
+- `app/Services/RestoreService.php`
+- `tests/Feature/Phase6/BackupServiceTest.php` (+ regression test)
+- `tests/Feature/Phase6/RestoreServiceTest.php` (+ regression test)
+- `docs/PHASE6.md`, `docs/CHANGELOG.md`
+
+### 6.7.5 Verification
+
+```text
+php artisan test                258 passed (1168 assertions), 4 skipped (env-gated)
+./vendor/bin/pint --test        PASS (193 files)
+npm run build                   PASS (vite exit 0)
+```
+
+### 6.7.6 Commit
+
+`fix(database): Phase 6 hotfix — data integrity`

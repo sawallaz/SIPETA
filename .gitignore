@@ -18,6 +18,9 @@
 /public/storage
 /storage/*.key
 /storage/logs/*
+_ide_helper.php
+_ide_helper_models.php
+.phpstorm.meta.php
 /storage/pail
 /vendor
 Homestead.json

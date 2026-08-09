@@ -7,72 +7,89 @@ use App\Models\Rt;
 use Filament\Widgets\ChartWidget;
 use Illuminate\Database\Eloquent\Builder;
 
-/**
- * Phase 4.3 — bar chart: active residents per RT.
- *
- * Counts only residents with resident_status = ACTIVE (docs/REQUIREMENTS.md
- * §5.5 "Charts reflect active residents only"). Every RT is shown, including
- * RTs with zero active residents, so the chart mirrors the kelurahan's
- * administrative structure (19 RTs across 3 area units per RegionSeeder).
- * RTs are ordered naturally by number ("RT 01" before "RT 10").
- */
 class PendudukPerRTChart extends ChartWidget
 {
     protected static bool $isLazy = false;
 
-    protected int|string|array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 1;
 
     protected ?string $heading = 'Penduduk per RT';
 
-    protected ?string $description = 'Jumlah penduduk aktif di setiap RT';
+    protected ?string $description =
+        'Jumlah penduduk aktif berdasarkan RT';
 
-    protected ?string $emptyStateHeading = 'Belum ada data penduduk';
-
-    protected ?string $emptyStateDescription = 'Grafik akan muncul setelah data penduduk aktif tersedia.';
+    protected ?string $maxHeight = '300px';
 
     protected function getType(): string
     {
         return 'bar';
     }
 
-    /**
-     * @return array<string, mixed>
-     */
     protected function getData(): array
     {
-        $rts = Rt::withCount([
-            'penduduks as active_count' => fn (Builder $query) => $query->where('resident_status', ResidentStatus::ACTIVE->value),
-        ])
+        $rts = Rt::query()
+            ->withCount([
+                'penduduks as active_count' =>
+                    fn (Builder $query) =>
+                        $query->where(
+                            'resident_status',
+                            ResidentStatus::ACTIVE->value
+                        ),
+            ])
             ->get()
             ->sortBy('number', SORT_NATURAL)
             ->values();
 
         return [
+            'labels' => $rts
+                ->map(fn (Rt $rt) => "RT {$rt->number}")
+                ->all(),
+
             'datasets' => [
                 [
                     'label' => 'Penduduk aktif',
-                    'data' => $rts->pluck('active_count')->all(),
-                    // Brand color (amber) shared by both bar charts (Phase 4.6).
-                    'backgroundColor' => '#f59e0b',
+
+                    'data' => $rts
+                        ->pluck('active_count')
+                        ->map(fn ($value) => (int) $value)
+                        ->all(),
+
+                    'backgroundColor' => '#4f6f3a',
+
+                    'borderRadius' => 6,
+
+                    'barThickness' => 22,
                 ],
             ],
-            'labels' => $rts->map(fn (Rt $rt) => "RT {$rt->number}")->all(),
         ];
     }
 
-    /**
-     * @return array<string, mixed>
-     */
     protected function getOptions(): array
     {
         return [
+            'responsive' => true,
+
+            'maintainAspectRatio' => false,
+
             'plugins' => [
-                'legend' => ['display' => false],
+                'legend' => [
+                    'display' => false,
+                ],
             ],
+
             'scales' => [
-                'y' => [
+                'x' => [
                     'beginAtZero' => true,
-                    'ticks' => ['precision' => 0],
+
+                    'ticks' => [
+                        'precision' => 0,
+                    ],
+                ],
+
+                'y' => [
+                    'ticks' => [
+                        'autoSkip' => false,
+                    ],
                 ],
             ],
         ];

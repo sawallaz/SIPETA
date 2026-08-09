@@ -47,6 +47,30 @@ return [
             'report' => false,
         ],
 
+        'kk_uploads' => [
+            'driver' => 'local',
+            'root' => storage_path('app/kk_uploads'),
+            'visibility' => 'private',
+            'throw' => false,
+            'report' => false,
+        ],
+
+        'ocr_temp' => [
+            'driver' => 'local',
+            'root' => storage_path('app/ocr_temp'),
+            'visibility' => 'private',
+            'throw' => false,
+            'report' => false,
+        ],
+
+        'db_backups' => [
+            'driver' => 'local',
+            'root' => storage_path('app/backups'),
+            'visibility' => 'private',
+            'throw' => false,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

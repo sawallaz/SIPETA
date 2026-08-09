@@ -1,4 +1,12 @@
 *
 !private/
 !public/
+!kk_uploads/
+!ocr_temp/
+!backups/
+
+# Ignore the contents of runtime data dirs (anchor files keep them tracked).
+kk_uploads/*
+ocr_temp/*
+backups/*
 !.gitignore

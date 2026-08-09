@@ -23,6 +23,8 @@ class PenduduksTable
     public static function configure(Table $table): Table
     {
         return $table
+            ->recordUrl(null)
+            ->deferFilters()
             ->columns([
                 TextColumn::make('nik')
                     ->label('NIK')
@@ -112,9 +114,7 @@ class PenduduksTable
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
-            ->filters([
-                //
-            ])
+            ->filters(PendudukanFilters::build())
             ->recordActions([
                 ViewAction::make()
                     ->label('Lihat'),

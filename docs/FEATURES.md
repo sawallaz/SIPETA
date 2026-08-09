@@ -26,8 +26,8 @@ Feature status legend:
 | F-CORE-02 | Dashboard statistics | Planned | Phase 3 | `.ai/architecture.md` §4 |
 | F-CORE-03 | KK CRUD | Planned | Phase 3 | `.ai/database.md` |
 | F-CORE-04 | Penduduk CRUD | Planned | Phase 3 | `.ai/database.md` |
-| F-CORE-05 | Search (Nama, NIK, KK Number) | Planned | Phase 3 | `.ai/workflow.md` |
-| F-CORE-06 | Filter (RT, RW, Lingkungan, Gender, Religion, Education, Occupation, Status, Exact Age, Age Range) | Planned | Phase 3 | `.ai/workflow.md` |
+| F-CORE-05 | Search (Nama, NIK, KK Number) | Implemented | Phase UI-2 | `.ai/workflow.md` |
+| F-CORE-06 | Filter (RT, RW, Lingkungan, Gender, Religion, Education, Occupation, Status, Exact Age, Age Range) | Implemented | Phase UI-2 | `.ai/workflow.md` |
 | F-CORE-07 | Resident status workflow (ACTIVE / PINDAH / MENINGGAL) | Planned | Phase 3 | `.ai/project-rules.md` |
 | F-CORE-08 | KK photo upload and display | Planned | Phase 3 | `.ai/database.md` |
 | F-CORE-09 | OCR from KK photo | Planned | Phase 4 | `.ai/ocr.md` |

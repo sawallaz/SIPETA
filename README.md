@@ -44,11 +44,34 @@ The setup script intentionally does not overwrite an existing `.env`. Database m
 
 | Script | Purpose |
 |---|---|
-| `bash scripts/setup.sh` | Install PHP/JS dependencies, create `.env` when absent, generate `APP_KEY` only when missing, build assets, and run local migrations. |
-| `bash scripts/verify.sh` | Validate Composer metadata, inspect Laravel/Filament status, run tests, and build frontend assets when dependencies are installed. |
-| `bash scripts/clean.sh` | Clear Laravel caches and regenerate Composer autoload files without deleting project data. |
+| `bash scripts/setup.sh` | Install PHP/JS dependencies, run `composer run setup`, and link the public storage directory. |
+| `bash scripts/verify.sh` | Validate Composer metadata, clear framework caches (`optimize:clear`), and run `php -l` syntax checks across the codebase. Prints PASS/FAIL. |
+| `bash scripts/backup.sh` | Dump the `sipeta` database to `storage/app/backups/sipeta_<timestamp>.sql.gz` (credentials read from `.env`). Includes a commented cron example. |
+| `bash scripts/clean.sh` | Clear Laravel caches and regenerate the Composer autoloader — deliberately NON-destructive (no `git clean`). |
+| `cat scripts/db-user.sql` | Idempotent MySQL `CREATE USER IF NOT EXISTS 'sipeta_app'@'localhost'` + `GRANT` script (run once as root). |
 
 These scripts are for developers, not for the final village operator workflow.
+
+## Storage Layout
+
+SIPETA uses dedicated private local disks (configured in `config/filesystems.php`):
+
+| Disk | Path | Purpose |
+|---|---|---|
+| `kk_uploads` | `storage/app/kk_uploads` | Uploaded Kartu Keluarga scans (Phase 3+). |
+| `ocr_temp` | `storage/app/ocr_temp` | Temporary OCR working files (Phase 5+). |
+| `db_backups` | `storage/app/backups` | Database dumps produced by `scripts/backup.sh`. |
+
+Their contents are gitignored; the directories themselves are tracked so deployments start with the right structure.
+
+## Deferred Tooling (deliberate, for KKN speed)
+
+The following were intentionally **not** added in Phase 1.5:
+
+- **PHPStan** — postponed until the app is nearly complete to avoid churn on static-analysis warnings during feature work.
+- **GitHub Actions CI** — not needed for a single-developer KKN project; focus stays on features.
+- **`scripts/release.sh`** — premature (no release, desktop app, or installer yet).
+- **Full `/tmp` clone-from-scratch verification** — deferred to pre-deployment.
 
 ## Architecture Overview
 

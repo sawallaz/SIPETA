@@ -8,20 +8,20 @@ use Filament\Widgets\ChartWidget;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
- * Phase 4.3 — doughnut chart: active residents per occupation (pekerjaan).
+ * PHASE UI-1 — horizontal bar chart: active residents per occupation (pekerjaan).
  *
- * Counts only residents with resident_status = ACTIVE (docs/REQUIREMENTS.md
- * §5.5 "Charts reflect active residents only"). Occupations come from the
- * evolving `occupations` lookup table (12 rows seeded); only occupations
- * with at least one active resident are shown, sorted by count descending
- * (largest share first) with ties broken by name — empty occupations are
- * omitted so the doughnut stays readable.
+ * Occupation has more than ~6 seeded categories, so per product decisions
+ * (docs/PRODUCT_DECISIONS.md §2 D-CHT-02/D-CHT-04) it must be a horizontal
+ * bar chart — never a pie. Counts only residents with resident_status =
+ * ACTIVE (docs/REQUIREMENTS.md §5.5 "Charts reflect active residents only").
+ * Occupations with zero active residents are omitted; sorted by count
+ * descending, ties broken by name.
  */
 class PendudukPerPekerjaanChart extends ChartWidget
 {
     protected static bool $isLazy = false;
 
-    protected int|string|array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 1;
 
     protected ?string $heading = 'Penduduk per Pekerjaan';
 
@@ -31,9 +31,11 @@ class PendudukPerPekerjaanChart extends ChartWidget
 
     protected ?string $emptyStateDescription = 'Grafik akan muncul setelah data penduduk aktif tersedia.';
 
+    protected ?string $maxHeight = '320px';
+
     protected function getType(): string
     {
-        return 'doughnut';
+        return 'bar';
     }
 
     /**
@@ -53,7 +55,7 @@ class PendudukPerPekerjaanChart extends ChartWidget
             ->values();
 
         // Categorical palette (Tailwind 500-scale), anchored on the brand
-        // amber (#f59e0b), covering the 12 seeded occupations (Phase 4.6).
+        // amber (#f59e0b), covering the seeded occupations.
         $palette = [
             '#f59e0b', '#0ea5e9', '#10b981', '#ef4444', '#8b5cf6', '#ec4899',
             '#f97316', '#14b8a6', '#6366f1', '#84cc16', '#eab308', '#64748b',
@@ -65,7 +67,6 @@ class PendudukPerPekerjaanChart extends ChartWidget
                     'label' => 'Penduduk aktif',
                     'data' => $occupations->pluck('active_count')->all(),
                     'backgroundColor' => array_slice($palette, 0, $occupations->count()),
-                    'borderColor' => '#ffffff',
                 ],
             ],
             'labels' => $occupations->pluck('name')->all(),
@@ -78,9 +79,14 @@ class PendudukPerPekerjaanChart extends ChartWidget
     protected function getOptions(): array
     {
         return [
+            'indexAxis' => 'y',
             'plugins' => [
-                'legend' => [
-                    'position' => 'right',
+                'legend' => ['display' => false],
+            ],
+            'scales' => [
+                'x' => [
+                    'beginAtZero' => true,
+                    'ticks' => ['precision' => 0],
                 ],
             ],
         ];

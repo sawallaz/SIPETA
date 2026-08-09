@@ -10,7 +10,9 @@ use App\Filament\Resources\Penduduks\Pages\CreatePenduduk;
 use App\Filament\Resources\Penduduks\Pages\EditPenduduk;
 use App\Filament\Resources\Penduduks\Pages\ListPenduduks;
 use App\Filament\Resources\Penduduks\PendudukResource;
+use App\Models\AreaUnit;
 use App\Models\KartuKeluarga;
+use App\Models\Rt;
 use App\Models\Penduduk;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -74,6 +76,8 @@ class Phase3PolishTest extends Phase3ResourceTestCase
             ->fillForm([
                 'kk_number' => '7371010101010555',
                 'address' => 'Jl. Notifikasi',
+                'area_unit_id' => AreaUnit::factory()->create()->id,
+                'rt_id' => Rt::factory()->create()->id,
             ])
             ->call('create')
             ->assertHasNoFormErrors()

@@ -36,15 +36,16 @@ class SettingsPageTest extends TestCase
         $this->actingAs($this->admin);
     }
 
-    public function test_page_loads_with_identity_and_backup_fields(): void
+    public function test_page_loads_with_identity_and_logo_fields(): void
     {
         $this->get(Settings::getUrl())
             ->assertOk()
             ->assertSee('Pengaturan')
             ->assertSee('Identitas Kelurahan')
             ->assertSee('Logo Kelurahan')
-            ->assertSee('Backup')
-            ->assertSee('SIMPAN');
+            ->assertDontSee('Lokasi Backup')
+            ->assertSee('Simpan')
+            ->assertDontSee('SIMPAN');
     }
 
     public function test_singleton_row_is_created_on_first_access(): void
@@ -56,7 +57,7 @@ class SettingsPageTest extends TestCase
         $this->assertSame('Kelurahan Tanete', $setting->kelurahan_name);
     }
 
-    public function test_identity_and_backup_fields_persist_on_save(): void
+    public function test_identity_and_logo_fields_persist_on_save(): void
     {
         Livewire::test(Settings::class)
             ->fillForm([
@@ -64,7 +65,6 @@ class SettingsPageTest extends TestCase
                 'kecamatan_name' => 'Barru',
                 'kabupaten_name' => 'Kabupaten Barru',
                 'province_name' => 'Sulawesi Selatan',
-                'backup_path' => '/data/sipeta/backups',
             ])
             ->call('save')
             ->assertNotified('Pengaturan tersimpan');
@@ -75,7 +75,6 @@ class SettingsPageTest extends TestCase
         $this->assertSame('Barru', $setting->kecamatan_name);
         $this->assertSame('Kabupaten Barru', $setting->kabupaten_name);
         $this->assertSame('Sulawesi Selatan', $setting->province_name);
-        $this->assertSame('/data/sipeta/backups', $setting->backup_path);
         $this->assertDatabaseCount('settings', 1);
     }
 
@@ -87,7 +86,6 @@ class SettingsPageTest extends TestCase
                 'kecamatan_name' => 'Tanete',
                 'kabupaten_name' => 'Barru',
                 'province_name' => 'Sulawesi Selatan',
-                'backup_path' => storage_path('app/backups'),
                 'logo_path' => UploadedFile::fake()->image('kota.png'),
             ])
             ->call('save')
@@ -100,21 +98,26 @@ class SettingsPageTest extends TestCase
         $this->assertTrue(Storage::disk('local')->exists($setting->logo_path));
     }
 
-    public function test_backup_path_is_operator_configuration_only(): void
+    public function test_backup_path_is_preserved_when_not_submitted_from_ui(): void
     {
+        // The Backup section was removed from the Settings UI, but backup_path
+        // remains a real backend field consumed by BackupService/RestoreService.
+        // Saving the form without a backup_path input must NOT wipe the stored value.
+        // Ensure the singleton exists first, then set a known value.
+        app(SettingsService::class)->get()->update(['backup_path' => '/var/opt/sipeta/protected-backups']);
+
         Livewire::test(Settings::class)
             ->fillForm([
                 'kelurahan_name' => 'Kelurahan Tanete',
                 'kecamatan_name' => 'Tanete',
                 'kabupaten_name' => 'Barru',
                 'province_name' => 'Sulawesi Selatan',
-                'backup_path' => '/var/opt/sipeta/custom-backups',
             ])
             ->call('save');
 
         $setting = Setting::query()->find(1);
 
-        $this->assertSame('/var/opt/sipeta/custom-backups', $setting->backup_path);
+        $this->assertSame('/var/opt/sipeta/protected-backups', $setting->backup_path);
     }
 
     public function test_identity_fields_are_required(): void
@@ -125,7 +128,6 @@ class SettingsPageTest extends TestCase
                 'kecamatan_name' => '',
                 'kabupaten_name' => '',
                 'province_name' => '',
-                'backup_path' => '',
             ])
             ->call('save')
             ->assertHasFormErrors([
@@ -133,7 +135,6 @@ class SettingsPageTest extends TestCase
                 'kecamatan_name',
                 'kabupaten_name',
                 'province_name',
-                'backup_path',
             ]);
     }
 }

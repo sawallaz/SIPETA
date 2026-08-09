@@ -75,9 +75,14 @@ class RestoreService
             // 2. Re-apply the settings singleton when a row was backed up.
             $this->applySettings($settingsJson);
 
-            // 3. Restore the archived KK photo files.
+            // 3. Restore the archived KK photo files. kk_uploads is configured
+            //    with throw=false, so a failed write returns false instead of
+            //    throwing — surface it rather than reporting a false success
+            //    with the DB already restored (NFR-REL-01).
             foreach ($photoFiles as $name => $bytes) {
-                Storage::disk(self::PHOTO_DISK)->put($name, $bytes);
+                if (Storage::disk(self::PHOTO_DISK)->put($name, $bytes) === false) {
+                    throw new RestoreException(sprintf('Foto %s gagal dipulihkan ke disk.', $name));
+                }
             }
 
             Log::info('Arsip backup diterapkan.', [

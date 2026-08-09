@@ -5,6 +5,7 @@ namespace Tests\Feature\Phase6;
 use App\Exceptions\RestoreException;
 use App\Models\Setting;
 use App\Services\RestoreService;
+use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\FakeDatabaseImporter;
@@ -188,5 +189,55 @@ class RestoreServiceTest extends TestCase
         // The SQL dump is applied first; a failure stops settings + photos.
         $this->assertSame('Kelurahan Tanete', Setting::query()->first()->kelurahan_name);
         Storage::disk(RestoreService::PHOTO_DISK)->assertDirectoryEmpty('');
+    }
+
+    public function test_photo_write_failure_is_never_a_false_success(): void
+    {
+        // kk_uploads is configured throw=false: a failed photo write returns
+        // false instead of throwing. Point the disk at a real unwritable root
+        // so put() fails for real, and assert a failed photo restore surfaces
+        // as a RestoreException — never a "restored" false success (NFR-REL-01).
+        $root = sys_get_temp_dir().'/sipeta_restore_test_'.uniqid();
+        mkdir($root, 0777, true);
+
+        config(['filesystems.disks.db_backups' => [
+            'driver' => 'local',
+            'root' => $root,
+            'throw' => false,
+        ]]);
+        config(['filesystems.disks.kk_uploads' => [
+            'driver' => 'local',
+            'root' => '/proc',
+            'throw' => false,
+        ]]);
+        $this->app->instance('filesystem', new FilesystemManager($this->app));
+        // The facade caches the resolved manager (setUp's Storage::fake); drop
+        // it so the re-pointed disks above actually resolve.
+        Storage::clearResolvedInstances();
+
+        try {
+            $this->putZip('backup_photo_fail.zip', [
+                'database.sql' => 'CREATE TABLE example (id INT);',
+                'settings.json' => '[]',
+                'kk/photo-a.jpg' => 'PHOTO_A',
+            ]);
+
+            // A photo write failure surfaces as a RestoreException (it must
+            // never report a "restored" success); the exact message depends on
+            // whether the adapter returns false or throws, so just assert the
+            // restore fails loudly.
+            try {
+                $this->service->restore('backup_photo_fail.zip', null, true);
+                $this->fail('Expected RestoreException was not thrown on a failed photo write.');
+            } catch (RestoreException) {
+                // expected — the restore must not report success
+            }
+
+            // The SQL dump was still applied, but the restore did not report success.
+            $this->assertSame(['CREATE TABLE example (id INT);'], $this->importer->applied);
+        } finally {
+            @unlink($root.'/backup_photo_fail.zip');
+            @rmdir($root);
+        }
     }
 }

@@ -133,6 +133,15 @@ class PendudukImportService
             $pendudukIds = DB::transaction(function () use ($job, $kk, $members, $rt, $operator): array {
                 $ids = [];
 
+                // Wilayah adalah milik Kartu Keluarga (ADR-004): simpan RT yang
+                // di-resolve ke KK dulu, lalu setiap Penduduk mewarisi rt_id-nya
+                // melalui hook Penduduk::booted(). Kolom penduduk.rt_id tetap
+                // NOT NULL, jadi KK wajib punya RT sebelum Penduduk dibuat.
+                if ($kk->rt_id !== $rt->id) {
+                    $kk->rt_id = $rt->id;
+                    $kk->save();
+                }
+
                 foreach ($members as $member) {
                     $penduduk = Penduduk::create($this->pendudukAttributes($kk, $member, $rt->id));
                     $ids[] = $penduduk->id;

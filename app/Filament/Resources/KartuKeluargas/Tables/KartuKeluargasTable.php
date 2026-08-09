@@ -2,22 +2,29 @@
 
 namespace App\Filament\Resources\KartuKeluargas\Tables;
 
+use App\Enums\FamilyRelation;
+use App\Filament\Resources\KartuKeluargas\KartuKeluargaDeleteGuard;
+use App\Filament\Resources\KartuKeluargas\KartuKeluargaResource;
 use App\Models\KartuKeluarga;
+use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ViewAction;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\HtmlString;
 
 class KartuKeluargasTable
 {
     public static function configure(Table $table): Table
     {
         return $table
+            ->recordUrl(null)
             ->columns([
 
                 /*
@@ -30,16 +37,16 @@ class KartuKeluargasTable
                  * langsung dari tabel.
                  */
                 ImageColumn::make('active_photo_thumbnail_url')
-                    ->label('Foto KK')
+                    ->label('Foto')
                     ->state(fn (KartuKeluarga $record): ?string => $record->active_photo_thumbnail_url)
-                    ->height(58)
-                    ->width(82)
+                    ->height(52)
+                    ->width(74)
                     ->extraImgAttributes([
                         'class' => 'cursor-pointer rounded-lg object-cover',
                     ])
                     ->url(fn (KartuKeluarga $record): ?string => $record->active_photo_full_url)
                     ->openUrlInNewTab()
-                    ->tooltip('Klik untuk melihat foto KK')
+                    ->tooltip('Buka foto KK')
                     ->toggleable(isToggledHiddenByDefault: false),
 
                 /*
@@ -54,7 +61,7 @@ class KartuKeluargasTable
                     ->copyable()
                     ->copyMessage('Nomor KK disalin')
                     ->copyMessageDuration(1500)
-                    ->width('170px')
+                    ->width('165px')
                     ->toggleable(isToggledHiddenByDefault: false),
 
                 /*
@@ -66,9 +73,29 @@ class KartuKeluargasTable
                     ->label('Kepala Keluarga')
                     ->state(fn (KartuKeluarga $record): ?string => $record->kepalaKeluarga()?->full_name)
                     ->placeholder('Belum ditentukan')
-                    ->searchable()
+                    /*
+                     * `kepala_keluarga` BUKAN kolom pada tabel `kartu_keluarga`.
+                     * Nama kepala keluarga hidup di penduduk.full_name, terhubung
+                     * lewat penduduk.kk_id dengan family_relation = KEPALA_KELUARGA.
+                     *
+                     * ->searchable() tanpa argumen membuat Filament menebak nama
+                     * kolom dari nama column ('kepala_keluarga') dan menghasilkan
+                     * `kartu_keluarga`.`kepala_keluarga` LIKE ? → SQLSTATE[42S22].
+                     *
+                     * Karena itu pencarian dialihkan ke relasi via closure
+                     * `query:` (Filament\Tables\Columns\Concerns\CanBeSearchable),
+                     * yang men-short-circuit jalur nama kolom sepenuhnya.
+                     */
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->whereHas(
+                            'penduduks',
+                            fn (Builder $penduduk): Builder => $penduduk
+                                ->where('family_relation', FamilyRelation::KEPALA_KELUARGA->value)
+                                ->where('full_name', 'like', '%'.$search.'%')
+                        );
+                    })
                     ->wrap()
-                    ->width('220px')
+                    ->width('190px')
                     ->toggleable(isToggledHiddenByDefault: false),
 
                 /*
@@ -77,10 +104,10 @@ class KartuKeluargasTable
                  * ==========================================================
                  */
                 TextColumn::make('rt_rw')
-                    ->label('RT / RW')
+                    ->label('RW / Lingkungan')
                     ->state(fn (KartuKeluarga $record): ?string => $record->rt_rw_label)
                     ->placeholder('-')
-                    ->width('120px')
+                    ->width('130px')
                     ->toggleable(isToggledHiddenByDefault: false),
 
                 /*
@@ -95,10 +122,9 @@ class KartuKeluargasTable
                     ->label('Alamat')
                     ->searchable()
                     ->wrap()
-                    ->width('420px')
-                    ->limit(120)
+                    ->limit(80)
                     ->tooltip(fn (KartuKeluarga $record): ?string => $record->address)
-                    ->toggleable(isToggledHiddenByDefault: false),
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 /*
                  * ==========================================================
@@ -118,7 +144,7 @@ class KartuKeluargasTable
                     ->formatStateUsing(fn (?int $state): string => number_format((int) $state, 0, ',', '.'))
                     ->suffix(' jiwa')
                     ->sortable()
-                    ->width('130px')
+                    ->width('120px')
                     ->toggleable(isToggledHiddenByDefault: false),
 
                 /*
@@ -168,9 +194,39 @@ class KartuKeluargasTable
              */
             ->recordActions([
 
-                ViewAction::make()
+                Action::make('lihat')
                     ->label('Lihat')
-                    ->icon('heroicon-o-eye'),
+                    ->icon('heroicon-o-eye')
+                    ->modalHeading(fn (KartuKeluarga $record): string => 'Kartu Keluarga '.$record->kk_number)
+                    ->modalWidth('7xl')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Tutup')
+                    ->modalFooterActions([
+                        Action::make('ubah')
+                            ->label('Ubah')
+                            ->icon('heroicon-o-pencil')
+                            ->url(
+                                fn (KartuKeluarga $record): string => KartuKeluargaResource::getUrl(
+                                    'edit',
+                                    ['record' => $record]
+                                )
+                            ),
+                    ])
+                    ->modalContent(
+                        fn (KartuKeluarga $record): HtmlString => new HtmlString(
+                            view(
+                                'filament.resources.kartu-keluargas.kk-detail-modal',
+                                [
+                                    'kk' => $record->load([
+                                        'rt.areaUnit',
+                                        'penduduks.religion',
+                                        'penduduks.education',
+                                        'penduduks.occupation',
+                                    ]),
+                                ]
+                            )->render()
+                        )
+                    ),
 
                 EditAction::make()
                     ->label('Ubah')
@@ -181,10 +237,15 @@ class KartuKeluargasTable
                     ->icon('heroicon-o-trash')
                     ->modalHeading('Hapus Kartu Keluarga')
                     ->modalDescription(
-                        'Data Kartu Keluarga dan data terkait akan dihapus. Lanjutkan?'
+                        'Kartu Keluarga hanya dapat dihapus jika tidak memiliki anggota atau data histori yang masih terhubung. Penghapusan tidak akan menghapus anggota, foto, maupun riwayat secara otomatis.'
                     )
                     ->modalSubmitActionLabel('Ya, Hapus')
                     ->modalCancelActionLabel('Batal')
+                    ->before(
+                        function (KartuKeluarga $record): void {
+                            KartuKeluargaDeleteGuard::assertDeletable($record);
+                        }
+                    )
                     ->successNotificationTitle('Kartu Keluarga berhasil dihapus'),
             ])
 
@@ -193,9 +254,16 @@ class KartuKeluargasTable
                     DeleteBulkAction::make()
                         ->label('Hapus yang dipilih')
                         ->modalHeading('Hapus Kartu Keluarga terpilih')
-                        ->modalDescription('Data yang dipilih akan dihapus. Lanjutkan?')
+                        ->modalDescription('Kartu Keluarga yang masih memiliki anggota, foto, atau riwayat tidak akan dihapus. Hanya KK yang benar-benar kosong yang dapat dihapus.')
                         ->modalSubmitActionLabel('Ya, Hapus')
                         ->modalCancelActionLabel('Batal')
+                        ->before(
+                            function (Collection $records): void {
+                                foreach ($records as $record) {
+                                    KartuKeluargaDeleteGuard::assertDeletable($record);
+                                }
+                            }
+                        )
                         ->successNotificationTitle('Kartu Keluarga terpilih berhasil dihapus'),
                 ]),
             ])

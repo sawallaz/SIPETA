@@ -3,7 +3,7 @@
 | **Title** | SIPETA Changelog |
 | **Purpose** | Record every meaningful change to the project, following the Keep a Changelog format. |
 | **Scope** | All phases of SIPETA development, including documentation, architecture, and code. |
-| **Version** | 1.22.0 |
+| **Version** | 1.23.0 |
 | **Status** | Active |
 | **Last Updated** | 2026-08-07 |
 | **Related Documents** | `docs/REQUIREMENTS.md`, `docs/FEATURES.md`, `docs/PHASE1.md`, `docs/PHASE2.md`, `docs/PHASE3.md`, `docs/PHASE4.md`, `docs/PHASE5.md`, `docs/PHASE6.md`, `.ai/roadmap.md`, `.ai/decisions.md`, `.ai/hermes.md` |
@@ -344,6 +344,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Still out of scope: scheduled backups, retention/rotation, FR-MED-04 launch integrity check, and FR-MED-05 restore dry-run (later Phase 6 work).
 - No migrations/schema changes — the existing `settings` table is reused.
 - `npm run build` regenerated only gitignored `public/build` artifacts — no tracked frontend file changed. `php artisan test tests/Feature/Phase6/SettingsPageTest.php` 6 passed (41 assertions); full-suite, `pint --test` and `npm run build` results recorded in docs/PHASE6.md §6.5.5.
+
+### Fixed (Phase 6 Hotfix 1 — Database & data integrity — 2026-08-07)
+- **Backup false success** (`app/Services/BackupService.php` `create()`): the `db_backups` disk is configured `throw=false`, so `Storage::writeStream()` returns `false` instead of throwing on a failed write. The return value was ignored — a backup that never landed on disk was logged `SUCCESS` and shown as "Backup berhasil". Now the write result (and archive existence) is checked; a failed write throws `BackupException`, which the existing catch records as `FAILED` instead of a false success (NFR-REL-01).
+- **Photo-restore false success** (`app/Services/RestoreService.php`): `kk_uploads` is also `throw=false`, so a failed photo `put()` returned `false` and was ignored — a restore could report "Pemulihan selesai" while photos never landed. A `put()` that returns `false` now throws `RestoreException`, surfacing the failure.
+- **Zip close guard** (`app/Services/BackupService.php` `buildArchive()`): a failed `ZipArchive::close()` (truncated archive) now throws `BackupException` (→ logged `FAILED`) and cleans up the temp file, rather than silently shipping a corrupt archive.
+- **Regression tests** added to `tests/Feature/Phase6/BackupServiceTest.php` and `tests/Feature/Phase6/RestoreServiceTest.php` proving a disk-write failure is never reported as success.
+
+### Notes (Phase 6 Hotfix 1)
+- Intentionally **not** fixed (documented in docs/PHASE6.md §6.7.3): atomicity of the SQL-dump restore (a redesign), `backup_path` remaining operator-configuration only (design intent), `KkPhoto` rows not yet written by any production path, and KK ↔ Penduduk/`kk_anggota` consistency where no production code reassigns or closes memberships.
+- `php artisan test` 258 passed (1168 assertions) / 4 skipped (env-gated); `./vendor/bin/pint --test` PASS (193 files); `npm run build` PASS.
 
 ### Added (Phase 5.7 — Import Kartu Keluarga — 2026-08-07)
 - **Import service** (`app/Services/OcrImportService.php`, new — `App\Services\*` per ADR-016):

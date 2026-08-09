@@ -3,25 +3,38 @@
 namespace Tests\Feature\Phase4;
 
 use App\Enums\ResidentStatus;
+use App\Filament\Widgets\PendudukPerAgamaChart;
+use App\Filament\Widgets\PendudukPerGenderChart;
 use App\Filament\Widgets\PendudukPerLingkunganChart;
 use App\Filament\Widgets\PendudukPerPekerjaanChart;
+use App\Filament\Widgets\PendudukPerPendidikanChart;
 use App\Filament\Widgets\PendudukPerRTChart;
+use App\Filament\Widgets\PendudukPerStatusChart;
 use App\Models\AreaUnit;
+use App\Models\Education;
 use App\Models\KartuKeluarga;
 use App\Models\Occupation;
 use App\Models\Penduduk;
+use App\Models\Religion;
 use App\Models\Rt;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * Phase 4.3 — dashboard charts.
+ * PHASE UI-1 — dashboard charts.
  *
- * Verifies the three charts (per RT, per Lingkungan, per Pekerjaan) render
- * with their headings on the dashboard and that every chart reflects ONLY
- * active residents (docs/REQUIREMENTS.md §5.5 "Charts reflect active
- * residents only"), matching a controlled set of database records.
+ * Verifies the dashboard renders the redesigned chart set — Gender and
+ * Resident Status as pies, Occupation / Education / Religion as horizontal
+ * bars, RT / Lingkungan as vertical bars (docs/PRODUCT_DECISIONS.md §2
+ * D-CHT-01..04) — and that every chart reflects **active residents only**
+ * (docs/REQUIREMENTS.md §5.5 "Charts reflect active residents only"),
+ * matching a controlled set of database records.
+ *
+ * Note: Gender and Resident Status pies summarise the whole resident list
+ * (their purpose is the population's gender/status make-up, not the active
+ * subset), whereas the distribution bars follow §5.5 and count active
+ * residents only.
  */
 class DashboardChartTest extends TestCase
 {
@@ -41,12 +54,68 @@ class DashboardChartTest extends TestCase
     {
         $this->get('/admin')
             ->assertOk()
+            ->assertSee('Penduduk per Gender')
+            ->assertSee('Status Penduduk')
+            ->assertSee('Penduduk per Pekerjaan')
+            ->assertSee('Penduduk per Pendidikan')
+            ->assertSee('Penduduk per Agama')
             ->assertSee('Penduduk per RT')
-            ->assertSee('Penduduk per Lingkungan')
-            ->assertSee('Penduduk per Pekerjaan');
+            ->assertSee('Penduduk per Lingkungan');
     }
 
-    public function test_chart_data_matches_database_and_counts_active_residents_only(): void
+    public function test_gender_and_status_are_pie_charts(): void
+    {
+        $this->assertSame('pie', invade(new PendudukPerGenderChart)->getType());
+        $this->assertSame('pie', invade(new PendudukPerStatusChart)->getType());
+    }
+
+    public function test_occupation_education_religion_are_horizontal_bars(): void
+    {
+        foreach (['bar' => [
+            PendudukPerPekerjaanChart::class,
+            PendudukPerPendidikanChart::class,
+            PendudukPerAgamaChart::class,
+        ]] as $type => $classes) {
+            foreach ($classes as $class) {
+                $this->assertSame($type, invade(new $class)->getType());
+                $options = invade(new $class)->getOptions();
+                $this->assertArrayHasKey('indexAxis', $options, "{$class} must be a horizontal bar (indexAxis)");
+                $this->assertSame('y', $options['indexAxis']);
+            }
+        }
+    }
+
+    public function test_gender_pie_counts_all_residents(): void
+    {
+        $kk = KartuKeluarga::factory()->create();
+
+        // Male: 3 (2 active + 1 moved), Female: 2 (active).
+        Penduduk::factory()->create(['kk_id' => $kk->id, 'gender' => 'LAKI_LAKI', 'resident_status' => ResidentStatus::ACTIVE->value]);
+        Penduduk::factory()->create(['kk_id' => $kk->id, 'gender' => 'LAKI_LAKI', 'resident_status' => ResidentStatus::ACTIVE->value]);
+        Penduduk::factory()->create(['kk_id' => $kk->id, 'gender' => 'LAKI_LAKI', 'resident_status' => ResidentStatus::PINDAH->value]);
+        Penduduk::factory()->create(['kk_id' => $kk->id, 'gender' => 'PEREMPUAN', 'resident_status' => ResidentStatus::ACTIVE->value]);
+        Penduduk::factory()->create(['kk_id' => $kk->id, 'gender' => 'PEREMPUAN', 'resident_status' => ResidentStatus::MENINGGAL->value]);
+
+        $data = invade(new PendudukPerGenderChart)->getData();
+        $this->assertSame(['Laki-laki', 'Perempuan'], $data['labels']);
+        $this->assertSame([3, 2], $data['datasets'][0]['data']);
+    }
+
+    public function test_status_pie_counts_all_residents(): void
+    {
+        $kk = KartuKeluarga::factory()->create();
+
+        Penduduk::factory()->create(['kk_id' => $kk->id, 'resident_status' => ResidentStatus::ACTIVE->value]);
+        Penduduk::factory()->create(['kk_id' => $kk->id, 'resident_status' => ResidentStatus::ACTIVE->value]);
+        Penduduk::factory()->create(['kk_id' => $kk->id, 'resident_status' => ResidentStatus::PINDAH->value]);
+        Penduduk::factory()->create(['kk_id' => $kk->id, 'resident_status' => ResidentStatus::MENINGGAL->value]);
+
+        $data = invade(new PendudukPerStatusChart)->getData();
+        $this->assertSame(['Aktif', 'Pindah', 'Meninggal'], $data['labels']);
+        $this->assertSame([2, 1, 1], $data['datasets'][0]['data']);
+    }
+
+    public function test_distribution_bar_charts_match_database_and_count_active_residents_only(): void
     {
         $area1 = AreaUnit::factory()->create(['name' => 'Lingkungan I']);
         $area2 = AreaUnit::factory()->create(['name' => 'Lingkungan II']);
@@ -58,31 +127,32 @@ class DashboardChartTest extends TestCase
         $pedagang = Occupation::factory()->create(['name' => 'Pedagang']);
         $pns = Occupation::factory()->create(['name' => 'PNS']);
 
+        $sd = Education::factory()->create(['name' => 'SD']);
+        $sma = Education::factory()->create(['name' => 'SMA']);
+
+        $islam = Religion::factory()->create(['name' => 'Islam']);
+        $katolik = Religion::factory()->create(['name' => 'Katolik']);
+
         $kk = KartuKeluarga::factory()->create();
 
-        $addPenduduk = static function (int $rtId, int $occupationId, string $status) use ($kk): void {
-            Penduduk::factory()->create([
-                'kk_id' => $kk->id,
-                'rt_id' => $rtId,
-                'occupation_id' => $occupationId,
-                'resident_status' => $status,
-            ]);
+        $addPenduduk = static function (int $rtId, array $attrs) use ($kk): void {
+            Penduduk::factory()->create(array_merge(['kk_id' => $kk->id, 'rt_id' => $rtId], $attrs));
         };
 
         // RT 01 (Lingkungan I): 3 active -> Petani x2, Pedagang x1 (+ 1 PINDAH Petani excluded)
-        $addPenduduk($rt1->id, $petani->id, ResidentStatus::ACTIVE->value);
-        $addPenduduk($rt1->id, $petani->id, ResidentStatus::ACTIVE->value);
-        $addPenduduk($rt1->id, $pedagang->id, ResidentStatus::ACTIVE->value);
-        $addPenduduk($rt1->id, $petani->id, ResidentStatus::PINDAH->value);
+        $addPenduduk($rt1->id, ['occupation_id' => $petani->id, 'education_id' => $sd->id, 'religion_id' => $islam->id, 'resident_status' => ResidentStatus::ACTIVE->value]);
+        $addPenduduk($rt1->id, ['occupation_id' => $petani->id, 'education_id' => $sd->id, 'religion_id' => $islam->id, 'resident_status' => ResidentStatus::ACTIVE->value]);
+        $addPenduduk($rt1->id, ['occupation_id' => $pedagang->id, 'education_id' => $sd->id, 'religion_id' => $islam->id, 'resident_status' => ResidentStatus::ACTIVE->value]);
+        $addPenduduk($rt1->id, ['occupation_id' => $petani->id, 'education_id' => $sma->id, 'religion_id' => $katolik->id, 'resident_status' => ResidentStatus::PINDAH->value]);
 
-        // RT 02 (Lingkungan I): no residents -> 0
+        // RT 02: no residents -> 0
         // RT 03 (Lingkungan II): 3 active -> Petani x1, Pedagang x1, PNS x1 (+ 1 MENINGGAL Pedagang excluded)
-        $addPenduduk($rt3->id, $petani->id, ResidentStatus::ACTIVE->value);
-        $addPenduduk($rt3->id, $pedagang->id, ResidentStatus::ACTIVE->value);
-        $addPenduduk($rt3->id, $pns->id, ResidentStatus::ACTIVE->value);
-        $addPenduduk($rt3->id, $pedagang->id, ResidentStatus::MENINGGAL->value);
+        $addPenduduk($rt3->id, ['occupation_id' => $petani->id, 'education_id' => $sma->id, 'religion_id' => $katolik->id, 'resident_status' => ResidentStatus::ACTIVE->value]);
+        $addPenduduk($rt3->id, ['occupation_id' => $pedagang->id, 'education_id' => $sma->id, 'religion_id' => $katolik->id, 'resident_status' => ResidentStatus::ACTIVE->value]);
+        $addPenduduk($rt3->id, ['occupation_id' => $pns->id, 'education_id' => $sma->id, 'religion_id' => $katolik->id, 'resident_status' => ResidentStatus::ACTIVE->value]);
+        $addPenduduk($rt3->id, ['occupation_id' => $pedagang->id, 'education_id' => $sd->id, 'religion_id' => $islam->id, 'resident_status' => ResidentStatus::MENINGGAL->value]);
 
-        // Per RT: every RT shown, zero-padded, natural number order.
+        // Per RT: every RT shown, zero-padded, natural order.
         $rtData = invade(new PendudukPerRTChart)->getData();
         $this->assertSame(['RT 01', 'RT 02', 'RT 03'], $rtData['labels']);
         $this->assertSame([3, 0, 3], $rtData['datasets'][0]['data']);
@@ -92,9 +162,25 @@ class DashboardChartTest extends TestCase
         $this->assertSame(['Lingkungan I', 'Lingkungan II'], $areaData['labels']);
         $this->assertSame([3, 3], $areaData['datasets'][0]['data']);
 
-        // Per Pekerjaan: active only, count desc, only occupations with >= 1.
+        // Per Occupation: active only, count desc, only occupations with >= 1.
         $occupationData = invade(new PendudukPerPekerjaanChart)->getData();
         $this->assertSame(['Petani', 'Pedagang', 'PNS'], $occupationData['labels']);
         $this->assertSame([3, 2, 1], $occupationData['datasets'][0]['data']);
+
+        // Per Education: active only, desc.
+        $educationData = invade(new PendudukPerPendidikanChart)->getData();
+        $this->assertSame([3, 3], array_values($educationData['datasets'][0]['data']));
+        $this->assertCount(2, $educationData['labels']);
+
+        // Per Agama: active only, desc.
+        $religionData = invade(new PendudukPerAgamaChart)->getData();
+        $this->assertSame([3, 3], array_values($religionData['datasets'][0]['data']));
+        $this->assertCount(2, $religionData['labels']);
+
+        // All three horizontal bars use the expected categorical palette.
+        foreach ([PendudukPerPekerjaanChart::class, PendudukPerPendidikanChart::class, PendudukPerAgamaChart::class] as $class) {
+            $opts = invade(new $class)->getOptions();
+            $this->assertSame('y', $opts['indexAxis']);
+        }
     }
 }

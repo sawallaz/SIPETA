@@ -5,6 +5,7 @@ namespace Tests\Feature\Phase6;
 use App\Enums\ExportFormat;
 use App\Enums\Gender;
 use App\Enums\ResidentStatus;
+use App\Models\KartuKeluarga;
 use App\Models\Penduduk;
 use App\Models\Religion;
 use App\Models\Rt;
@@ -100,8 +101,8 @@ class PendudukExportServiceTest extends TestCase
     {
         $rt = Rt::factory()->create(['number' => '007']);
         $otherRt = Rt::factory()->create(['number' => '001']);
-        Penduduk::factory()->create(['rt_id' => $rt->id]);
-        Penduduk::factory()->create(['rt_id' => $otherRt->id]);
+        Penduduk::factory()->create(['kk_id' => KartuKeluarga::factory()->create(['rt_id' => $rt->id])]);
+        Penduduk::factory()->create(['kk_id' => KartuKeluarga::factory()->create(['rt_id' => $otherRt->id])]);
 
         $query = $this->service->buildQuery(['rt' => '007']);
 
@@ -165,7 +166,23 @@ class PendudukExportServiceTest extends TestCase
         $this->assertSame(1, $query->count());
     }
 
-    public function test_excel_export_returns_valid_xlsx_zip(): void
+    public function test_csv_export_contains_only_prefiltered_rows(): void
+    {
+        // Two residents, different ages. Export a query already narrowed to
+        // adults only (the same age-range predicate the table filter emits, via
+        // Penduduk::scopeAgeRange), and assert the child never appears.
+        Penduduk::factory()->create(['full_name' => 'Dewasa Satu', 'birth_date' => now()->subYears(30)->format('Y-m-d')]);
+        Penduduk::factory()->create(['full_name' => 'Balita Dua', 'birth_date' => now()->subYears(3)->format('Y-m-d')]);
+
+        $query = Penduduk::query()->ageRange(20, 30);
+        $response = $this->service->exportQuery($query, ExportFormat::CSV);
+        $contents = file_get_contents($response->getFile()->getPathname());
+
+        $this->assertStringContainsString('Dewasa Satu', $contents);
+        $this->assertStringNotContainsString('Balita Dua', $contents);
+    }
+
+    public function test_xlsx_export_returns_valid_xlsx_zip(): void
     {
         Penduduk::factory()->create(['full_name' => 'Budi Santoso']);
 

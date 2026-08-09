@@ -76,12 +76,11 @@ class KartuKeluargaPendudukRelationTest extends Phase3ResourceTestCase
         $this->assertSame(2, $kk->penduduks()->count());
     }
 
-    public function test_relation_manager_links_to_the_penduduk_resource(): void
+    public function test_relation_manager_manages_members_in_place(): void
     {
-        $this->assertSame(
-            PendudukResource::class,
-            PenduduksRelationManager::getRelatedResource(),
-        );
+        // UI-5: members must be managed on the KK page (modals), not via
+        // navigation to the Penduduk resource, so no related resource is bound.
+        $this->assertNull(PenduduksRelationManager::getRelatedResource());
     }
 
     public function test_edit_kk_page_renders_the_relation_manager(): void
@@ -99,7 +98,7 @@ class KartuKeluargaPendudukRelationTest extends Phase3ResourceTestCase
         );
     }
 
-    public function test_add_member_action_links_to_penduduk_create_prefilled_with_the_kk(): void
+    public function test_add_member_action_opens_an_in_place_modal(): void
     {
         $kk = KartuKeluarga::factory()->create();
 
@@ -110,10 +109,10 @@ class KartuKeluargaPendudukRelationTest extends Phase3ResourceTestCase
 
         $createAction = $component->instance()->getTable()->getHeaderActions()[0];
 
-        $this->assertStringContainsString(
-            'kk_id='.$kk->getKey(),
-            $createAction->getUrl(),
-        );
+        // UI-5: the operator stays on the KK page, so the action must not
+        // navigate to the Penduduk create page (no URL is bound).
+        $this->assertNull($createAction->getUrl());
+        $this->assertSame('Tambah Anggota', $createAction->getLabel());
     }
 
     public function test_create_penduduk_page_preselects_the_kk_from_the_query_string(): void

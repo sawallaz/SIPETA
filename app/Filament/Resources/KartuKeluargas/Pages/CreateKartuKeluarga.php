@@ -302,8 +302,24 @@ class CreateKartuKeluarga extends CreateRecord
             $data['address'] = $parsed->address;
         }
 
+        /*
+         * Wilayah adalah milik KK, bukan milik tiap anggota.
+         *
+         * RT hasil pemindaian mengisi wilayah pada tingkat KK sehingga
+         * operator tidak perlu memilih RT berulang kali per anggota.
+         * Nilai yang sudah dipilih operator tidak ditimpa.
+         */
+        if (blank($data['rt_id'] ?? null)) {
+            $rt = $this->resolveRt($parsed->rt);
+
+            if ($rt !== null) {
+                $data['area_unit_id'] = $rt->area_unit_id;
+                $data['rt_id'] = $rt->id;
+            }
+        }
+
         $data['anggota'] = array_map(
-            fn (ParsedResident $member): array => $this->memberFromParsed($parsed, $member),
+            fn (ParsedResident $member): array => $this->memberFromParsed($member),
             $parsed->members,
         );
 
@@ -311,7 +327,7 @@ class CreateKartuKeluarga extends CreateRecord
         $this->data = $data;
     }
 
-    private function memberFromParsed(ParsedOcrResult $parsed, ParsedResident $member): array
+    private function memberFromParsed(ParsedResident $member): array
     {
         return [
             'full_name' => $member->nama ?? '',
@@ -328,14 +344,19 @@ class CreateKartuKeluarga extends CreateRecord
             // has no bloodType field — so a scanned member defaults to
             // TIDAK_DIKETAHUI and the operator corrects it manually.
             'blood_type' => BloodType::TIDAK_DIKETAHUI->value,
-            'rt_id' => $this->resolveRt($parsed->rt)?->id,
         ];
     }
 
     /**
      * Resolve the incoming anggota rows to Penduduk + KkAnggota rows under
-     * the new household. Duplicate NIKs (within the list or already in the
-     * database) are rejected before any write (FR-OCR-05).
+     * the new household.
+     *
+     * NIK is the identity of a person, not of a KK. When a NIK already exists
+     * in the database the existing Penduduk is NOT duplicated — instead its
+     * kk_id is moved to the new KK, its old KK membership is closed (KELUAR +
+     * end_date), and a new AKTIF membership is recorded. Only genuinely new
+     * NIKs produce a new Penduduk row. (Replaces the old duplicate-NIK
+     * rejection that wrongly blocked legitimate KK moves / marriages.)
      */
     private function createAnggota(KartuKeluarga $kk, array $anggota): void
     {
@@ -343,66 +364,187 @@ class CreateKartuKeluarga extends CreateRecord
             return;
         }
 
-        $niks = array_map(fn (array $row): string => (string) ($row['nik'] ?? ''), $anggota);
+        /*
+         * NIK harus tetap unik secara global.
+         *
+         * Jika NIK belum ada:
+         *     -> buat Penduduk baru
+         *
+         * Jika NIK sudah ada:
+         *     -> JANGAN buat Penduduk baru
+         *     -> pindahkan Penduduk yang sama ke KK baru
+         *     -> tutup riwayat KK lama
+         *     -> buat riwayat KK baru sebagai AKTIF
+         */
+        $seen = [];
 
-        $conflict = $this->duplicateNiks($niks);
+        foreach ($anggota as $row) {
+            $nik = trim((string) ($row['nik'] ?? ''));
 
-        if ($conflict !== null) {
-            throw ValidationException::withMessages([
-                'data.anggota' => 'NIK sudah terdaftar: '.$conflict.'. Gunakan NIK yang berbeda.',
-            ]);
+            if ($nik === '') {
+                continue;
+            }
+
+            /*
+             * Jangan sampai NIK yang sama dimasukkan dua kali
+             * dalam satu KK baru.
+             */
+            if (isset($seen[$nik])) {
+                throw ValidationException::withMessages([
+                    'data.anggota' => "NIK {$nik} muncul lebih dari satu kali dalam daftar anggota.",
+                ]);
+            }
+
+            $seen[$nik] = true;
         }
 
-        // NOTE: this loop runs inside the outer handleRecordCreation()
-        // transaction, so a failure here rolls back the KK + every member.
+        /*
+         * Proses seluruh anggota dalam satu transaksi.
+         *
+         * handleRecordCreation() sudah membungkus method ini
+         * dengan DB::transaction(), sehingga jika satu anggota gagal,
+         * seluruh proses KK dibatalkan.
+         */
         foreach ($anggota as $row) {
-            $penduduk = Penduduk::create([
-                'kk_id' => $kk->id,
-                'nik' => (string) $row['nik'],
-                'full_name' => (string) $row['full_name'],
-                'gender' => (string) $row['gender'],
-                'birth_place' => (string) $row['birth_place'],
-                'birth_date' => (string) $row['birth_date'],
-                'religion_id' => (int) $row['religion_id'],
-                'education_id' => (int) $row['education_id'],
-                'occupation_id' => (int) $row['occupation_id'],
-                'marital_status' => (string) $row['marital_status'],
-                'family_relation' => (string) $row['family_relation'],
-                'blood_type' => (string) ($row['blood_type'] ?? BloodType::TIDAK_DIKETAHUI->value),
-                'resident_status' => ResidentStatus::ACTIVE->value,
-                'rt_id' => (int) $row['rt_id'],
-            ]);
+            $nik = trim((string) ($row['nik'] ?? ''));
 
+            if ($nik === '') {
+                continue;
+            }
+
+            /*
+             * Cari Penduduk berdasarkan NIK.
+             *
+             * NIK adalah identitas orang, bukan identitas KK.
+             */
+            $penduduk = Penduduk::query()
+                ->where('nik', $nik)
+                ->first();
+
+            if ($penduduk === null) {
+                /*
+                 * ============================================================
+                 * ORANG BARU
+                 * ============================================================
+                 */
+                $penduduk = Penduduk::create([
+                    'kk_id' => $kk->id,
+                    'nik' => $nik,
+                    'full_name' => (string) $row['full_name'],
+                    'gender' => (string) $row['gender'],
+                    'birth_place' => (string) $row['birth_place'],
+                    'birth_date' => (string) $row['birth_date'],
+                    'religion_id' => (int) $row['religion_id'],
+                    'education_id' => (int) $row['education_id'],
+                    'occupation_id' => (int) $row['occupation_id'],
+                    'marital_status' => (string) $row['marital_status'],
+                    'family_relation' => (string) $row['family_relation'],
+                    'blood_type' => (string) (
+                        $row['blood_type']
+                        ?? BloodType::TIDAK_DIKETAHUI->value
+                    ),
+                    'resident_status' => ResidentStatus::ACTIVE->value,
+                    'rt_id' => $kk->rt_id,
+                ]);
+            } else {
+                /*
+                 * ============================================================
+                 * ORANG SUDAH ADA
+                 * ============================================================
+                 *
+                 * Jangan create Penduduk baru.
+                 *
+                 * Ini berarti orang tersebut sedang:
+                 * - pindah KK
+                 * - menikah
+                 * - menjadi anggota KK lain
+                 * - atau sedang diperbaiki datanya
+                 */
+                $oldKkId = $penduduk->kk_id;
+
+                /*
+                 * Tutup hubungan aktif dengan KK sebelumnya.
+                 */
+                KkAnggota::query()
+                    ->where('penduduk_id', $penduduk->id)
+                    ->where('status', KkAnggotaStatus::AKTIF->value)
+                    ->update([
+                        'status' => KkAnggotaStatus::KELUAR->value,
+                        'end_date' => now()->toDateString(),
+                    ]);
+
+                /*
+                 * Update data orang yang sama.
+                 *
+                 * ID Penduduk tetap sama.
+                 * NIK tetap sama.
+                 * Hanya KK dan data administratifnya yang diperbarui.
+                 */
+                $penduduk->update([
+                    'kk_id' => $kk->id,
+                    'full_name' => (string) $row['full_name'],
+                    'gender' => (string) $row['gender'],
+                    'birth_place' => (string) $row['birth_place'],
+                    'birth_date' => (string) $row['birth_date'],
+                    'religion_id' => (int) $row['religion_id'],
+                    'education_id' => (int) $row['education_id'],
+                    'occupation_id' => (int) $row['occupation_id'],
+                    'marital_status' => (string) $row['marital_status'],
+                    'family_relation' => (string) $row['family_relation'],
+                    'blood_type' => (string) (
+                        $row['blood_type']
+                        ?? BloodType::TIDAK_DIKETAHUI->value
+                    ),
+                    'resident_status' => ResidentStatus::ACTIVE->value,
+                    'moved_at' => null,
+                    'moved_destination' => null,
+                    'moved_note' => null,
+                    'rt_id' => $kk->rt_id,
+                ]);
+
+                /*
+                 * Variabel ini sengaja dipertahankan untuk dokumentasi/logika
+                 * dan memudahkan debugging bila diperlukan.
+                 */
+                unset($oldKkId);
+            }
+
+            /*
+             * Pastikan hanya ada satu hubungan AKTIF
+             * untuk Penduduk ini pada KK baru.
+             */
+            $existingActiveMembership = KkAnggota::query()
+                ->where('kk_id', $kk->id)
+                ->where('penduduk_id', $penduduk->id)
+                ->where('status', KkAnggotaStatus::AKTIF->value)
+                ->first();
+
+            if ($existingActiveMembership !== null) {
+                /*
+                 * Sudah ada. Update datanya saja.
+                 */
+                $existingActiveMembership->update([
+                    'family_relation' => (string) $row['family_relation'],
+                    'effective_date' => $existingActiveMembership->effective_date
+                        ?? now()->toDateString(),
+                    'end_date' => null,
+                ]);
+
+                continue;
+            }
+
+            /*
+             * Buat riwayat hubungan KK baru.
+             */
             KkAnggota::create([
                 'kk_id' => $kk->id,
                 'penduduk_id' => $penduduk->id,
                 'family_relation' => (string) $row['family_relation'],
                 'status' => KkAnggotaStatus::AKTIF->value,
                 'effective_date' => now()->toDateString(),
+                'end_date' => null,
             ]);
         }
-    }
-
-    /**
-     * @param  array<int, string>  $niks
-     */
-    private function duplicateNiks(array $niks): ?string
-    {
-        $seen = [];
-
-        foreach ($niks as $nik) {
-            if ($nik === '') {
-                continue;
-            }
-
-            if (in_array($nik, $seen, true)) {
-                return $nik;
-            }
-
-            $seen[] = $nik;
-        }
-
-        return Penduduk::query()->whereIn('nik', $seen)->value('nik');
     }
 
     /**
@@ -453,18 +595,29 @@ class CreateKartuKeluarga extends CreateRecord
     private function anggotaSection(): Section
     {
         return Section::make('Anggota Keluarga')
-            ->description('Daftar penduduk anggota Kartu Keluarga. Hasil pemindaian akan mengisi baris ini secara otomatis.')
+            ->description(
+                'Daftar penduduk anggota Kartu Keluarga. '.
+                'Hasil pemindaian akan mengisi data ini secara otomatis.'
+            )
             ->schema([
                 Repeater::make('anggota')
-                    ->label('Anggota Keluarga')
+                    ->label('')
                     ->defaultItems(0)
-                    ->collapsible()
-                    ->itemLabel(fn (array $state): ?string => $state['full_name'] ?? null)
                     ->addActionLabel('Tambah Anggota')
+                    ->itemLabel(
+                        fn (array $state): ?string => filled($state['full_name'] ?? null)
+                                ? $state['full_name']
+                                : 'Anggota Baru'
+                    )
+                    ->collapsible()
+                    ->cloneable(false)
+                    ->reorderable(false)
                     ->schema([
                         $this->memberFields(),
-                    ]),
+                    ])
+                    ->columnSpanFull(),
             ])
+            ->columnSpanFull()
             ->collapsible();
     }
 
@@ -489,9 +642,17 @@ class CreateKartuKeluarga extends CreateRecord
                     ->label('NIK')
                     ->required()
                     ->maxLength(16)
+                    ->minLength(16)
                     ->regex('/^[0-9]{16}$/')
-                    ->numeric()
-                    ->inputMode('numeric'),
+                    ->rule('digits:16')
+                    ->inputMode('numeric')
+                    ->dehydrateStateUsing(
+                        fn ($state): ?string => filled($state)
+                            ? preg_replace('/\D/', '', (string) $state)
+                            : null
+                    )
+                    ->placeholder('Masukkan 16 digit NIK')
+                    ->helperText('NIK harus terdiri dari 16 digit.'),
                 Select::make('gender')
                     ->label('Jenis Kelamin')
                     ->required()
@@ -540,15 +701,6 @@ class CreateKartuKeluarga extends CreateRecord
                     ->label('Golongan Darah')
                     ->default(BloodType::TIDAK_DIKETAHUI->value)
                     ->options(self::BLOOD_LABELS),
-                Select::make('rt_id')
-                    ->label('RT')
-                    ->required()
-                    ->searchable()
-                    ->preload()
-                    ->options(fn (): array => Rt::query()
-                        ->pluck('number', 'id')
-                        ->mapWithKeys(fn (string $number, int $id): array => [$id => 'RT '.$number])
-                        ->all()),
             ]);
     }
 }

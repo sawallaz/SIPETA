@@ -58,9 +58,18 @@ class BackupService
         try {
             $tmp = $this->buildArchive();
             $stream = fopen($tmp, 'rb');
-            Storage::disk(self::DISK)->writeStream($filename, $stream);
+            // The db_backup disk is configured with throw=false, so a write
+            // failure (e.g. a full disk) returns false instead of throwing.
+            // Only report SUCCESS once the archive is physically on disk;
+            // otherwise a non-existent backup would be logged as success
+            // (NFR-REL-01 — never a false success).
+            $written = Storage::disk(self::DISK)->writeStream($filename, $stream);
             fclose($stream);
             @unlink($tmp);
+
+            if ($written === false || ! Storage::disk(self::DISK)->exists($filename)) {
+                throw new BackupException('Arsip backup tidak dapat disimpan ke disk backup.');
+            }
 
             $size = Storage::disk(self::DISK)->size($filename);
             $this->record($operator, $filename, BackupStatus::SUCCESS, $size, $startedAt, null);
@@ -103,7 +112,11 @@ class BackupService
             $zip->addFromString('kk/'.$photo->stored_filename, $disk->get($photo->storage_path));
         }
 
-        $zip->close();
+        if (! $zip->close()) {
+            @unlink($tmp);
+
+            throw new BackupException('Arsip backup tidak dapat ditutup dengan benar (kemungkinan korup).');
+        }
 
         return $tmp;
     }

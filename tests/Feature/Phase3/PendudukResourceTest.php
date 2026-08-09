@@ -44,7 +44,6 @@ class PendudukResourceTest extends Phase3ResourceTestCase
             'gender' => Gender::LAKI_LAKI->value,
             'blood_type' => BloodType::O->value,
             'family_relation' => FamilyRelation::KEPALA_KELUARGA->value,
-            'rt_id' => Rt::factory()->create()->getKey(),
             'religion_id' => Religion::factory()->create()->getKey(),
             'education_id' => Education::factory()->create()->getKey(),
             'occupation_id' => Occupation::factory()->create()->getKey(),
@@ -71,7 +70,6 @@ class PendudukResourceTest extends Phase3ResourceTestCase
             ->assertFormFieldExists('kk_id')
             ->assertFormFieldExists('gender')
             ->assertFormFieldExists('birth_date')
-            ->assertFormFieldExists('rt_id')
             ->assertFormFieldExists('religion_id')
             ->assertFormFieldExists('education_id')
             ->assertFormFieldExists('occupation_id')
@@ -91,6 +89,21 @@ class PendudukResourceTest extends Phase3ResourceTestCase
                 'nik' => $penduduk->nik,
                 'full_name' => $penduduk->full_name,
             ]);
+    }
+
+    /**
+     * Wilayah (RW / Lingkungan & RT) is owned by the KK, not the Penduduk.
+     * On edit the Penduduk form must NOT expose area_unit_id / rt_id — the
+     * read-only wilayah placeholder reflects the KK's RT (ADR-004).
+     */
+    public function test_edit_page_has_no_area_or_rt_fields(): void
+    {
+        $penduduk = Penduduk::factory()->create();
+
+        Livewire::test(EditPenduduk::class, ['record' => $penduduk->getKey()])
+            ->assertOk()
+            ->assertFormFieldDoesNotExist('area_unit_id')
+            ->assertFormFieldDoesNotExist('rt_id');
     }
 
     public function test_can_create_penduduk(): void

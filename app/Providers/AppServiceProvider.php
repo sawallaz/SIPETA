@@ -8,6 +8,8 @@ use App\Services\MysqlClientDatabaseImporter;
 use App\Services\MysqldumpDatabaseDumper;
 use App\Services\OcrEngine;
 use App\Services\TesseractOcrEngine;
+use Filament\Support\Facades\FilamentView;
+use Filament\View\PanelsRenderHook;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -35,6 +37,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // Phase UI-4: load the scoped admin stylesheet after Filament's own
+        // theme so sidebar/spacing/typography refinements take precedence
+        // without shadowing the default. The SIDEBAR hooks are not needed here;
+        // the stylesheet is injected for every panel page (dashboard included).
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::STYLES_AFTER,
+            fn (): string => app(\Illuminate\Foundation\Vite::class)('resources/css/sipeta-admin.css')->toHtml(),
+        );
     }
 }

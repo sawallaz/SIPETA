@@ -214,22 +214,16 @@ class PendudukExportService
 
     protected function applyExactAge(Builder $query, int $age): void
     {
-        // Birth-date span for people who are exactly N years old today.
-        $start = now()->subYears($age + 1)->addDay()->startOfDay();
-        $end = now()->subYears($age)->endOfDay();
-        $query->whereBetween('birth_date', [$start, $end]);
+        // Exact age N = the shared age-range predicate with min == max.
+        // Single source of the birth-date translation (Phase UI-2).
+        $query->ageRange($age, $age);
     }
 
     protected function applyAgeRange(Builder $query, ?int $ageMin, ?int $ageMax): void
     {
-        if ($ageMin !== null) {
-            // born on or before => at least ageMin years old
-            $query->where('birth_date', '<=', now()->subYears($ageMin)->endOfDay());
-        }
-        if ($ageMax !== null) {
-            // born after => at most ageMax years old
-            $query->where('birth_date', '>', now()->subYears($ageMax + 1)->endOfDay());
-        }
+        // Delegates to Penduduk::scopeAgeRange() — the SAME predicate the
+        // Filament table age filters use, so it is never implemented twice.
+        $query->ageRange($ageMin, $ageMax);
     }
 
     protected function pdfResponse(Builder $query, array $filters, string $filename): Response

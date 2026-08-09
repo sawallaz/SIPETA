@@ -2,127 +2,51 @@
 
 namespace App\Filament\Widgets;
 
-use App\Enums\FamilyRelation;
-use App\Enums\Gender;
+use App\Enums\MaritalStatus;
 use App\Enums\ResidentStatus;
-use App\Models\AreaUnit;
 use App\Models\KartuKeluarga;
 use App\Models\Penduduk;
 use App\Models\Rt;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
+use Filament\Support\Icons\Heroicon;
 
-/**
- * Phase 4.2 — KPI cards for the admin dashboard.
- *
- * Eleven population statistics, every one derived from existing tables:
- *   - Keluarga: kartu_keluarga count + penduduk.family_relation breakdown
- *     (Total Kepala Keluarga = KEPALA_KELUARGA; Total Anggota Keluarga =
- *     everyone else — the two partition Total Penduduk).
- *   - Penduduk: total + gender breakdown (penduduk.gender).
- *   - Wilayah: rts and area_units counts (RT; RW / Lingkungan).
- *   - Status: penduduk.resident_status breakdown (ACTIVE / PINDAH / MENINGGAL).
- *
- * No charts, no exports, no filters. Values are formatted with Indonesian
- * thousands separators (1.234). Cards are ordered and colored by group;
- * Filament v4 has no native stat grouping, so grouping is conveyed through
- * ordering + color families only.
- */
 class SipetaStatsOverview extends StatsOverviewWidget
 {
-    // KPI cards are cheap count queries; render eagerly so they appear in the
-    // initial dashboard HTML (no Livewire lazy hydration needed).
-    protected static bool $isLazy = false;
-
-    protected int|string|array $columnSpan = 'full';
-
     protected function getStats(): array
     {
-        $totalPenduduk = Penduduk::count();
+        $totalKk = KartuKeluarga::query()->count();
 
-        $lakiLaki = Penduduk::where('gender', Gender::LAKI_LAKI->value)->count();
-        $perempuan = Penduduk::where('gender', Gender::PEREMPUAN->value)->count();
+        $pendudukAktif = Penduduk::query()
+            ->where('resident_status', ResidentStatus::ACTIVE->value)
+            ->count();
 
-        $kepalaKeluarga = Penduduk::where('family_relation', FamilyRelation::KEPALA_KELUARGA->value)->count();
+        $belumMenikah = Penduduk::query()
+            ->where('marital_status', MaritalStatus::BELUM_KAWIN->value)
+            ->count();
+
+        $jumlahRt = Rt::query()->count();
 
         return [
-            // --- Keluarga ---
-            Stat::make('Total Kartu Keluarga', $this->format($totalKk = KartuKeluarga::count()))
-                ->description('Kartu keluarga terdaftar di sistem')
-                ->icon('heroicon-o-home-modern')
+            Stat::make('Kartu Keluarga', number_format($totalKk))
+                ->description('Total KK terdaftar')
+                ->descriptionIcon(Heroicon::OutlinedHome)
                 ->color('primary'),
 
-            Stat::make('Total Kepala Keluarga', $this->format($kepalaKeluarga))
-                ->description('Penduduk berstatus kepala keluarga')
-                ->icon('heroicon-o-user-circle')
-                ->color('primary'),
-
-            Stat::make('Total Anggota Keluarga', $this->format($totalPenduduk - $kepalaKeluarga))
-                ->description('Penduduk selain kepala keluarga')
-                ->icon('heroicon-o-user-group')
-                ->color('gray'),
-
-            // --- Penduduk ---
-            Stat::make('Total Penduduk', $this->format($totalPenduduk))
-                ->description('Seluruh penduduk yang terdaftar')
-                ->icon('heroicon-o-users')
-                ->color('primary'),
-
-            Stat::make('Laki-laki', $this->format($lakiLaki))
-                ->description($this->percentage($lakiLaki, $totalPenduduk))
-                ->icon('heroicon-o-user')
-                ->color('info'),
-
-            Stat::make('Perempuan', $this->format($perempuan))
-                ->description($this->percentage($perempuan, $totalPenduduk))
-                ->icon('heroicon-o-user')
-                ->color('danger'),
-
-            // --- Wilayah ---
-            Stat::make('Total RT', $this->format(Rt::count()))
-                ->description('Rukun tetangga terdaftar')
-                ->icon('heroicon-o-squares-2x2')
-                ->color('gray'),
-
-            Stat::make('Total RW / Lingkungan', $this->format(AreaUnit::count()))
-                ->description('RW atau lingkungan terdaftar')
-                ->icon('heroicon-o-map-pin')
-                ->color('gray'),
-
-            // --- Status ---
-            Stat::make('Penduduk Aktif', $this->format(Penduduk::where('resident_status', ResidentStatus::ACTIVE->value)->count()))
-                ->description('Berstatus aktif')
-                ->icon('heroicon-o-check-circle')
+            Stat::make('Penduduk Aktif', number_format($pendudukAktif))
+                ->description('Penduduk berstatus aktif')
+                ->descriptionIcon(Heroicon::OutlinedUsers)
                 ->color('success'),
 
-            Stat::make('Penduduk Pindah', $this->format(Penduduk::where('resident_status', ResidentStatus::PINDAH->value)->count()))
-                ->description('Berstatus pindah')
-                ->icon('heroicon-o-arrow-right-circle')
+            Stat::make('Belum Menikah', number_format($belumMenikah))
+                ->description('Penduduk belum kawin')
+                ->descriptionIcon(Heroicon::OutlinedHeart)
                 ->color('warning'),
 
-            Stat::make('Penduduk Meninggal', $this->format(Penduduk::where('resident_status', ResidentStatus::MENINGGAL->value)->count()))
-                ->description('Berstatus meninggal')
-                ->icon('heroicon-o-x-circle')
-                ->color('danger'),
+            Stat::make('Jumlah RT', number_format($jumlahRt))
+                ->description('RT terdaftar')
+                ->descriptionIcon(Heroicon::OutlinedMapPin)
+                ->color('info'),
         ];
-    }
-
-    /**
-     * Indonesian-style integer formatting: 1234567 -> "1.234.567".
-     */
-    private function format(int $value): string
-    {
-        return number_format($value, 0, ',', '.');
-    }
-
-    /**
-     * Share of total as a whole percentage, e.g. "45% dari total penduduk".
-     * Guarded against division by zero (empty database).
-     */
-    private function percentage(int $part, int $total): string
-    {
-        $percent = $total > 0 ? (int) round(($part / $total) * 100) : 0;
-
-        return "{$percent}% dari total penduduk";
     }
 }

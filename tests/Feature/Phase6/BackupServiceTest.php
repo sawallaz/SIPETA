@@ -11,6 +11,7 @@ use App\Models\Setting;
 use App\Models\User;
 use App\Services\BackupService;
 use Carbon\Carbon;
+use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\FakeDatabaseDumper;
@@ -138,6 +139,35 @@ class BackupServiceTest extends TestCase
         $this->assertStringContainsString('simulated mysqldump failure', $log->message);
         $this->assertNotNull($log->finished_at);
         $this->assertSame([], Storage::disk(BackupService::DISK)->allFiles());
+    }
+
+    public function test_disk_write_failure_is_never_a_false_success(): void
+    {
+        // The db_backups disk is configured throw=false: a failed write (full
+        // disk, permissions) returns false instead of throwing. Point the disk
+        // at a real unwritable root so writeStream() fails for real, and assert
+        // the attempt is logged FAILED — never SUCCESS (NFR-REL-01).
+        config(['filesystems.disks.db_backups' => [
+            'driver' => 'local',
+            'root' => '/proc',
+            'throw' => false,
+        ]]);
+        $this->app->instance('filesystem', new FilesystemManager($this->app));
+        // The facade caches the resolved manager (setUp's Storage::fake); drop
+        // it so the re-pointed db_backups disk above actually resolves.
+        Storage::clearResolvedInstances();
+
+        try {
+            $this->service->create();
+            $this->fail('Expected BackupException was not thrown on a failed disk write.');
+        } catch (BackupException $e) {
+            $this->assertStringContainsString('tidak dapat disimpan', $e->getMessage());
+        }
+
+        $log = BackupLog::query()->first();
+        $this->assertNotNull($log);
+        $this->assertSame(BackupStatus::FAILED, $log->backup_status);
+        $this->assertSame(0, $log->backup_size);
     }
 
     public function test_operator_is_recorded(): void
