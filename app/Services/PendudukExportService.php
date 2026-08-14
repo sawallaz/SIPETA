@@ -11,6 +11,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 use OpenSpout\Common\Entity\Row;
 use OpenSpout\Writer\CSV\Options as CsvOptions;
 use OpenSpout\Writer\CSV\Writer as CsvWriter;
@@ -39,6 +40,7 @@ class PendudukExportService
         'birth_date' => 'Tanggal Lahir',
         'age' => 'Usia (th)',
         'rt' => 'RT',
+        'area_unit' => 'RW',
         'resident_status' => 'Status',
         'religion' => 'Agama',
         'education' => 'Pendidikan',
@@ -172,7 +174,7 @@ class PendudukExportService
             $parts[] = 'rt-'.strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '-', (string) $filters['rt']));
         }
         if (($filters['area_unit'] ?? null) !== null) {
-            $parts[] = 'lingkungan-'.strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '-', (string) $filters['area_unit']));
+            $parts[] = 'rw-'.strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '-', (string) $filters['area_unit']));
         }
         if (($filters['gender'] ?? null) !== null) {
             $g = match (Gender::tryFrom($filters['gender'])) {
@@ -229,14 +231,36 @@ class PendudukExportService
     protected function pdfResponse(Builder $query, array $filters, string $filename): Response
     {
         $rows = $this->collectRows($query);
-        $kelurahanName = Setting::query()->first()?->kelurahan_name;
+
+        $setting = Setting::query()->first();
+
+        $logoData = null;
+
+        if ($setting?->logo_path) {
+            $logoDisk = Storage::disk('local');
+
+            if ($logoDisk->exists($setting->logo_path)) {
+                $logoPath = $logoDisk->path($setting->logo_path);
+                $logoMime = mime_content_type($logoPath);
+
+                $logoData = 'data:'.$logoMime.';base64,'.
+                    base64_encode(file_get_contents($logoPath));
+            }
+        }
+
         $pdf = Pdf::loadView('exports.penduduk-pdf', [
             'rows' => $rows,
             'columns' => array_values(self::COLUMNS),
             'filterSummary' => $this->filterSummary($filters),
             'generatedAt' => now(),
-            'kelurahanName' => $kelurahanName,
-        ]);
+
+            'kelurahanName' => $setting?->kelurahan_name,
+            'kecamatanName' => $setting?->kecamatan_name,
+            'kabupatenName' => $setting?->kabupaten_name,
+            'provinceName' => $setting?->province_name,
+
+            'logoData' => $logoData,
+        ])->setPaper('a4', 'landscape');
 
         return new Response(
             $pdf->output(),
@@ -313,6 +337,7 @@ class PendudukExportService
             self::COLUMNS['birth_date'] => $penduduk->birth_date?->format('d-m-Y') ?? '-',
             self::COLUMNS['age'] => (string) $penduduk->age,
             self::COLUMNS['rt'] => $penduduk->rt?->number ?? '-',
+            self::COLUMNS['area_unit'] => $penduduk->rt?->areaUnit?->display_label ?? '-',
             self::COLUMNS['resident_status'] => $status,
             self::COLUMNS['religion'] => $penduduk->religion?->name ?? '-',
             self::COLUMNS['education'] => $penduduk->education?->name ?? '-',

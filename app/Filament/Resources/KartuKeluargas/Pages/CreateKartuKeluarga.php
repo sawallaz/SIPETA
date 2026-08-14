@@ -10,6 +10,7 @@ use App\Enums\MaritalStatus;
 use App\Enums\OcrJobStatus;
 use App\Enums\ResidentStatus;
 use App\Filament\Resources\KartuKeluargas\KartuKeluargaResource;
+use App\Filament\Resources\KartuKeluargas\Pages\Concerns\ChecksDuplicateKkNumber;
 use App\Filament\Resources\KartuKeluargas\Schemas\KartuKeluargaForm;
 use App\Models\Education;
 use App\Models\KartuKeluarga;
@@ -23,8 +24,10 @@ use App\Services\KkPhotoService;
 use App\Services\OcrProcessingService;
 use App\Services\ParsedOcrResult;
 use App\Services\ParsedResident;
+use App\Services\PendudukDocumentService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -37,7 +40,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Throwable;
 
 /**
@@ -58,10 +63,24 @@ use Throwable;
  */
 class CreateKartuKeluarga extends CreateRecord
 {
+    use ChecksDuplicateKkNumber;
+
     protected static string $resource = KartuKeluargaResource::class;
+
+    /**
+     * Hilangkan action bawaan "Create & create another".
+     *
+     * Footer hanya menyisakan "Simpan Kartu Keluarga" dan "Batal".
+     */
+    protected static bool $canCreateAnother = false;
 
     /** Early-cycle guard so re-entrant state updates during a scan are no-ops. */
     protected bool $scanning = false;
+
+    /**
+     * Path OCR temp (on kk_uploads disk) that must be cleaned after scan.
+     */
+    protected ?string $ocrTempPath = null;
 
     private const GENDER_LABELS = [
         Gender::LAKI_LAKI->value => 'Laki-laki',
@@ -105,6 +124,20 @@ class CreateKartuKeluarga extends CreateRecord
         return 'Kartu Keluarga berhasil disimpan';
     }
 
+    protected function getCreateFormAction(): Action
+    {
+        return parent::getCreateFormAction()
+            ->label('Simpan Kartu Keluarga')
+            ->icon('heroicon-o-check');
+    }
+
+    protected function getCancelFormAction(): Action
+    {
+        return parent::getCancelFormAction()
+            ->label('Batal')
+            ->icon('heroicon-o-x-mark');
+    }
+
     /**
      * Triggered by Livewire whenever a bound page property changes — the
      * "Upload Photo -> Automatic Reading" step: as soon as the KK photo is
@@ -112,7 +145,10 @@ class CreateKartuKeluarga extends CreateRecord
      */
     public function updated(string $property): void
     {
-        if ($property !== 'data.kk_photo') {
+        if (
+            $property !== 'data.kk_photo'
+            && ! str_starts_with($property, 'data.kk_photo.')
+        ) {
             return;
         }
 
@@ -129,13 +165,18 @@ class CreateKartuKeluarga extends CreateRecord
      */
     public function scanFoto(): void
     {
-        $path = $this->data['kk_photo'] ?? null;
+        $rawPath = $this->data['kk_photo'] ?? null;
 
-        if (blank($path)) {
+        $path = $this->resolveOcrDiskPath($rawPath);
+
+        if ($path === null) {
             Notification::make()
                 ->warning()
-                ->title('Foto KK belum diunggah')
-                ->body('Unggah foto/scan Kartu Keluarga terlebih dahulu, lalu ulangi pemindaian.')
+                ->title('Foto KK belum siap')
+                ->body(
+                    'Foto Kartu Keluarga belum tersedia sebagai file yang dapat diproses. '
+                    .'Tunggu sampai upload selesai, lalu coba Scan Foto KK kembali.'
+                )
                 ->send();
 
             return;
@@ -155,8 +196,12 @@ class CreateKartuKeluarga extends CreateRecord
             if ($parsed->isEmpty()) {
                 Notification::make()
                     ->warning()
-                    ->title('Foto tidak terbaca otomatis')
-                    ->body('Lengkapi formulir secara manual (Input Manual).')
+                    ->title('Data KK tidak terbaca')
+                    ->body(
+                        'Foto berhasil diproses, tetapi tidak ada data Kartu Keluarga '
+                        .'yang berhasil dikenali. Periksa kualitas foto atau lengkapi '
+                        .'data secara manual.'
+                    )
                     ->send();
 
                 return;
@@ -164,24 +209,38 @@ class CreateKartuKeluarga extends CreateRecord
 
             $summary = collect($parsed->validationErrors)
                 ->merge($parsed->warnings)
+                ->filter(fn ($messageOrArray): bool => is_scalar($messageOrArray))
+                ->map(fn ($messageOrArray): string => (string) $messageOrArray)
                 ->take(3)
                 ->implode(' · ');
 
             Notification::make()
                 ->success()
-                ->title('Data Kartu Keluarga terbaca')
-                ->body('Periksa kembali setiap isian sebelum menyimpan.'.$summary)
+                ->title('Data Kartu Keluarga berhasil dibaca')
+                ->body(
+                    'Periksa kembali setiap hasil OCR sebelum menyimpan.'
+                    .($summary !== '' ? ' '.$summary : '')
+                )
                 ->send();
         } catch (Throwable $e) {
-            Log::warning('KK scan failed', ['error' => $e->getMessage(), 'exception' => $e::class]);
+            Log::warning('KK scan failed', [
+                'error' => $e->getMessage(),
+                'exception' => $e::class,
+                'photo_state_type' => get_debug_type($rawPath),
+                'normalized_path' => $path,
+            ]);
 
             Notification::make()
                 ->danger()
-                ->title('Pemindaian gagal')
-                ->body('Tidak dapat membaca foto ini. Coba foto lain atau isi manual.')
+                ->title('Pemindaian KK gagal')
+                ->body(
+                    $this->ocrErrorMessage($e)
+                )
                 ->send();
         } finally {
             $this->scanning = false;
+
+            $this->cleanupOcrTemp($rawPath);
         }
     }
 
@@ -240,7 +299,8 @@ class CreateKartuKeluarga extends CreateRecord
     {
         return DB::transaction(function () use ($data): Model {
             $anggota = (array) ($data['anggota'] ?? []);
-            $photoPath = $data['kk_photo'] ?? null;
+
+            $photo = $data['kk_photo'] ?? null;
 
             unset($data['anggota'], $data['kk_photo']);
 
@@ -250,12 +310,11 @@ class CreateKartuKeluarga extends CreateRecord
             // Buat semua penduduk (serta baris pivot kk_anggota).
             $this->createAnggota($kk, $anggota);
 
-            // Simpan arsip foto KK.
-            if (filled($photoPath)) {
-                app(KkPhotoService::class)->storeForKk(
+            // Simpan arsip foto KK (storeFiles(false) -> TemporaryUploadedFile).
+            if ($photo instanceof TemporaryUploadedFile) {
+                app(KkPhotoService::class)->storeUploadedFileForKk(
                     $kk->id,
-                    $photoPath,
-                    null,
+                    $photo,
                     auth()->id()
                 );
             }
@@ -269,13 +328,191 @@ class CreateKartuKeluarga extends CreateRecord
      * engine -> parse) over the photo already stored on the kk_uploads disk.
      * The job row is the audit record; nothing domain-related is written.
      */
+    /**
+     * Normalisasi state FileUpload menjadi satu path string.
+     *
+     * Filament FileUpload dapat mengembalikan:
+     *
+     * - string:
+     *     "kk/abc.jpg"
+     *
+     * - array:
+     *     ["kk/abc.jpg"]
+     *
+     * Pada workflow satu foto KK, hanya satu path yang dipakai.
+     */
+    private function normalizePhotoPath(mixed $value): ?string
+    {
+        if (is_string($value)) {
+            $value = trim($value);
+
+            return $value !== '' ? $value : null;
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $item) {
+                $path = $this->normalizePhotoPath($item);
+
+                if ($path !== null) {
+                    return $path;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolusi path foto untuk OCR.
+     *
+     * OCR membaca dari disk kk_uploads. TemporaryUploadedFile (hasil
+     * storeFiles(false)) berada di disk livewire-tmp, sehingga byte-nya
+     * disalin ke kk_uploads/ocr-tmp terlebih dahulu dan path tersebut
+     * yang dikembalikan agar runOcr() dapat membacanya.
+     *
+     * String/array (path yang sudah ada di disk) diteruskan apa adanya.
+     */
+    private function resolveOcrDiskPath(mixed $value): ?string
+    {
+        if ($value instanceof TemporaryUploadedFile) {
+            return $this->storeOcrTemporaryFile($value);
+        }
+
+        if (is_array($value)) {
+            foreach ($value as $uploadedFile) {
+                if ($uploadedFile instanceof TemporaryUploadedFile) {
+                    return $this->storeOcrTemporaryFile($uploadedFile);
+                }
+            }
+
+            return null;
+        }
+
+        return $this->normalizePhotoPath($value);
+    }
+
+    /**
+     * Salin byte TemporaryUploadedFile (hasil storeFiles(false)) ke disk
+     * kk_uploads/ocr-tmp agar runOcr() dapat membacanya, lalu kembalikan
+     * path-nya.
+     */
+    private function storeOcrTemporaryFile(
+        TemporaryUploadedFile $file
+    ): ?string {
+        $bytes = $file->get();
+
+        if ($bytes === null || $bytes === '') {
+            return null;
+        }
+
+        $extension = 'jpg';
+
+        if (
+            preg_match(
+                '/\.(png|jpe?g)$/i',
+                (string) $file->getClientOriginalName(),
+                $match,
+            )
+        ) {
+            $extension = strtolower($match[1]) === 'jpeg'
+                ? 'jpg'
+                : 'png';
+        }
+
+        $path = 'ocr-tmp/'.Str::uuid().'.'.$extension;
+
+        Storage::disk(KkPhotoService::DISK)->put(
+            $path,
+            $bytes,
+        );
+
+        $this->ocrTempPath = $path;
+
+        return $path;
+    }
+
+    /**
+     * Hapus file OCR temp di disk kk_uploads apabila berasal dari
+     * TemporaryUploadedFile.
+     */
+    private function cleanupOcrTemp(mixed $rawValue): void
+    {
+        if (
+            $rawValue instanceof TemporaryUploadedFile
+            && $this->ocrTempPath !== null
+            && Storage::disk(KkPhotoService::DISK)->exists($this->ocrTempPath)
+        ) {
+            Storage::disk(KkPhotoService::DISK)->delete($this->ocrTempPath);
+        }
+
+        $this->ocrTempPath = null;
+    }
+
+    /**
+     * Pesan error yang dibedakan berdasarkan jenis kegagalan.
+     */
+    private function ocrErrorMessage(Throwable $e): string
+    {
+        $message = strtolower($e->getMessage());
+
+        if (
+            str_contains($message, 'array to string conversion')
+            || str_contains($message, 'array given')
+        ) {
+            return 'Format data foto belum siap diproses. '
+                .'Tunggu upload selesai, kemudian tekan Scan Foto KK kembali.';
+        }
+
+        if (
+            str_contains($message, 'could not be decoded')
+            || str_contains($message, 'image could not be decoded')
+        ) {
+            return 'File foto tidak dapat dibaca sebagai gambar. '
+                .'Gunakan JPG atau PNG yang dapat dibuka dengan normal.';
+        }
+
+        if (
+            str_contains($message, 'resolution below minimum')
+        ) {
+            return 'Resolusi foto terlalu rendah untuk OCR. '
+                .'Gunakan foto KK yang lebih jelas dan beresolusi lebih tinggi.';
+        }
+
+        if (
+            str_contains($message, 'source image')
+            || str_contains($message, 'file does not exist')
+            || str_contains($message, 'unable to load')
+        ) {
+            return 'File foto KK tidak ditemukan atau belum selesai disimpan. '
+                .'Silakan upload ulang foto KK.';
+        }
+
+        return 'Foto berhasil diterima, tetapi proses OCR gagal. '
+            .'Periksa kualitas foto lalu coba Scan Foto KK kembali. '
+            .'Jika tetap gagal, data dapat diisi secara manual.';
+    }
+
     private function runOcr(string $path): ParsedOcrResult
     {
         $disk = Storage::disk(KkPhotoService::DISK);
 
+        if (! $disk->exists($path)) {
+            throw new \RuntimeException(
+                'File foto KK tidak ditemukan pada penyimpanan.'
+            );
+        }
+
+        $contents = $disk->get($path);
+
+        if ($contents === '') {
+            throw new \RuntimeException(
+                'File foto KK kosong dan tidak dapat diproses.'
+            );
+        }
+
         $job = OcrJob::create([
             'kk_id' => null,
-            'source_image_hash' => hash('sha256', (string) $disk->get($path)),
+            'source_image_hash' => hash('sha256', $contents),
             'source_image_path' => $path,
             'status' => OcrJobStatus::PENDING,
             'operator_id' => auth()->id(),
@@ -325,6 +562,97 @@ class CreateKartuKeluarga extends CreateRecord
 
         $this->form->fill($data);
         $this->data = $data;
+    }
+
+    /**
+     * Cari KK yang sudah terdaftar berdasarkan nomor KK hasil OCR.
+     *
+     * Nomor KK harus 16 digit; input pendek/salah format diabaikan
+     * (tidak perlu query database).
+     */
+    private function findExistingKk(?string $kkNumber): ?KartuKeluarga
+    {
+        $kkNumber = preg_replace(
+            '/\D/',
+            '',
+            (string) $kkNumber
+        );
+
+        if (
+            strlen($kkNumber) !== 16
+            || preg_match('/^\d{16}$/', $kkNumber) !== 1
+        ) {
+            return null;
+        }
+
+        return KartuKeluarga::query()
+            ->with([
+                'rt.areaUnit',
+            ])
+            ->where('kk_number', $kkNumber)
+            ->first();
+    }
+
+    /**
+     * Pengaman backend agar OCR (atau input manual) tidak membuat KK duplikat.
+     *
+     * UI sudah menampilkan alert duplikat, tetapi backend tetap harus
+     * menolak penyimpanan bila operator memaksa menekan Simpan.
+     *
+     * Ini lapis kedua setelah duplicate alert pada KartuKeluargaForm.
+     */
+    protected function beforeCreate(): void
+    {
+        $kkNumber = preg_replace(
+            '/\D/',
+            '',
+            (string) ($this->data['kk_number'] ?? '')
+        );
+
+        if (
+            strlen($kkNumber) !== 16
+            || preg_match('/^\d{16}$/', $kkNumber) !== 1
+        ) {
+            return;
+        }
+
+        $existingKk = KartuKeluarga::query()
+            ->where('kk_number', $kkNumber)
+            ->first();
+
+        if ($existingKk === null) {
+            return;
+        }
+
+        $editUrl = KartuKeluargaResource::getUrl(
+            'edit',
+            [
+                'record' => $existingKk,
+            ]
+        );
+
+        Notification::make()
+            ->danger()
+            ->title('Nomor KK sudah terdaftar')
+            ->body(
+                'Nomor KK '.$kkNumber.
+                ' sudah ada di sistem. '.
+                'Silakan buka dan edit KK lama.'
+            )
+            ->actions([
+                Action::make('editKkLama')
+                    ->label('Buka & Edit KK Lama')
+                    ->url($editUrl),
+            ])
+            ->persistent()
+            ->send();
+
+        /*
+         * Jangan izinkan proses CREATE diteruskan.
+         */
+        throw ValidationException::withMessages([
+            'data.kk_number' => 'Nomor KK sudah terdaftar. Gunakan KK yang sudah ada.',
+        ]);
     }
 
     private function memberFromParsed(ParsedResident $member): array
@@ -510,6 +838,21 @@ class CreateKartuKeluarga extends CreateRecord
             }
 
             /*
+             * ================================================================
+             * DOKUMEN PENDUKUNG (OPSIONAL)
+             * ================================================================
+             *
+             * KTP dan Akta Kelahiran BUKAN kolom tabel penduduk.
+             * File disimpan ke tabel penduduk_documents lewat
+             * PendudukDocumentService dan terhubung melalui penduduk_id.
+             *
+             * storeFiles(false) membuat state form berupa
+             * TemporaryUploadedFile; nilai lain (null / path string lama)
+             * diabaikan karena tidak ada byte baru yang perlu disimpan.
+             */
+            $this->storeAnggotaDocuments($penduduk, $row);
+
+            /*
              * Pastikan hanya ada satu hubungan AKTIF
              * untuk Penduduk ini pada KK baru.
              */
@@ -544,6 +887,55 @@ class CreateKartuKeluarga extends CreateRecord
                 'effective_date' => now()->toDateString(),
                 'end_date' => null,
             ]);
+        }
+    }
+
+    /**
+     * Simpan dokumen pendukung satu anggota.
+     *
+     * Kedua dokumen OPSIONAL. Hanya TemporaryUploadedFile yang diproses —
+     * nilai null atau path string lama tidak menghasilkan byte baru.
+     *
+     * Tipe dokumen mengikuti PendudukDocumentService::ALLOWED_TYPES:
+     * KTP dan AKTA_KELAHIRAN.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function storeAnggotaDocuments(Penduduk $penduduk, array $row): void
+    {
+        $documents = [
+            'ktp_document' => 'KTP',
+            'akta_kelahiran_document' => 'AKTA_KELAHIRAN',
+        ];
+
+        $service = null;
+
+        foreach ($documents as $field => $documentType) {
+            $file = $row[$field] ?? null;
+
+            /*
+             * FileUpload non-multiple tetap dapat mengembalikan array
+             * berisi satu berkas tergantung waktu hidrasi Livewire.
+             */
+            if (is_array($file)) {
+                $file = collect($file)
+                    ->first(
+                        fn ($item): bool => $item instanceof TemporaryUploadedFile
+                    );
+            }
+
+            if (! $file instanceof TemporaryUploadedFile) {
+                continue;
+            }
+
+            $service ??= app(PendudukDocumentService::class);
+
+            $service->store(
+                penduduk: $penduduk,
+                file: $file,
+                documentType: $documentType,
+                operatorId: auth()->id(),
+            );
         }
     }
 
@@ -614,8 +1006,71 @@ class CreateKartuKeluarga extends CreateRecord
                     ->reorderable(false)
                     ->schema([
                         $this->memberFields(),
+                        $this->memberDocumentsSection(),
                     ])
                     ->columnSpanFull(),
+            ])
+            ->columnSpanFull()
+            ->collapsible();
+    }
+
+    /**
+     * Dokumen pendukung per anggota.
+     *
+     * KTP dan Akta Kelahiran keduanya OPSIONAL — tidak ada required().
+     *
+     * File TIDAK disimpan sebagai kolom tabel penduduk. storeFiles(false)
+     * membuat nilai state berupa TemporaryUploadedFile yang diserahkan ke
+     * PendudukDocumentService (tabel penduduk_documents, terhubung lewat
+     * penduduk_id).
+     */
+    private function memberDocumentsSection(): Section
+    {
+        return Section::make('Dokumen Pendukung')
+            ->description(
+                'KTP dan Akta Kelahiran merupakan dokumen pendukung '
+                .'dan bersifat opsional.'
+            )
+            ->schema([
+                Grid::make([
+                    'default' => 1,
+                    'md' => 2,
+                ])
+                    ->schema([
+                        FileUpload::make('ktp_document')
+                            ->label('KTP')
+                            ->disk(PendudukDocumentService::DISK)
+                            ->directory('penduduk-documents')
+                            ->acceptedFileTypes([
+                                'image/jpeg',
+                                'image/png',
+                                'application/pdf',
+                            ])
+                            ->maxSize(5120)
+                            ->storeFiles(false)
+                            ->downloadable()
+                            ->openable()
+                            ->helperText(
+                                'Opsional · JPG, PNG atau PDF · Maksimal 5 MB'
+                            ),
+
+                        FileUpload::make('akta_kelahiran_document')
+                            ->label('Akta Kelahiran')
+                            ->disk(PendudukDocumentService::DISK)
+                            ->directory('penduduk-documents')
+                            ->acceptedFileTypes([
+                                'image/jpeg',
+                                'image/png',
+                                'application/pdf',
+                            ])
+                            ->maxSize(5120)
+                            ->storeFiles(false)
+                            ->downloadable()
+                            ->openable()
+                            ->helperText(
+                                'Opsional · JPG, PNG atau PDF · Maksimal 5 MB'
+                            ),
+                    ]),
             ])
             ->columnSpanFull()
             ->collapsible();

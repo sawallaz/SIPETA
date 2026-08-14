@@ -9,6 +9,7 @@ use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use RuntimeException;
 
 class KkPhotoService
@@ -26,14 +27,14 @@ class KkPhotoService
     ) {}
 
     /**
-     * Simpan foto KK baru.
+     * Simpan foto KK baru sebagai arsip versi.
      *
-     * Jika KK sudah memiliki foto aktif, foto lama akan diganti:
-     * - file asli lama dihapus
-     * - thumbnail lama dihapus
-     * - record KkPhoto lama dihapus
+     * Jika KK sudah memiliki foto aktif, foto lama diarsipkan
+     * (is_active = false): file fisik dan record tetap tersimpan
+     * sebagai riwayat dokumen KK. Foto baru menjadi satu-satunya
+     * foto aktif.
      *
-     * Tidak ada arsip foto lama.
+     * Pada jalur ganti foto, foto lama TIDAK dihapus.
      */
     public function storeForKk(
         int $kkId,
@@ -111,10 +112,12 @@ class KkPhotoService
                 ]);
 
                 /*
-                 * Foto lama dihapus setelah foto baru berhasil dibuat.
+                 * Foto lama diarsipkan (is_active = false) setelah
+                 * foto baru berhasil dibuat. File fisik dan record
+                 * tetap tersimpan sebagai riwayat, tidak dihapus.
                  */
                 foreach ($oldPhotos as $oldPhoto) {
-                    $this->deletePhoto($oldPhoto);
+                    $oldPhoto->update(['is_active' => false]);
                 }
 
                 /*
@@ -138,6 +141,105 @@ class KkPhotoService
 
             if ($thumbnail !== null && $disk->exists($thumbnail)) {
                 $disk->delete($thumbnail);
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Simpan foto KK dari hasil upload langsung (TemporaryUploadedFile)
+     * tanpa bergantung pada path file yang sudah tersimpan di disk.
+     *
+     * Dipakai ketika FileUpload di-set storeFiles(false), sehingga nilai
+     * form berupa TemporaryUploadedFile yang kita serahkan ke service.
+     *
+     * Foto aktif lama diarsipkan (is_active = false); file fisik dan record
+     * tetap tersimpan sebagai riwayat dokumen — tidak dihapus, sejalan dengan
+     * storeForKk().
+     */
+    public function storeUploadedFileForKk(
+        int $kkId,
+        TemporaryUploadedFile $file,
+        ?int $operatorId = null,
+    ): KkPhoto {
+        $disk = $this->filesystem->disk(self::DISK);
+
+        $bytes = $file->get();
+
+        if ($bytes === null || $bytes === '') {
+            throw new RuntimeException(
+                'Foto KK yang diunggah kosong atau tidak dapat dibaca.'
+            );
+        }
+
+        $originalFilename = $file->getClientOriginalName();
+
+        if (
+            ! is_string($originalFilename)
+            || $originalFilename === ''
+            || ! mb_check_encoding($originalFilename, 'UTF-8')
+        ) {
+            $originalFilename = null;
+        }
+
+        $extension = $this->extensionFor($originalFilename, $bytes);
+        $stored = Str::uuid().'.'.$extension;
+
+        $disk->put($stored, $bytes);
+
+        try {
+            $thumbnail = $this->writeThumbnail($disk, $bytes, $stored);
+
+            return DB::transaction(function () use (
+                $kkId,
+                $originalFilename,
+                $operatorId,
+                $stored,
+                $thumbnail,
+                $bytes,
+            ): KkPhoto {
+                $oldPhotos = KkPhoto::query()
+                    ->where('kk_id', $kkId)
+                    ->where('is_active', true)
+                    ->get();
+
+                $photo = KkPhoto::create([
+                    'kk_id' => $kkId,
+                    'original_filename' => $originalFilename ?: $stored,
+                    'stored_filename' => $stored,
+                    'thumbnail_filename' => $thumbnail,
+                    'mime_type' => $this->mimeFor($bytes),
+                    'file_size' => strlen($bytes),
+                    'sha256_hash' => hash('sha256', $bytes),
+                    'storage_disk' => self::DISK,
+                    'storage_path' => $stored,
+                    'photo_type' => PhotoType::KK_PHOTO->value,
+                    'is_active' => true,
+                    'uploaded_by' => $operatorId,
+                    'uploaded_at' => now(),
+                    'ocr_job_id' => null,
+                ]);
+
+                /*
+                 * Foto lama diarsipkan (is_active = false), file fisik
+                 * dan record tetap tersimpan sebagai riwayat.
+                 */
+                foreach ($oldPhotos as $oldPhoto) {
+                    $oldPhoto->update(['is_active' => false]);
+                }
+
+                return $photo;
+            });
+        } catch (\Throwable $e) {
+            if ($disk->exists($stored)) {
+                $disk->delete($stored);
+            }
+
+            $thumbPath = pathinfo($stored, PATHINFO_FILENAME).'.thumb.png';
+
+            if ($disk->exists($thumbPath)) {
+                $disk->delete($thumbPath);
             }
 
             throw $e;

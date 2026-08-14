@@ -157,16 +157,45 @@ class PendudukResourceTest extends Phase3ResourceTestCase
             ->assertHasFormErrors(['nik']);
     }
 
-    public function test_nik_must_be_unique(): void
+    /**
+     * NIK adalah identitas orang, bukan identitas KK.
+     *
+     * NIK yang sudah terdaftar TIDAK ditolak dan TIDAK menghasilkan
+     * Penduduk kedua — orang yang sama dipindahkan ke KK yang dipilih.
+     */
+    public function test_existing_nik_is_reused_instead_of_duplicated(): void
     {
         $existing = Penduduk::factory()->create(['nik' => '7371010101010102']);
+        $kkBaru = KartuKeluarga::factory()->create();
 
         Livewire::test(CreatePenduduk::class)
-            ->fillForm($this->validPayload(['nik' => $existing->nik]))
+            ->fillForm($this->validPayload([
+                'nik' => $existing->nik,
+                'kk_id' => $kkBaru->getKey(),
+            ]))
             ->call('create')
-            ->assertHasFormErrors(['nik' => 'unique']);
+            ->assertHasNoFormErrors();
 
         $this->assertSame(1, Penduduk::where('nik', '7371010101010102')->count());
+        $this->assertSame($kkBaru->getKey(), $existing->refresh()->kk_id);
+    }
+
+    /**
+     * Database tetap menjadi pengaman terakhir: NIK milik orang lain
+     * tidak boleh diambil alih lewat Edit. Pesannya harus muncul di
+     * field, bukan sebagai HTTP 500 dari unique index.
+     */
+    public function test_editing_cannot_take_over_another_residents_nik(): void
+    {
+        $lain = Penduduk::factory()->create(['nik' => '7371010101010105']);
+        $penduduk = Penduduk::factory()->create(['nik' => '7371010101010106']);
+
+        Livewire::test(EditPenduduk::class, ['record' => $penduduk->getKey()])
+            ->fillForm(['nik' => $lain->nik])
+            ->call('save')
+            ->assertHasFormErrors(['nik']);
+
+        $this->assertSame('7371010101010106', $penduduk->refresh()->nik);
     }
 
     public function test_editing_a_record_ignores_its_own_nik_for_uniqueness(): void

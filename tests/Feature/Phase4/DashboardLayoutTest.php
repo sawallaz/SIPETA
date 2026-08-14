@@ -3,13 +3,13 @@
 namespace Tests\Feature\Phase4;
 
 use App\Filament\Pages\Dashboard;
+use App\Filament\Widgets\PendudukPerAgamaChart;
 use App\Filament\Widgets\PendudukPerGenderChart;
 use App\Filament\Widgets\PendudukPerLingkunganChart;
 use App\Filament\Widgets\PendudukPerPekerjaanChart;
 use App\Filament\Widgets\PendudukPerPendidikanChart;
 use App\Filament\Widgets\PendudukPerRTChart;
 use App\Filament\Widgets\PendudukPerStatusChart;
-use App\Filament\Widgets\PendudukPerAgamaChart;
 use App\Filament\Widgets\QuickActionsWidget;
 use App\Filament\Widgets\RecentActivityWidget;
 use App\Filament\Widgets\SipetaStatsOverview;
@@ -20,12 +20,11 @@ use Tests\TestCase;
 /**
  * PHASE UI-1 — dashboard redesign visual structure.
  *
- * Locks in the redesigned dashboard layout contract
- * (docs/PRODUCT_DECISIONS.md §2 D-DASH): KPI cards first, Quick Actions
- * directly beneath them, the charts section tiled compactly, and Recent
- * Activity always last. KPI / Quick Actions / Recent Activity span the full
- * dashboard width; charts occupy a single page-grid column (or less) so they
- * never dominate the viewport.
+ * Locks in the production dashboard layout contract: KPI cards first, Quick
+ * Actions directly beneath them, the charts section tiled compactly, and
+ * Recent Activity always last. KPI / Quick Actions / Recent Activity span the
+ * full dashboard width; charts occupy a single page-grid column (or less) so
+ * they never dominate the viewport.
  */
 class DashboardLayoutTest extends TestCase
 {
@@ -48,12 +47,9 @@ class DashboardLayoutTest extends TestCase
                 SipetaStatsOverview::class,
                 QuickActionsWidget::class,
                 PendudukPerGenderChart::class,
-                PendudukPerStatusChart::class,
                 PendudukPerPekerjaanChart::class,
-                PendudukPerPendidikanChart::class,
-                PendudukPerAgamaChart::class,
-                PendudukPerRTChart::class,
                 PendudukPerLingkunganChart::class,
+                PendudukPerPendidikanChart::class,
                 RecentActivityWidget::class,
             ],
             invade(new Dashboard)->getWidgets(),
@@ -70,7 +66,7 @@ class DashboardLayoutTest extends TestCase
             $this->assertSame(
                 'full',
                 (new $widgetClass)->getColumnSpan(),
-                "{$widgetClass} should span the full dashboard width after the UI-1 redesign",
+                "{$widgetClass} should span the full dashboard width",
             );
         }
     }
@@ -83,12 +79,13 @@ class DashboardLayoutTest extends TestCase
             PendudukPerPekerjaanChart::class,
             PendudukPerPendidikanChart::class,
             PendudukPerAgamaChart::class,
+            PendudukPerRTChart::class,
             PendudukPerLingkunganChart::class,
         ] as $widgetClass) {
             $this->assertNotSame(
                 'full',
                 (new $widgetClass)->getColumnSpan(),
-                "{$widgetClass} must use a compact column span after the UI-1 redesign",
+                "{$widgetClass} must use a compact column span",
             );
         }
     }
@@ -99,6 +96,6 @@ class DashboardLayoutTest extends TestCase
             ->assertOk()
             ->assertSee('Aksi Cepat')
             ->assertSee('Aktivitas Terbaru')
-            ->assertSee('Status Penduduk');
+            ->assertSee('Jenis Kelamin');
     }
 }

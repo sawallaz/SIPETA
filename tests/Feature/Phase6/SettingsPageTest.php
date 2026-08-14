@@ -15,10 +15,15 @@ use Tests\TestCase;
 /**
  * Phase 6.5 — operator "Pengaturan" (Settings) page. Verifies the singleton
  * settings row is created on first access and never deleted (FR-SET-02), the
- * identity, logo and backup-path fields are editable and persist (FR-SET-01),
- * the logo is stored on the `local` disk under the `logos/` prefix with only
- * the relative path persisted, and that `backup_path` is recorded as operator
- * configuration without changing the Phase 6.2 BackupService.
+ * identity and logo fields are editable and persist (FR-SET-01), the logo is
+ * stored on the `local` disk under the `logos/` prefix with only the relative
+ * path persisted.
+ *
+ * The "Lokasi Backup" (backup location) field has been removed from the
+ * Settings UI: backup is no longer configured as a location here. The backend
+ * `backup_path` column is intentionally preserved (consumed by BackupService /
+ * RestoreService) but is no longer part of the form, so saving the form must
+ * NOT wipe a previously stored value.
  */
 class SettingsPageTest extends TestCase
 {
@@ -100,10 +105,10 @@ class SettingsPageTest extends TestCase
 
     public function test_backup_path_is_preserved_when_not_submitted_from_ui(): void
     {
-        // The Backup section was removed from the Settings UI, but backup_path
-        // remains a real backend field consumed by BackupService/RestoreService.
-        // Saving the form without a backup_path input must NOT wipe the stored value.
-        // Ensure the singleton exists first, then set a known value.
+        // The "Lokasi Backup" field was removed from the Settings UI, but the
+        // backup_path column remains a real backend field consumed by
+        // BackupService / RestoreService. Saving the form without a backup_path
+        // input must NOT wipe the stored value.
         app(SettingsService::class)->get()->update(['backup_path' => '/var/opt/sipeta/protected-backups']);
 
         Livewire::test(Settings::class)

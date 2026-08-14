@@ -54,8 +54,8 @@ TXT;
         // KK-level fields (FR-OCR-02).
         $this->assertSame('3207122801160001', $result->kkNumber);
         $this->assertSame('JL. MELATI NO. 5', $result->address);
-        $this->assertSame('001', $result->rt);
-        $this->assertSame('004', $result->rw);
+        $this->assertSame('01', $result->rt);
+        $this->assertSame('04', $result->rw);
         $this->assertNull($result->lingkungan);
 
         $this->assertCount(3, $result->members);
@@ -135,7 +135,7 @@ TXT;
 
         $this->assertNull($result->kkNumber);
         $this->assertCount(1, $result->members);
-        $this->assertContains('Nomor KK tidak ditemukan', $result->validationErrors);
+        $this->assertContains('Nomor KK tidak ditemukan atau tidak terbaca.', $result->validationErrors);
 
         // Header present but zero member rows: no NIK extracted (low yield).
         $noMembers = implode("\n", [
@@ -148,7 +148,7 @@ TXT;
 
         $this->assertSame('3207122801160001', $result->kkNumber);
         $this->assertSame([], $result->members);
-        $this->assertContains('OCR tidak menemukan NIK', $result->validationErrors);
+        $this->assertContains('OCR tidak menemukan NIK anggota keluarga.', $result->validationErrors);
     }
 
     public function test_malformed_ocr_is_handled_gracefully(): void
@@ -203,15 +203,16 @@ TXT;
         // First occurrence wins everywhere.
         $this->assertSame('3207122801160001', $result->kkNumber);
         $this->assertSame('JL. MELATI NO. 5', $result->address);
-        $this->assertSame('001', $result->rt);
-        $this->assertSame('004', $result->rw);
+        $this->assertSame('01', $result->rt);
+        $this->assertSame('04', $result->rw);
 
         // Duplicate NIK row dropped: exactly one member.
         $this->assertCount(1, $result->members);
         $this->assertContains('NIK duplikat diabaikan: 3207122801160001', $result->warnings);
-        $this->assertContains('Nomor KK ganda tidak konsisten: 3207122801160999 (diabaikan)', $result->warnings);
-        $this->assertContains('Label duplikat diabaikan: ALAMAT', $result->warnings);
-        $this->assertContains('Label duplikat diabaikan: RT/RW', $result->warnings);
+        $this->assertContains('Nomor KK ganda tidak konsisten: 3207122801160999 diabaikan.', $result->warnings);
+        $this->assertContains('Label ALAMAT ditemukan lebih dari satu kali. Nilai pertama dipertahankan.', $result->warnings);
+        $this->assertContains('Nilai RT berbeda ditemukan pada dokumen. Nilai pertama dipertahankan.', $result->warnings);
+        $this->assertContains('Nilai RW berbeda ditemukan pada dokumen. Nilai pertama dipertahankan.', $result->warnings);
     }
 
     public function test_low_confidence_text_flags_result_and_members(): void
@@ -240,7 +241,7 @@ TXT;
         $result = $this->parse(self::KK_TEXT, 25.0);
 
         $this->assertTrue($result->lowConfidence);
-        $this->assertContains('Gambar tidak terbaca (confidence sangat rendah)', $result->warnings);
+        $this->assertContains('Gambar tidak terbaca dengan baik (confidence sangat rendah).', $result->warnings);
     }
 
     public function test_empty_ocr_result_yields_empty_parsed_result(): void
@@ -253,13 +254,13 @@ TXT;
         $this->assertNull($result->address);
         $this->assertSame([], $result->members);
         $this->assertTrue($result->lowConfidence);
-        $this->assertContains('OCR tidak menghasilkan teks (gambar kosong atau tidak terbaca)', $result->warnings);
-        $this->assertContains('OCR tidak menemukan NIK', $result->validationErrors);
+        $this->assertContains('OCR tidak menghasilkan teks (gambar kosong atau tidak terbaca).', $result->warnings);
+        $this->assertContains('OCR tidak menemukan NIK.', $result->validationErrors);
 
         // Whitespace-only input behaves identically.
         $blank = $this->parse("   \n \t \n", 0.0);
         $this->assertTrue($blank->isEmpty());
-        $this->assertContains('OCR tidak menghasilkan teks (gambar kosong atau tidak terbaca)', $blank->warnings);
+        $this->assertContains('OCR tidak menghasilkan teks (gambar kosong atau tidak terbaca).', $blank->warnings);
     }
 
     public function test_rt_rw_and_lingkungan_variants_are_extracted(): void
@@ -278,8 +279,8 @@ TXT;
         $result = $this->parse($text, 90.0);
 
         $this->assertSame('3207122801160001', $result->kkNumber);
-        $this->assertSame('003', $result->rt);
-        $this->assertSame('006', $result->rw);
+        $this->assertSame('03', $result->rt);
+        $this->assertSame('06', $result->rw);
         $this->assertSame('I', $result->lingkungan);
         $this->assertSame([], $result->validationErrors);
     }

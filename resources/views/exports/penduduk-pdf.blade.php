@@ -1,65 +1,273 @@
-{{-- Phase 6.1 — Laporan Data Penduduk (PDF). Rendered via DomPDF; inline CSS only. --}}
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="utf-8">
+
     <title>Laporan Data Penduduk</title>
+
     <style>
-        * { font-family: DejaVu Sans, sans-serif; }
-        body { font-size: 10px; color: #1f2937; }
-        .header { text-align: center; margin-bottom: 16px; }
-        .header h1 { font-size: 16px; margin: 0 0 2px; }
-        .header .sub { font-size: 11px; color: #4b5563; }
-        .meta { margin-bottom: 10px; font-size: 10px; }
-        .meta table { width: 100%; }
-        table.data { width: 100%; border-collapse: collapse; }
-        table.data th, table.data td { border: 1px solid #9ca3af; padding: 4px 6px; text-align: left; }
-        table.data th { background: #f3f4f6; font-weight: bold; }
-        .footer { margin-top: 14px; font-size: 9px; color: #6b7280; text-align: right; }
+        * {
+            font-family: DejaVu Sans, sans-serif;
+        }
+
+        @page {
+            margin: 20px 18px 18px 18px;
+        }
+
+        body {
+            font-size: 7px;
+            color: #111827;
+        }
+
+        .kop {
+            width: 100%;
+            border-bottom: 2px solid #111827;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
+        }
+
+        .kop-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .logo-cell {
+            width: 70px;
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        .logo {
+            max-width: 55px;
+            max-height: 55px;
+        }
+
+        .identity {
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        .identity .kelurahan {
+            font-size: 13px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .identity .address {
+            font-size: 8px;
+            margin-top: 2px;
+        }
+
+        .title {
+            text-align: center;
+            margin-top: 8px;
+            margin-bottom: 6px;
+        }
+
+        .title h1 {
+            font-size: 12px;
+            margin: 0;
+            text-transform: uppercase;
+        }
+
+        .title p {
+            margin: 3px 0 0;
+            font-size: 8px;
+        }
+
+        .meta {
+            margin-bottom: 6px;
+            font-size: 7px;
+        }
+
+        .meta table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .meta td {
+            padding: 1px 0;
+        }
+
+        table.data {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        table.data thead {
+            display: table-header-group;
+        }
+
+        table.data tr {
+            page-break-inside: avoid;
+        }
+
+        table.data th,
+        table.data td {
+            border: 0.5px solid #9ca3af;
+            padding: 2px 2px;
+            vertical-align: top;
+            line-height: 1.15;
+            overflow-wrap: break-word;
+            word-wrap: break-word;
+        }
+
+        table.data th {
+            background: #f3f4f6;
+            font-weight: bold;
+            font-size: 6.5px;
+            text-align: center;
+        }
+
+        table.data td {
+            font-size: 6.5px;
+        }
+
+        /* Lebar per kolom (13 kolom, total 100%, A4 landscape) */
+        table.data th:nth-child(1),
+        table.data td:nth-child(1) { width: 9%; }   /* NIK */
+        table.data th:nth-child(2),
+        table.data td:nth-child(2) { width: 11%; }  /* Nama Lengkap */
+        table.data th:nth-child(3),
+        table.data td:nth-child(3) { width: 11%; }  /* Nomor KK */
+        table.data th:nth-child(4),
+        table.data td:nth-child(4) { width: 8%; }   /* Jenis Kelamin */
+        table.data th:nth-child(5),
+        table.data td:nth-child(5) { width: 7%; }   /* Tempat Lahir */
+        table.data th:nth-child(6),
+        table.data td:nth-child(6) { width: 6%; }   /* Tanggal Lahir */
+        table.data th:nth-child(7),
+        table.data td:nth-child(7) { width: 5%; }   /* Usia */
+        table.data th:nth-child(8),
+        table.data td:nth-child(8) { width: 7%; }   /* RT */
+        table.data th:nth-child(9),
+        table.data td:nth-child(9) { width: 8%; }   /* RW / Lingkungan */
+        table.data th:nth-child(10),
+        table.data td:nth-child(10) { width: 6%; }  /* Status */
+        table.data th:nth-child(11),
+        table.data td:nth-child(11) { width: 6%; }  /* Agama */
+        table.data th:nth-child(12),
+        table.data td:nth-child(12) { width: 8%; }  /* Pendidikan */
+        table.data th:nth-child(13),
+        table.data td:nth-child(13) { width: 8%; }  /* Pekerjaan */
+
+        .footer {
+            position: fixed;
+            bottom: -20px;
+            left: 0;
+            right: 0;
+            text-align: right;
+            font-size: 8px;
+            color: #6b7280;
+        }
     </style>
 </head>
+
 <body>
-    <div class="header">
-        <h1>Laporan Data Penduduk</h1>
-        <div class="sub">{{ $kelurahanName ?? config('app.name') }}</div>
+
+    {{-- KOP SURAT --}}
+    <div class="kop">
+        <table class="kop-table">
+            <tr>
+                <td class="logo-cell">
+                    @if (!empty($logoData))
+                        <img
+                            src="{{ $logoData }}"
+                            class="logo"
+                        >
+                    @endif
+                </td>
+
+                <td class="identity">
+                    <div class="kelurahan">
+                        {{ $kelurahanName ?? 'Kelurahan' }}
+                    </div>
+
+                    <div class="address">
+                        Kecamatan {{ $kecamatanName ?? '-' }}
+                    </div>
+
+                    <div class="address">
+                        {{ $kabupatenName ?? '-' }},
+                        {{ $provinceName ?? '-' }}
+                    </div>
+                </td>
+
+                <td style="width: 80px;"></td>
+            </tr>
+        </table>
     </div>
 
+    {{-- JUDUL --}}
+    <div class="title">
+        <h1>Laporan Data Penduduk</h1>
+
+        <p>
+            Data Penduduk Kelurahan
+            {{ $kelurahanName ?? '-' }}
+        </p>
+    </div>
+
+    {{-- INFORMASI LAPORAN --}}
     <div class="meta">
         <table>
             <tr>
-                <td>Filter: {{ $filterSummary }}</td>
-                <td style="text-align: right;">Dibuat: {{ $generatedAt->format('d-m-Y H:i') }}</td>
+                <td>
+                    <strong>Filter:</strong>
+                    {{ $filterSummary ?: 'Semua Data' }}
+                </td>
+
+                <td style="text-align: right;">
+                    <strong>Dibuat:</strong>
+                    {{ $generatedAt->format('d-m-Y H:i') }}
+                </td>
             </tr>
+
             <tr>
-                <td>Jumlah data: {{ count($rows) }} penduduk</td>
+                <td>
+                    <strong>Jumlah Data:</strong>
+                    {{ count($rows) }} penduduk
+                </td>
+
                 <td></td>
             </tr>
         </table>
     </div>
 
+    {{-- DATA PENDUDUK --}}
     <table class="data">
         <thead>
-        <tr>
-            @foreach ($columns as $column)
-                <th>{{ $column }}</th>
-            @endforeach
-        </tr>
-        </thead>
-        <tbody>
-        @forelse ($rows as $row)
             <tr>
                 @foreach ($columns as $column)
-                    <td>{{ $row[$column] ?? '-' }}</td>
+                    <th>{{ $column }}</th>
                 @endforeach
             </tr>
-        @empty
-            <tr><td colspan="{{ count($columns) }}">Tidak ada data.</td></tr>
-        @endforelse
+        </thead>
+
+        <tbody>
+            @forelse ($rows as $row)
+                <tr>
+                    @foreach ($columns as $column)
+                        <td>
+                            {{ $row[$column] ?? '-' }}
+                        </td>
+                    @endforeach
+                </tr>
+            @empty
+                <tr>
+                    <td colspan="{{ count($columns) }}">
+                        Tidak ada data penduduk.
+                    </td>
+                </tr>
+            @endforelse
         </tbody>
     </table>
 
     <div class="footer">
-        Dihasilkan oleh Aplikasi SIPETA — Kelurahan Tanete
+        Dihasilkan oleh SIPETA —
+        {{ $kelurahanName ?? 'Kelurahan' }}
     </div>
+
 </body>
 </html>

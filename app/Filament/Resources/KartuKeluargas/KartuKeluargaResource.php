@@ -18,6 +18,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 use UnitEnum;
 
 class KartuKeluargaResource extends Resource
@@ -37,6 +38,25 @@ class KartuKeluargaResource extends Resource
     protected static ?string $pluralModelLabel = 'Kartu Keluarga';
 
     protected static ?string $recordTitleAttribute = 'kk_number';
+
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['kk_number', 'penduduks.full_name', 'address'];
+    }
+
+    public static function getGlobalSearchResultUrl(Model $record): ?string
+    {
+        $canView = static::canView($record);
+
+        if ($canView) {
+            return static::getUrl(parameters: [
+                'tableAction' => 'lihat',
+                'tableActionRecord' => $record,
+            ]);
+        }
+
+        return null;
+    }
 
     public static function form(Schema $schema): Schema
     {
@@ -60,30 +80,24 @@ class KartuKeluargaResource extends Resource
                             'lg' => 3,
                         ])
                             ->schema([
-                                Section::make('Foto KK')
+                                Section::make('Foto Kartu Keluarga')
                                     ->schema([
                                         TextEntry::make('active_photo_full_url')
                                             ->hiddenLabel()
                                             ->state(fn (KartuKeluarga $record): string => $record->active_photo_full_url
-                                                ? '<div class="flex flex-col items-center gap-3">
-                                                    <a href="'.e($record->active_photo_full_url).'" target="_blank">
-                                                        <img src="'.e($record->active_photo_full_url).'"
-                                                             alt="Foto KK"
-                                                             class="w-full rounded-xl border object-contain shadow-sm"
-                                                             style="max-height: 430px;">
-                                                    </a>
-                                                    <a href="'.e($record->active_photo_full_url).'"
-                                                       target="_blank"
-                                                       class="text-sm font-medium text-primary-600 hover:underline">
-                                                        Buka Foto KK
-                                                    </a>
+                                                ? '<div class="overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
+                                                    <div class="flex h-48 items-center justify-center p-3">
+                                                        <a href="'.e($record->active_photo_full_url).'" target="_blank" class="flex h-full w-full items-center justify-center">
+                                                            <img src="'.e($record->active_photo_full_url).'"
+                                                                 alt="Foto Kartu Keluarga"
+                                                                 class="max-h-full max-w-full rounded-lg object-contain">
+                                                        </a>
+                                                    </div>
                                                 </div>'
-                                                : '<div class="flex min-h-64 items-center justify-center rounded-xl border border-dashed p-8 text-center">
+                                                : '<div class="flex h-48 items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-center">
                                                     <div>
-                                                        <div class="font-medium">Belum ada foto KK</div>
-                                                        <div class="mt-1 text-sm text-gray-500">
-                                                            Upload foto melalui menu Ubah.
-                                                        </div>
+                                                        <div class="text-sm font-medium text-gray-500">Belum ada foto KK.</div>
+                                                        <div class="mt-1 text-xs text-gray-400">Foto KK belum tersedia.</div>
                                                     </div>
                                                 </div>')
                                             ->html(),

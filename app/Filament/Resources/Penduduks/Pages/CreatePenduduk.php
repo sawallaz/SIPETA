@@ -2,11 +2,15 @@
 
 namespace App\Filament\Resources\Penduduks\Pages;
 
+use App\Filament\Resources\Penduduks\Pages\Concerns\SavesPendudukThroughKkService;
 use App\Filament\Resources\Penduduks\PendudukResource;
 use Filament\Resources\Pages\CreateRecord;
+use Illuminate\Database\Eloquent\Model;
 
 class CreatePenduduk extends CreateRecord
 {
+    use SavesPendudukThroughKkService;
+
     protected static string $resource = PendudukResource::class;
 
     public function getTitle(): string
@@ -20,10 +24,15 @@ class CreatePenduduk extends CreateRecord
     }
 
     /**
-     * Pre-select the Kartu Keluarga when arriving from the KK relation manager
-     * ("Tambah Anggota"), so the new resident lands in the right family.
+     * Ketika form dibuka dari Relation Manager KK:
      *
-     * Runs after the normal fill so component defaults are preserved.
+     * KK
+     *  ↓
+     * Tambah Anggota
+     *  ↓
+     * CreatePenduduk
+     *  ↓
+     * kk_id otomatis diisi
      */
     protected function afterFill(): void
     {
@@ -33,6 +42,21 @@ class CreatePenduduk extends CreateRecord
             return;
         }
 
-        $this->form->fillPartially(['kk_id' => $kkId], ['kk_id']);
+        $this->form->fillPartially(
+            ['kk_id' => $kkId],
+            ['kk_id'],
+        );
+    }
+
+    /**
+     * Semua proses create penduduk dilewatkan
+     * melalui service agar aturan NIK + KK + histori
+     * tidak berbeda dengan jalur lainnya.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function handleRecordCreation(array $data): Model
+    {
+        return $this->savePendudukThroughService($data);
     }
 }

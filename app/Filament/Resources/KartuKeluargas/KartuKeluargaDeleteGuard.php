@@ -5,73 +5,94 @@ namespace App\Filament\Resources\KartuKeluargas;
 use App\Models\KartuKeluarga;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Guard that blocks deletion of a Kartu Keluarga while it still owns
- * dependent records.
- *
- * The SIPETA schema deliberately uses RESTRICT on every child foreign key
- * (penduduk.kk_id, kk_anggota.kk_id, kk_photos.kk_id, ocr_jobs.kk_id) so the
- * household's history can never be wiped by accident. We surface that
- * constraint to the operator as a human-readable message instead of letting
- * Laravel bubble up a raw SQLSTATE[23000] integrity-violation error.
- *
- * Call {@see assertDeletable()} from a DeleteAction / DeleteBulkAction
- * `->before()` hook. When dependencies remain it throws a
- * ValidationException, which Filament renders inline in the confirmation
- * modal and — crucially — prevents the underlying DELETE from running.
- */
 final class KartuKeluargaDeleteGuard
 {
     /**
-     * @throws ValidationException when the household still has dependencies.
+     * KK hanya boleh dihapus permanen apabila benar-benar merupakan
+     * data kosong dan tidak mempunyai jejak administratif.
+     *
+     * Yang diperiksa:
+     * - penduduk aktif/current
+     * - histori kk_anggota
+     * - arsip foto KK
+     * - OCR job
+     *
+     * Jika KK sudah mempunyai histori, jangan DELETE.
+     * KK tersebut harus masuk ke Riwayat KK.
      */
     public static function assertDeletable(KartuKeluarga $record): void
     {
-        $penduduk = $record->penduduks()->count();
-        $anggota = $record->kkAnggotas()->count();
-        $foto = $record->kkPhotos()->count();
-        $ocr = $record->ocrJobs()->count();
+        $pendudukCount = $record->penduduks()->count();
 
-        if ($penduduk === 0 && $anggota === 0 && $foto === 0 && $ocr === 0) {
-            return;
+        if ($pendudukCount > 0) {
+            throw ValidationException::withMessages([
+                'kk' => sprintf(
+                    'Kartu Keluarga %s masih memiliki %d anggota aktif. Hapus atau pindahkan seluruh anggota terlebih dahulu.',
+                    $record->kk_number,
+                    $pendudukCount,
+                ),
+            ]);
         }
 
-        $reasons = [];
+        $historyCount = $record->kkAnggotas()->count();
 
-        if ($penduduk > 0) {
-            $reasons[] = sprintf(
-                '%d anggota keluarga masih terhubung',
-                $penduduk,
-            );
+        if ($historyCount > 0) {
+            throw ValidationException::withMessages([
+                'kk' => sprintf(
+                    'Kartu Keluarga %s memiliki riwayat kependudukan dan tidak boleh dihapus permanen. KK tersebut akan disimpan sebagai riwayat.',
+                    $record->kk_number,
+                ),
+            ]);
         }
 
-        if ($anggota > 0) {
-            $reasons[] = sprintf(
-                '%d riwayat keanggotaan ditemukan',
-                $anggota,
-            );
+        $photoCount = $record->kkPhotos()->count();
+
+        if ($photoCount > 0) {
+            throw ValidationException::withMessages([
+                'kk' => sprintf(
+                    'Kartu Keluarga %s masih memiliki arsip foto. Hapus arsip foto terlebih dahulu jika data ini memang merupakan data uji.',
+                    $record->kk_number,
+                ),
+            ]);
         }
 
-        if ($foto > 0) {
-            $reasons[] = sprintf(
-                '%d foto KK tersimpan',
-                $foto,
-            );
-        }
+        $ocrJobCount = $record->ocrJobs()->count();
 
-        if ($ocr > 0) {
-            $reasons[] = sprintf(
-                '%d riwayat OCR terhubung',
-                $ocr,
-            );
+        if ($ocrJobCount > 0) {
+            throw ValidationException::withMessages([
+                'kk' => sprintf(
+                    'Kartu Keluarga %s masih memiliki riwayat OCR dan tidak boleh dihapus permanen.',
+                    $record->kk_number,
+                ),
+            ]);
         }
+    }
 
-        throw ValidationException::withMessages([
-            'delete' => sprintf(
-                'Kartu Keluarga %s tidak dapat dihapus. %s. Data tidak dihapus untuk menjaga integritas dan histori kependudukan.',
-                $record->kk_number,
-                implode('; ', $reasons),
-            ),
-        ]);
+    /**
+     * Apakah KK masih mempunyai anggota aktif/current?
+     */
+    public static function hasCurrentMembers(KartuKeluarga $record): bool
+    {
+        return $record->penduduks()->exists();
+    }
+
+    /**
+     * Apakah KK mempunyai histori perpindahan?
+     */
+    public static function hasHistory(KartuKeluarga $record): bool
+    {
+        return $record->kkAnggotas()->exists();
+    }
+
+    /**
+     * KK dianggap sebagai histori apabila:
+     *
+     * - tidak mempunyai penduduk current
+     * - tetapi mempunyai kk_anggota history.
+     */
+    public static function isHistorical(KartuKeluarga $record): bool
+    {
+        return ! self::hasCurrentMembers($record)
+            && self::hasHistory($record);
     }
 }

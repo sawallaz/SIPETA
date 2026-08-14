@@ -143,7 +143,7 @@ class ReviewOcrJob extends Page
                         ->required()
                         ->columnSpanFull(),
                     TextInput::make('lingkungan')
-                        ->label('Lingkungan')
+                        ->label('RW')
                         ->columnSpanFull(),
                 ]),
             Section::make('Anggota Keluarga')

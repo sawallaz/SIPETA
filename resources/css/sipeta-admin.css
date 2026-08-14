@@ -7,7 +7,39 @@
  * - Compact but readable sidebar
  * - Clear dashboard hierarchy
  * - Consistent card dimensions
+ *
+ * Tailwind v4 bridge:
+ * This stylesheet is injected on every panel page (STYLES_AFTER hook in
+ * AppServiceProvider) and is the ONLY user stylesheet the admin panel loads
+ * besides Filament's vendored app.css. Filament's vendored CSS does NOT ship
+ * arbitrary `grid-cols-*` utilities, and this file previously had no
+ * `@import 'tailwindcss'` / `@source`, so Tailwind never emitted utilities such
+ * as `.grid` / `.grid-cols-4`. The dashboard KPI custom view
+ * (filament.widgets.sipeta-stats-overview) relies on `grid grid-cols-1
+ * md:grid-cols-2 xl:grid-cols-4`; without the generated utilities the cards
+ * collapse to a single vertical column. Importing Tailwind and pointing
+ * `@source` at the project's Blade + JS (plus compiled vendor views) restores
+ * those utilities without affecting the `.fi-*` overrides below.
+ *
+ * Dark-mode strategy alignment (CRITICAL):
+ * Filament 4 drives dark mode via a `.dark` class on an ancestor
+ * (`:where(.dark, .dark *)` in its vendored CSS), NOT the OS
+ * `prefers-color-scheme` media query. Our `@import 'tailwindcss'`
+ * otherwise pulls in Tailwind v4's DEFAULT dark variant, which is
+ * `@media (prefers-color-scheme: dark)`. That mismatch made the KPI
+ * cards flip to dark/navy based on the OPERATING SYSTEM preference while
+ * the rest of the dashboard followed Filament's `.dark` class toggle —
+ * so the cards looked out of sync ("navy") next to light Quick Actions.
+ * Declaring the same class-based custom variant re-aligns every
+ * `dark:` utility below with Filament's actual theme switch.
  */
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@source '../../resources/views/**/*.blade.php';
+@source '../../resources/js/**/*.js';
+@source '../../storage/framework/views/*.php';
 
 /* ================================================================
    1. SIPETA COLOR SYSTEM
@@ -150,11 +182,7 @@
  * apply the green identity there.
  */
 .fi-topbar {
-    background: linear-gradient(
-        90deg,
-        var(--sipeta-green-950),
-        var(--sipeta-green-900)
-    );
+    background-color: #365C45;
 }
 
 
@@ -1243,4 +1271,251 @@
 /* Jangan membuat modal terlalu kecil */
 .fi-modal-window {
     max-width: 90vw !important;
+}
+
+/* ================================================================
+   9. MODAL DUPLICATE KK (KartuKeluargaForm)
+   ================================================================
+   Alert card lama (.kk-dup-alert) DIHAPUS dan diganti modal overlay
+   yang muncul di tengah layar.
+
+   CATATAN PENTING:
+   Utility Tailwind generik (fixed, inset-0, z-*, rounded-2xl, max-w-lg,
+   bg-amber-*, bg-primary-*, shadow-2xl, ...) TIDAK tersedia di CSS
+   ter-build panel ini — Filament v4 hanya menghasilkan kelas .fi-*
+   (diverifikasi: 0 kemunculan di public/css/filament/filament/app.css
+   maupun bundle sipeta-admin). Karena itu seluruh tampilan modal
+   didefinisikan sendiri di bawah ini.
+
+   Palet aksen = Amber (warning Filament), sumber:
+   vendor/filament/support/src/Colors/Color.php :: Amber.
+*/
+
+/* Alpine x-cloak: sembunyikan sebelum Alpine siap. */
+[x-cloak] {
+    display: none !important;
+}
+
+.kk-dup-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.kk-dup-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background-color: rgba(3, 7, 18, 0.55);
+    backdrop-filter: blur(2px);
+}
+
+.kk-dup-modal-panel {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 32rem;
+    overflow: hidden;
+    border-radius: 1rem;
+    background-color: #ffffff;
+    box-shadow:
+        0 25px 50px -12px rgba(0, 0, 0, 0.35),
+        0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+/* ---------------- header ---------------- */
+
+.kk-dup-modal-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 1.25rem 1.5rem;
+}
+
+.kk-dup-modal-icon {
+    display: flex;
+    height: 2.75rem;
+    width: 2.75rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    background-color: #fef3c7;
+    color: #d97706;
+}
+
+.kk-dup-modal-icon-svg {
+    height: 1.5rem;
+    width: 1.5rem;
+}
+
+.kk-dup-modal-heading {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.kk-dup-modal-title {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    line-height: 1.5rem;
+    color: #030712;
+}
+
+.kk-dup-modal-subtitle {
+    margin: 0.25rem 0 0;
+    font-size: 0.875rem;
+    color: #6b7280;
+}
+
+/* ---------------- body ---------------- */
+
+.kk-dup-modal-body {
+    padding: 1.25rem 1.5rem;
+}
+
+.kk-dup-modal-box {
+    display: grid;
+    gap: 0.75rem;
+    border-radius: 0.75rem;
+    border: 1px solid #e5e7eb;
+    background-color: #f9fafb;
+    padding: 1rem;
+}
+
+.kk-dup-modal-label {
+    font-size: 0.75rem;
+    color: #6b7280;
+}
+
+.kk-dup-modal-value {
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #111827;
+    overflow-wrap: anywhere;
+}
+
+.kk-dup-modal-value-strong {
+    font-weight: 600;
+}
+
+.kk-dup-modal-note {
+    margin: 1rem 0 0;
+    font-size: 0.875rem;
+    color: #4b5563;
+}
+
+/* ---------------- footer ---------------- */
+
+.kk-dup-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    border-top: 1px solid #e5e7eb;
+    background-color: #f9fafb;
+    padding: 1rem 1.5rem;
+}
+
+.kk-dup-modal-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.5rem;
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background-color 150ms ease-in-out;
+}
+
+.kk-dup-modal-btn-icon {
+    height: 1rem;
+    width: 1rem;
+}
+
+.kk-dup-modal-btn-secondary {
+    border: 1px solid #d1d5db;
+    background-color: #ffffff;
+    color: #374151;
+    font-weight: 500;
+}
+
+.kk-dup-modal-btn-secondary:hover {
+    background-color: #f3f4f6;
+}
+
+.kk-dup-modal-btn-primary {
+    border: 1px solid transparent;
+    background-color: #d97706;
+    color: #ffffff;
+}
+
+.kk-dup-modal-btn-primary:hover {
+    background-color: #b45309;
+}
+
+.kk-dup-modal-btn:focus-visible {
+    outline: 2px solid #d97706;
+    outline-offset: 2px;
+}
+
+/* ---------------- mode gelap ---------------- */
+
+@media (prefers-color-scheme: dark) {
+    .kk-dup-modal-panel {
+        background-color: #111827;
+    }
+
+    .kk-dup-modal-header,
+    .kk-dup-modal-footer {
+        border-color: #374151;
+    }
+
+    .kk-dup-modal-footer {
+        background-color: #1f2937;
+    }
+
+    .kk-dup-modal-icon {
+        background-color: rgba(217, 119, 6, 0.15);
+        color: #fcd34d;
+    }
+
+    .kk-dup-modal-title {
+        color: #ffffff;
+    }
+
+    .kk-dup-modal-subtitle {
+        color: #9ca3af;
+    }
+
+    .kk-dup-modal-box {
+        border-color: #374151;
+        background-color: #1f2937;
+    }
+
+    .kk-dup-modal-value {
+        color: #f9fafb;
+    }
+
+    .kk-dup-modal-note {
+        color: #d1d5db;
+    }
+
+    .kk-dup-modal-btn-secondary {
+        border-color: #4b5563;
+        background-color: #111827;
+        color: #e5e7eb;
+    }
+
+    .kk-dup-modal-btn-secondary:hover {
+        background-color: #1f2937;
+    }
 }

@@ -15,9 +15,9 @@ use Illuminate\Database\Eloquent\Builder;
 /**
  * Phase UI-2 — complete operator filtering for the Penduduk list.
  *
- * Order of the area filters is intentional: RW / Lingkungan (area_unit) comes
- * FIRST, then RT. RT options are scoped to the selected RW / Lingkungan so that
- * "RT 01" from Lingkungan I and "RT 01" from Lingkungan II never mix, and the
+ * Order of the area filters is intentional: RW (area_unit) comes
+ * FIRST, then RT. RT options are scoped to the selected RW so that
+ * "RT 01" from RW I and "RT 01" from RW II never mix, and the
  * dropdown is labelled "RT 01", "RT 02", … instead of bare "01".
  *
  * Every filter name is preserved (F-CORE-06) so the existing feature tests that
@@ -48,24 +48,24 @@ class PendudukanFilters
                     })
                     : $query),
 
-            // ---- Area: RW / Lingkungan FIRST -------------------------------
+            // ---- Area: RW FIRST -------------------------------
             SelectFilter::make('area_unit')
-                ->label('RW / Lingkungan')
+                ->label('RW')
                 ->relationship('rt.areaUnit', 'name')
                 ->preload()
                 ->searchable()
                 ->modifyFormFieldUsing(fn (Select $field): Select => $field
-                    ->placeholder('Pilih RW / Lingkungan')
+                    ->placeholder('Pilih RW')
                     ->live()),
 
-            // ---- Area: RT (scoped to the chosen RW / Lingkungan) -----------
+            // ---- Area: RT (scoped to the chosen RW) -----------
             SelectFilter::make('rt')
                 ->label('RT')
                 ->relationship('rt', 'number')
                 ->searchable()
                 ->modifyFormFieldUsing(function (Select $field, $livewire): Select {
                     return $field
-                        ->placeholder('Pilih RW / Lingkungan terlebih dahulu')
+                        ->placeholder('Pilih RW terlebih dahulu')
                         ->live()
                         ->disabled(fn (): bool => blank(self::selectedAreaUnitId($livewire)))
                         ->options(fn (): array => self::rtOptions($livewire));
@@ -166,8 +166,8 @@ class PendudukanFilters
     }
 
     /**
-     * RT options scoped to the selected RW / Lingkungan, labelled "RT 01" etc.
-     * so duplicate numbers across lingkungan never collide in the dropdown.
+     * RT options scoped to the selected RW, labelled "RT 01" etc.
+     * so duplicate numbers across RW never collide in the dropdown.
      */
     private static function rtOptions($livewire): array
     {

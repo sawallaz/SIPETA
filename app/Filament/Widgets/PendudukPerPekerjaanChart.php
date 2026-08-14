@@ -54,19 +54,12 @@ class PendudukPerPekerjaanChart extends ChartWidget
             ])
             ->values();
 
-        // Categorical palette (Tailwind 500-scale), anchored on the brand
-        // amber (#f59e0b), covering the seeded occupations.
-        $palette = [
-            '#f59e0b', '#0ea5e9', '#10b981', '#ef4444', '#8b5cf6', '#ec4899',
-            '#f97316', '#14b8a6', '#6366f1', '#84cc16', '#eab308', '#64748b',
-        ];
-
         return [
             'datasets' => [
                 [
                     'label' => 'Penduduk aktif',
                     'data' => $occupations->pluck('active_count')->all(),
-                    'backgroundColor' => array_slice($palette, 0, $occupations->count()),
+                    'backgroundColor' => '#4f6f3a',
                 ],
             ],
             'labels' => $occupations->pluck('name')->all(),

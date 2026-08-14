@@ -4,8 +4,8 @@ namespace App\Filament\Pages;
 
 use App\Filament\Widgets\PendudukPerGenderChart;
 use App\Filament\Widgets\PendudukPerLingkunganChart;
+use App\Filament\Widgets\PendudukPerPekerjaanChart;
 use App\Filament\Widgets\PendudukPerPendidikanChart;
-use App\Filament\Widgets\PendudukPerRTChart;
 use App\Filament\Widgets\QuickActionsWidget;
 use App\Filament\Widgets\RecentActivityWidget;
 use App\Filament\Widgets\SipetaStatsOverview;
@@ -16,51 +16,20 @@ class Dashboard extends BaseDashboard
     public function getWidgets(): array
     {
         return [
-            /*
-             * ==========================================================
-             * 1. KPI
-             * ==========================================================
-             */
             SipetaStatsOverview::class,
 
-            /*
-             * ==========================================================
-             * 2. AKSI CEPAT
-             * Tepat di bawah KPI
-             * ==========================================================
-             */
             QuickActionsWidget::class,
 
-            /*
-             * ==========================================================
-             * 3. GRAFIK UTAMA
-             * Maksimal 4 grafik di dashboard utama.
-             * ==========================================================
-             */
             PendudukPerGenderChart::class,
-            PendudukPerRTChart::class,
+            PendudukPerPekerjaanChart::class,
             PendudukPerLingkunganChart::class,
             PendudukPerPendidikanChart::class,
 
-            /*
-             * ==========================================================
-             * 4. AKTIVITAS
-             * ==========================================================
-             */
             RecentActivityWidget::class,
         ];
     }
 
-    /**
-     * Dashboard menggunakan 2 kolom pada desktop.
-     *
-     * Tujuannya:
-     * - card lebih lebar
-     * - chart tidak terlalu sempit
-     * - teks panjang lebih mudah dibaca
-     * - mengurangi kesan dashboard "pecah-pecah"
-     */
-    public function getColumns(): int | array
+    public function getColumns(): int|array
     {
         return [
             'default' => 1,

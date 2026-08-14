@@ -7,6 +7,7 @@ use App\Enums\FamilyRelation;
 use App\Enums\Gender;
 use App\Enums\MaritalStatus;
 use App\Enums\ResidentStatus;
+use App\Services\PendudukDocumentService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -168,6 +169,21 @@ class Penduduk extends Model
     }
 
     /**
+     * Dokumen pendukung penduduk (KTP, Akta Kelahiran).
+     *
+     * Semua dokumen bersifat opsional.
+     * Dokumen lama diarsipkan (is_active=false) saat diganti,
+     * mengikuti filosofi arsip foto KK.
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(
+            PendudukDocument::class,
+            'penduduk_id'
+        );
+    }
+
+    /**
      * Audit log penduduk.
      */
     public function audits(): MorphMany
@@ -270,6 +286,22 @@ class Penduduk extends Model
                  */
                 $penduduk->rt_id = null;
             }
+        });
+
+        /*
+         * Bersihkan dokumen pendukung (file + record)
+         * sebelum Penduduk dihapus.
+         *
+         * penduduk_documents.penduduk_id memakai
+         * onDelete('RESTRICT'), sehingga baris anak
+         * harus dihapus lebih dulu agar FK tidak melanggar.
+         *
+         * Catatan: kk_anggota.penduduk_id juga RESTRICT
+         * (di luar cakupan fitur ini).
+         */
+        static::deleting(function (Penduduk $penduduk): void {
+            app(PendudukDocumentService::class)
+                ->deleteForPenduduk($penduduk);
         });
     }
 

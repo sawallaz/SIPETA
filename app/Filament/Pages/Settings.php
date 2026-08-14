@@ -19,6 +19,8 @@ class Settings extends Page
 
     protected string $view = 'filament.pages.settings';
 
+    protected static ?string $title = 'Pengaturan';
+
     protected static ?string $navigationLabel = 'Pengaturan';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cog-6-tooth';
@@ -62,7 +64,7 @@ class Settings extends Page
      */
     public function getSubheading(): ?string
     {
-        return 'Kelola identitas, logo, dan konfigurasi penyimpanan SIPETA.';
+        return 'Kelola identitas dan logo kelurahan untuk dokumen SIPETA.';
     }
 
     /**
@@ -74,6 +76,13 @@ class Settings extends Page
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('riwayatKartuKeluarga')
+                ->label('Riwayat Kartu Keluarga')
+                ->icon('heroicon-o-clock')
+                ->color('gray')
+                ->url(
+                    fn (): string => KartuKeluargaHistory::getUrl()
+                ),
             Action::make('save')
                 ->label('Simpan')
                 ->icon('heroicon-o-check')
@@ -188,30 +197,6 @@ class Settings extends Page
                             ->helperText(
                                 'Format PNG atau JPG. Ukuran maksimal 2 MB.'
                             ),
-                    ]),
-
-                /*
-                |--------------------------------------------------------------------------
-                | BACKUP & PENYIMPANAN
-                |--------------------------------------------------------------------------
-                */
-                Section::make('Backup & Penyimpanan')
-                    ->description(
-                        'Atur lokasi folder yang digunakan untuk menyimpan file backup SIPETA.'
-                    )
-                    ->icon('heroicon-o-server-stack')
-                    ->columns(1)
-                    ->schema([
-
-                        TextInput::make('backup_path')
-                            ->label('Lokasi Backup')
-                            ->placeholder('/home/awa/Documents/SIPETA/backups')
-                            ->helperText(
-                                'Masukkan lokasi folder backup yang dapat dibaca dan ditulis oleh aplikasi.'
-                            )
-                            ->required()
-                            ->maxLength(1024)
-                            ->columnSpanFull(),
                     ]),
             ]);
     }

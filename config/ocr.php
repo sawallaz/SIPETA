@@ -22,12 +22,14 @@ return [
     // (.ai/ocr.md §6).
     'tesseract_path' => env('TESSERACT_PATH', 'tesseract'),
 
-    // Engine invocation (.ai/ocr.md §4.3): Indonesian language pack, single
-    // uniform text block page-segmentation mode, TSV output for word-level
-    // confidence.
+    // Engine invocation (.ai/ocr.md §4.3): Indonesian language pack +
+    // TSV output for word-level confidence. PSM 4 (column-like document)
+    // was selected over the previous PSM 6 default after a bake-off on a
+    // real KK photo: PSM 4 captured member rows (PSM 6/11 captured none)
+    // and scored highest useful confidence. Threshold stays 70.
     'language' => 'ind',
 
-    'psm' => '6',
+    'psm' => '4',
 
     // .ai/ocr.md §6: below this mean word confidence a job is recorded as
     // LOW_CONFIDENCE instead of SUCCESS.

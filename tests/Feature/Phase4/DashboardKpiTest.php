@@ -2,11 +2,9 @@
 
 namespace Tests\Feature\Phase4;
 
-use App\Enums\FamilyRelation;
-use App\Enums\Gender;
+use App\Enums\MaritalStatus;
 use App\Enums\ResidentStatus;
 use App\Filament\Widgets\SipetaStatsOverview;
-use App\Models\AreaUnit;
 use App\Models\KartuKeluarga;
 use App\Models\Penduduk;
 use App\Models\Rt;
@@ -18,8 +16,13 @@ use Tests\TestCase;
 /**
  * Phase 4.2 — dashboard KPI enhancement.
  *
- * Verifies the eleven population-statistic cards render with their labels and
+ * Verifies the FOUR population-statistic cards render with their labels and
  * that the values reflect a controlled set of records in the database.
+ * This is the production design (see Dashboard.php + SipetaStatsOverview):
+ *   1. Kartu Keluarga
+ *   2. Penduduk Aktif
+ *   3. Belum Menikah
+ *   4. Jumlah RT
  */
 class DashboardKpiTest extends TestCase
 {
@@ -39,64 +42,47 @@ class DashboardKpiTest extends TestCase
     {
         $this->get('/admin')
             ->assertOk()
-            ->assertSee('Total Kartu Keluarga')
-            ->assertSee('Total Kepala Keluarga')
-            ->assertSee('Total Anggota Keluarga')
-            ->assertSee('Total Penduduk')
-            ->assertSee('Laki-laki')
-            ->assertSee('Perempuan')
-            ->assertSee('Total RT')
-            ->assertSee('Total RW / Lingkungan')
+            ->assertSee('Kartu Keluarga')
             ->assertSee('Penduduk Aktif')
-            ->assertSee('Penduduk Pindah')
-            ->assertSee('Penduduk Meninggal');
+            ->assertSee('Belum Menikah')
+            ->assertSee('Jumlah RT');
     }
 
     public function test_dashboard_kpi_values_match_database(): void
     {
-        $kk = KartuKeluarga::factory()->create();
-        $area = AreaUnit::factory()->create();
-        $rt = Rt::factory()->create(['area_unit_id' => $area->id]);
+        $rt = Rt::factory()->create();
+        $kk = KartuKeluarga::factory()->create(['rt_id' => $rt->id]);
 
-        $addPenduduk = static function (string $gender, string $familyRelation, string $residentStatus) use ($kk, $rt): void {
-            Penduduk::factory()->create([
-                'kk_id' => $kk->id,
-                'rt_id' => $rt->id,
-                'gender' => $gender,
-                'family_relation' => $familyRelation,
-                'resident_status' => $residentStatus,
-            ]);
-        };
+        // 3 active residents, all belum menikah.
+        Penduduk::factory()->count(3)->create([
+            'kk_id' => $kk->id,
+            'rt_id' => $rt->id,
+            'resident_status' => ResidentStatus::ACTIVE->value,
+            'marital_status' => MaritalStatus::BELUM_KAWIN->value,
+        ]);
 
-        $addPenduduk(Gender::LAKI_LAKI->value, FamilyRelation::KEPALA_KELUARGA->value, ResidentStatus::ACTIVE->value);
-        $addPenduduk(Gender::PEREMPUAN->value, FamilyRelation::ISTRI->value, ResidentStatus::ACTIVE->value);
-        $addPenduduk(Gender::PEREMPUAN->value, FamilyRelation::ANAK->value, ResidentStatus::PINDAH->value);
-        $addPenduduk(Gender::LAKI_LAKI->value, FamilyRelation::ANAK->value, ResidentStatus::MENINGGAL->value);
+        // 1 deceased resident, already married -> excluded from both
+        // "Penduduk Aktif" and "Belum Menikah".
+        Penduduk::factory()->create([
+            'kk_id' => $kk->id,
+            'rt_id' => $rt->id,
+            'resident_status' => ResidentStatus::MENINGGAL->value,
+            'marital_status' => MaritalStatus::KAWIN->value,
+        ]);
 
         $stats = collect(invade(new SipetaStatsOverview)->getStats())
             ->keyBy(fn (Stat $stat) => $stat->getLabel());
 
-        // Kartu Keluarga
-        $this->assertSame('1', $stats['Total Kartu Keluarga']->getValue());
+        // 1. Kartu Keluarga
+        $this->assertSame('1', $stats['Kartu Keluarga']->getValue());
 
-        // Penduduk role breakdown (Kepala + Anggota partition the total)
-        $this->assertSame('1', $stats['Total Kepala Keluarga']->getValue());
-        $this->assertSame('3', $stats['Total Anggota Keluarga']->getValue());
+        // 2. Penduduk Aktif (ACTIVE only)
+        $this->assertSame('3', $stats['Penduduk Aktif']->getValue());
 
-        // Penduduk totals and gender
-        $this->assertSame('4', $stats['Total Penduduk']->getValue());
-        $this->assertSame('2', $stats['Laki-laki']->getValue());
-        $this->assertSame('2', $stats['Perempuan']->getValue());
-        $this->assertSame('50% dari total penduduk', $stats['Laki-laki']->getDescription());
-        $this->assertSame('50% dari total penduduk', $stats['Perempuan']->getDescription());
+        // 3. Belum Menikah (marital_status = BELUM_KAWIN)
+        $this->assertSame('3', $stats['Belum Menikah']->getValue());
 
-        // Wilayah
-        $this->assertSame('1', $stats['Total RT']->getValue());
-        $this->assertSame('1', $stats['Total RW / Lingkungan']->getValue());
-
-        // Status breakdown
-        $this->assertSame('2', $stats['Penduduk Aktif']->getValue());
-        $this->assertSame('1', $stats['Penduduk Pindah']->getValue());
-        $this->assertSame('1', $stats['Penduduk Meninggal']->getValue());
+        // 4. Jumlah RT
+        $this->assertSame('1', $stats['Jumlah RT']->getValue());
     }
 }

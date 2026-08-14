@@ -5,43 +5,43 @@ namespace App\Services;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Rule-based OCR text parser (Phase 5.5, .ai/ocr.md §4.5–§4.7, ADR-017).
+ * OCR text parser untuk dokumen Kartu Keluarga.
  *
- * Converts the raw text produced by the Phase 5.4 engine into a structured
- * ParsedOcrResult containing only project-defined fields (FR-OCR-02):
+ * Tahap ini hanya melakukan:
  *
- *   KK level  : nomor KK, alamat, RT, RW, lingkungan
- *   member    : nama, NIK, jenis kelamin, tempat lahir, tanggal lahir,
- *               agama, pendidikan, pekerjaan, status perkawinan, status
- *               hubungan keluarga
+ * RAW OCR TEXT
+ *      ↓
+ * normalisasi
+ *      ↓
+ * parsing header KK
+ *      ↓
+ * parsing tabel anggota
+ *      ↓
+ * validasi hasil
+ *      ↓
+ * ParsedOcrResult
  *
- * Strategy (rule-based, deterministic, offline — ADR-017):
+ * Tidak ada database write di class ini.
  *
- *   1. Header key/value scan — "NOMOR KARTU KELUARGA", "ALAMAT", "RT/RW",
- *      "RT", "RW", "LINGKUNGAN" labels with ':' or space separators; the
- *      address may wrap to the following lines.
- *   2. Member-table parse — locate the table header row (the "NIK" column
- *      line), then read each following row that carries a valid 16-digit
- *      NIK; the remaining row tokens are attributed in column order
- *      (gender, birth place, birth date, religion, education, occupation,
- *      marital status, family relation) by longest-match against the
- *      curated vocabularies below.
- *   3. Required-field validation (.ai/ocr.md §4.7) — KK number and at least
- *      one member NIK are required; dates must parse and fall in a sane
- *      range. Problems land in validationErrors, never exceptions.
- *
- * Graceful degradation is deliberate: missing values stay null, duplicated
- * labels keep the first occurrence, malformed rows are skipped with a
- * warning, and low-confidence text flags the whole result (FR-OCR-04).
- *
- * The engine currently exposes only an aggregated mean confidence, so
- * field-level confidence (minimum word confidence, .ai/ocr.md §4.4) is
- * approximated by carrying the aggregate onto every extracted member.
+ * Prinsip:
+ * - OCR adalah assistant, bukan sumber kebenaran final.
+ * - Data yang tidak terbaca tetap null.
+ * - Jangan menebak data penduduk.
+ * - NIK harus 16 digit.
+ * - Duplicate NIK di satu hasil OCR hanya diambil sekali.
+ * - Semua masalah parsing masuk warnings / validationErrors.
  */
 final class OcrParsingService
 {
-    /** Header labels, longest first so "NOMOR KARTU KELUARGA" wins over
-     * "NOMOR KK" and "RT/RW" over "RT". */
+    /**
+     * Header KK.
+     *
+     * Urutkan label yang lebih panjang terlebih dahulu agar:
+     *
+     * NOMOR KARTU KELUARGA
+     * tidak terbaca sebagai
+     * NOMOR KK
+     */
     private const HEADER_KEYS = [
         'NOMOR_KARTU_KELUARGA' => 'NOMOR KARTU KELUARGA',
         'NOMOR_KK' => 'NOMOR KK',
@@ -53,7 +53,11 @@ final class OcrParsingService
         'RW' => 'RW',
     ];
 
-    /** Religion vocabulary (.ai/ocr.md §4.5). */
+    /**
+     * Agama.
+     *
+     * Key = nilai canonical yang akan dikirim ke layer berikutnya.
+     */
     private const RELIGIONS = [
         'ISLAM' => ['ISLAM'],
         'KRISTEN' => ['KRISTEN'],
@@ -63,14 +67,34 @@ final class OcrParsingService
         'KONGHUCU' => ['KONGHUCU'],
     ];
 
-    /** Education labels as printed on a KK card (normalized, longest first). */
+    /**
+     * Pendidikan.
+     */
     private const EDUCATIONS = [
         'TIDAK/BELUM SEKOLAH' => ['TIDAK/BELUM', 'SEKOLAH'],
-        'BELUM TAMAT SD/SEDERAJAT' => ['BELUM', 'TAMAT', 'SD/SEDERAJAT'],
-        'TAMAT SD/SEDERAJAT' => ['TAMAT', 'SD/SEDERAJAT'],
-        'AKADEMI/DIPLOMA III/SARJANA MUDA' => ['AKADEMI/DIPLOMA', 'III/SARJANA', 'MUDA'],
-        'DIPLOMA IV/STRATA I' => ['DIPLOMA', 'IV/STRATA', 'I'],
-        'DIPLOMA I/II' => ['DIPLOMA', 'I/II'],
+        'BELUM TAMAT SD/SEDERAJAT' => [
+            'BELUM',
+            'TAMAT',
+            'SD/SEDERAJAT',
+        ],
+        'TAMAT SD/SEDERAJAT' => [
+            'TAMAT',
+            'SD/SEDERAJAT',
+        ],
+        'AKADEMI/DIPLOMA III/SARJANA MUDA' => [
+            'AKADEMI/DIPLOMA',
+            'III/SARJANA',
+            'MUDA',
+        ],
+        'DIPLOMA IV/STRATA I' => [
+            'DIPLOMA',
+            'IV/STRATA',
+            'I',
+        ],
+        'DIPLOMA I/II' => [
+            'DIPLOMA',
+            'I/II',
+        ],
         'SLTP/SEDERAJAT' => ['SLTP/SEDERAJAT'],
         'SLTA/SEDERAJAT' => ['SLTA/SEDERAJAT'],
         'SD' => ['SD'],
@@ -84,13 +108,32 @@ final class OcrParsingService
         'S3' => ['S3'],
     ];
 
-    /** Occupation labels, matching the project's occupation masters. */
+    /**
+     * Pekerjaan.
+     */
     private const OCCUPATIONS = [
-        'PEGAWAI NEGERI SIPIL' => ['PEGAWAI', 'NEGERI', 'SIPIL'],
-        'IBU RUMAH TANGGA' => ['IBU', 'RUMAH', 'TANGGA'],
-        'BURUH HARIAN LEPAS' => ['BURUH', 'HARIAN', 'LEPAS'],
-        'KARYAWAN SWASTA' => ['KARYAWAN', 'SWASTA'],
-        'PELAJAR/MAHASISWA' => ['PELAJAR/MAHASISWA'],
+        'PEGAWAI NEGERI SIPIL' => [
+            'PEGAWAI',
+            'NEGERI',
+            'SIPIL',
+        ],
+        'IBU RUMAH TANGGA' => [
+            'IBU',
+            'RUMAH',
+            'TANGGA',
+        ],
+        'BURUH HARIAN LEPAS' => [
+            'BURUH',
+            'HARIAN',
+            'LEPAS',
+        ],
+        'KARYAWAN SWASTA' => [
+            'KARYAWAN',
+            'SWASTA',
+        ],
+        'PELAJAR/MAHASISWA' => [
+            'PELAJAR/MAHASISWA',
+        ],
         'PETANI' => ['PETANI'],
         'PEDAGANG' => ['PEDAGANG'],
         'NELAYAN' => ['NELAYAN'],
@@ -103,19 +146,43 @@ final class OcrParsingService
         'LAINNYA' => ['LAINNYA'],
     ];
 
-    /** Marital status vocabulary (.ai/ocr.md §4.5). */
+    /**
+     * Status perkawinan.
+     */
     private const MARITAL_STATUSES = [
-        'BELUM_KAWIN' => ['BELUM', 'KAWIN'],
-        'CERAI_HIDUP' => ['CERAI', 'HIDUP'],
-        'CERAI_MATI' => ['CERAI', 'MATI'],
-        'KAWIN' => ['KAWIN'],
+        'BELUM_KAWIN' => [
+            'BELUM',
+            'KAWIN',
+        ],
+        'CERAI_HIDUP' => [
+            'CERAI',
+            'HIDUP',
+        ],
+        'CERAI_MATI' => [
+            'CERAI',
+            'MATI',
+        ],
+        'KAWIN' => [
+            'KAWIN',
+        ],
     ];
 
-    /** Family relation vocabulary (.ai/ocr.md §4.5). */
+    /**
+     * Hubungan keluarga.
+     */
     private const FAMILY_RELATIONS = [
-        'KEPALA_KELUARGA' => ['KEPALA', 'KELUARGA'],
-        'ORANG_TUA' => ['ORANG', 'TUA'],
-        'FAMILI_LAIN' => ['FAMILI', 'LAIN'],
+        'KEPALA_KELUARGA' => [
+            'KEPALA',
+            'KELUARGA',
+        ],
+        'ORANG_TUA' => [
+            'ORANG',
+            'TUA',
+        ],
+        'FAMILI_LAIN' => [
+            'FAMILI',
+            'LAIN',
+        ],
         'MENANTU' => ['MENANTU'],
         'CUCU' => ['CUCU'],
         'MERTUA' => ['MERTUA'],
@@ -125,158 +192,286 @@ final class OcrParsingService
     ];
 
     /**
-     * Select options for the operator review form (Phase 5.6), derived from
-     * the same vocabularies the parser uses so the review choices can never
-     * drift from what parsing emits. Key and value are the canonical label.
+     * Opsi agama untuk UI review.
      *
      * @return array<string, string>
      */
     public static function religionOptions(): array
     {
-        return array_combine(array_keys(self::RELIGIONS), array_keys(self::RELIGIONS));
+        return array_combine(
+            array_keys(self::RELIGIONS),
+            array_keys(self::RELIGIONS),
+        );
     }
 
     /**
+     * Opsi pendidikan untuk UI review.
+     *
      * @return array<string, string>
      */
     public static function educationOptions(): array
     {
-        return array_combine(array_keys(self::EDUCATIONS), array_keys(self::EDUCATIONS));
+        return array_combine(
+            array_keys(self::EDUCATIONS),
+            array_keys(self::EDUCATIONS),
+        );
     }
 
     /**
+     * Opsi pekerjaan untuk UI review.
+     *
      * @return array<string, string>
      */
     public static function occupationOptions(): array
     {
-        return array_combine(array_keys(self::OCCUPATIONS), array_keys(self::OCCUPATIONS));
+        return array_combine(
+            array_keys(self::OCCUPATIONS),
+            array_keys(self::OCCUPATIONS),
+        );
     }
 
     /**
-     * Parse raw OCR text into a structured result.
-     *
-     * @param  string  $rawText  raw extracted text (OcrResult::rawText)
-     * @param  float  $confidence  engine aggregate confidence (0–100)
+     * Parse raw OCR text menjadi ParsedOcrResult.
      */
-    public function parse(string $rawText, float $confidence = 0.0): ParsedOcrResult
-    {
+    public function parse(
+        string $rawText,
+        float $confidence = 0.0,
+    ): ParsedOcrResult {
         $startedAt = microtime(true);
 
-        $threshold = (float) config('ocr.confidence_threshold', 70);
+        $threshold = (float) config(
+            'ocr.confidence_threshold',
+            70,
+        );
+
         $lowConfidence = $confidence < $threshold;
 
         $warnings = [];
         $validationErrors = [];
 
         if ($confidence < 30) {
-            $warnings[] = 'Gambar tidak terbaca (confidence sangat rendah)';
+            $warnings[] =
+                'Gambar tidak terbaca dengan baik (confidence sangat rendah).';
         }
 
         $lines = $this->normalizeLines($rawText);
 
         if ($lines === []) {
-            $warnings[] = 'OCR tidak menghasilkan teks (gambar kosong atau tidak terbaca)';
-            $validationErrors[] = 'OCR tidak menemukan NIK';
+            $warnings[] =
+                'OCR tidak menghasilkan teks (gambar kosong atau tidak terbaca).';
 
-            $this->log($confidence, $lowConfidence, 0, 0, $startedAt);
+            $validationErrors[] =
+                'OCR tidak menemukan NIK.';
 
-            return new ParsedOcrResult(
+            $this->log(
                 $confidence,
                 $lowConfidence,
-                null,
-                null,
-                null,
-                null,
-                null,
-                [],
-                $warnings,
-                $validationErrors,
-                $this->elapsedMs($startedAt),
+                0,
+                count($warnings),
+                $startedAt,
+            );
+
+            return new ParsedOcrResult(
+                confidence: $confidence,
+                lowConfidence: $lowConfidence,
+                kkNumber: null,
+                address: null,
+                rt: null,
+                rw: null,
+                lingkungan: null,
+                members: [],
+                warnings: $warnings,
+                validationErrors: $validationErrors,
+                durationMs: $this->elapsedMs($startedAt),
             );
         }
 
-        [$kkNumber, $address, $rt, $rw, $lingkungan] = $this->parseHeader($lines, $warnings);
-        $members = $this->parseMembers($lines, $confidence, $lowConfidence, $warnings, $validationErrors);
-
-        // Required-field validation (.ai/ocr.md §4.7): the KK number and at
-        // least one member NIK are the minimum a KK record needs.
-        if ($kkNumber === null) {
-            $validationErrors[] = 'Nomor KK tidak ditemukan';
-        }
-
-        if ($members === []) {
-            $validationErrors[] = 'OCR tidak menemukan NIK';
-        }
-
-        $this->log($confidence, $lowConfidence, count($members), count($warnings), $startedAt);
-
-        return new ParsedOcrResult(
-            $confidence,
-            $lowConfidence,
+        [
             $kkNumber,
             $address,
             $rt,
             $rw,
             $lingkungan,
+        ] = $this->parseHeader(
+            $lines,
+            $warnings,
+        );
+
+        $members = $this->parseMembers(
+            $lines,
+            $confidence,
+            $lowConfidence,
+            $warnings,
+            $validationErrors,
+        );
+
+        /*
+         * Minimum viable OCR result:
+         *
+         * - Nomor KK
+         * - minimal satu NIK anggota
+         */
+        if ($kkNumber === null) {
+            $validationErrors[] =
+                'Nomor KK tidak ditemukan atau tidak terbaca.';
+        }
+
+        if ($members === []) {
+            $validationErrors[] =
+                'OCR tidak menemukan NIK anggota keluarga.';
+        }
+
+        /*
+         * Validasi tambahan yang aman.
+         *
+         * Ini tidak menghapus hasil OCR.
+         * Hanya memberi warning kepada operator.
+         */
+        $this->validateMemberConsistency(
             $members,
             $warnings,
             $validationErrors,
-            $this->elapsedMs($startedAt),
+        );
+
+        $this->log(
+            $confidence,
+            $lowConfidence,
+            count($members),
+            count($warnings),
+            $startedAt,
+        );
+
+        return new ParsedOcrResult(
+            confidence: $confidence,
+            lowConfidence: $lowConfidence,
+            kkNumber: $kkNumber,
+            address: $address,
+            rt: $rt,
+            rw: $rw,
+            lingkungan: $lingkungan,
+            members: $members,
+            warnings: $warnings,
+            validationErrors: $validationErrors,
+            durationMs: $this->elapsedMs($startedAt),
         );
     }
 
     /**
-     * Split the raw text into trimmed, non-empty lines.
+     * Bersihkan raw OCR menjadi baris-baris bermakna.
+     *
+     * Jangan mengubah isi data terlalu agresif di sini.
+     * Koreksi OCR hanya dilakukan pada token yang memang aman
+     * untuk dinormalisasi.
      *
      * @return array<int, string>
      */
     private function normalizeLines(string $rawText): array
     {
+        $rawText = str_replace(
+            [
+                "\r\n",
+                "\r",
+                "\u{00A0}",
+                "\u{200B}",
+            ],
+            [
+                "\n",
+                "\n",
+                ' ',
+                '',
+            ],
+            $rawText,
+        );
+
         $lines = [];
 
-        foreach (preg_split('/\r?\n/', $rawText) ?: [] as $line) {
+        foreach (
+            preg_split('/\n/u', $rawText) ?: [] as $line
+        ) {
             $line = trim($line);
 
-            if ($line !== '') {
-                $lines[] = $line;
+            if ($line === '') {
+                continue;
             }
+
+            /*
+             * Collapse repeated whitespace.
+             */
+            $line = preg_replace(
+                '/[ \t]+/u',
+                ' ',
+                $line,
+            ) ?? $line;
+
+            $lines[] = $line;
         }
 
         return $lines;
     }
 
     /**
-     * Scan the header block for the KK-level fields.
+     * Parse bagian header KK.
      *
-     * Duplicated labels keep the first occurrence; a second occurrence that
-     * disagrees is recorded as a warning. Address continuation lines (the
-     * wrapped second line of a long address) are appended while they carry
-     * no ':' separator and match no known label.
+     * Field:
+     * - nomor KK
+     * - alamat
+     * - RT
+     * - RW
+     * - lingkungan
+     *
+     * Header hanya diproses sebelum tabel anggota.
+     *
+     * Ini penting agar baris anggota tidak dianggap sebagai
+     * kelanjutan alamat.
      *
      * @param  array<int, string>  $lines
      * @param  array<int, string>  $warnings
-     * @return array{0: string|null, 1: string|null, 2: string|null, 3: string|null, 4: string|null}
+     * @return array{
+     *     0: string|null,
+     *     1: string|null,
+     *     2: string|null,
+     *     3: string|null,
+     *     4: string|null
+     * }
      */
-    private function parseHeader(array $lines, array &$warnings): array
-    {
+    private function parseHeader(
+        array $lines,
+        array &$warnings,
+    ): array {
         $kkNumber = null;
         $address = null;
         $rt = null;
         $rw = null;
         $lingkungan = null;
 
-        $count = count($lines);
+        $tableHeaderIndex = $this->findTableHeader($lines);
 
-        for ($i = 0; $i < $count; $i++) {
+        $headerEnd = $tableHeaderIndex ?? count($lines);
+
+        for ($i = 0; $i < $headerEnd; $i++) {
             $line = $lines[$i];
-            [$key, $value] = $this->splitKeyValue($line);
 
-            // Address continuation: a non-label line immediately after
-            // ALAMAT that carries no ':' separator and is not part of the
-            // member table belongs to the (wrapped) address.
-            if ($key === null && $address !== null) {
-                if ($this->isAddressContinuation($line)) {
-                    $address = trim($address.' '.$line);
+            [
+                $key,
+                $value,
+            ] = $this->splitKeyValue($line);
+
+            /*
+             * Address continuation.
+             *
+             * Hanya diterima ketika:
+             * - address sudah ditemukan
+             * - bukan label lain
+             * - tidak terlihat seperti data anggota
+             */
+            if ($key === null) {
+                if (
+                    $address !== null
+                    && $this->isAddressContinuation($line)
+                ) {
+                    $address = trim(
+                        $address.' '.$line,
+                    );
                 }
 
                 continue;
@@ -286,8 +481,18 @@ final class OcrParsingService
                 case 'NOMOR_KK':
                 case 'NO_KK':
                 case 'NOMOR_KARTU_KELUARGA':
-                    $nextLine = $kkNumber === null && isset($lines[$i + 1]) ? $lines[$i + 1] : null;
-                    $candidate = $this->extractKkNumber($value, $nextLine, $warnings);
+                    $nextLine = (
+                        $kkNumber === null
+                        && isset($lines[$i + 1])
+                    )
+                        ? $lines[$i + 1]
+                        : null;
+
+                    $candidate = $this->extractKkNumber(
+                        $value,
+                        $nextLine,
+                        $warnings,
+                    );
 
                     if ($candidate === null) {
                         break;
@@ -296,40 +501,79 @@ final class OcrParsingService
                     if ($kkNumber === null) {
                         $kkNumber = $candidate;
                     } elseif ($kkNumber !== $candidate) {
-                        $warnings[] = 'Nomor KK ganda tidak konsisten: '.$candidate.' (diabaikan)';
+                        $warnings[] =
+                            'Nomor KK ganda tidak konsisten: '
+                            .$candidate
+                            .' diabaikan.';
                     }
+
                     break;
 
                 case 'ALAMAT':
-                    $candidate = trim($value ?? '');
+                    $candidate = trim(
+                        (string) ($value ?? ''),
+                    );
 
-                    if ($address === null) {
-                        $address = $candidate;
-                    } elseif ($candidate !== '' && $candidate !== $address) {
-                        $warnings[] = 'Label duplikat diabaikan: ALAMAT';
-                    }
-                    break;
-
-                case 'RT_RW':
-                    [$parsedRt, $parsedRw] = $this->parseRtRwPair($value);
-
-                    if ($parsedRt === null && $parsedRw === null) {
+                    if ($candidate === '') {
                         break;
                     }
 
-                    $conflicts = ($rt !== null && $parsedRt !== null && $rt !== $parsedRt)
-                        || ($rw !== null && $parsedRw !== null && $rw !== $parsedRw);
+                    if ($address === null) {
+                        $address = $candidate;
+                    } elseif ($candidate !== $address) {
+                        $warnings[] =
+                            'Label ALAMAT ditemukan lebih dari satu kali. '
+                            .'Nilai pertama dipertahankan.';
+                    }
+
+                    break;
+
+                case 'RT_RW':
+                    [
+                        $parsedRt,
+                        $parsedRw,
+                    ] = $this->parseRtRwPair(
+                        $value,
+                    );
+
+                    if (
+                        $parsedRt === null
+                        && $parsedRw === null
+                    ) {
+                        $warnings[] =
+                            'Nilai RT/RW ditemukan tetapi formatnya tidak dikenali.';
+                        break;
+                    }
+
+                    if (
+                        $rt !== null
+                        && $parsedRt !== null
+                        && $rt !== $parsedRt
+                    ) {
+                        $warnings[] =
+                            'Nilai RT berbeda ditemukan pada dokumen. '
+                            .'Nilai pertama dipertahankan.';
+                    }
+
+                    if (
+                        $rw !== null
+                        && $parsedRw !== null
+                        && $rw !== $parsedRw
+                    ) {
+                        $warnings[] =
+                            'Nilai RW berbeda ditemukan pada dokumen. '
+                            .'Nilai pertama dipertahankan.';
+                    }
 
                     $rt ??= $parsedRt;
                     $rw ??= $parsedRw;
 
-                    if ($conflicts) {
-                        $warnings[] = 'Label duplikat diabaikan: RT/RW';
-                    }
                     break;
 
                 case 'RT':
-                    $candidate = $this->extractNumber($value);
+                    $candidate = $this->extractAreaNumber(
+                        $value,
+                    );
 
                     if ($candidate === null) {
                         break;
@@ -338,12 +582,17 @@ final class OcrParsingService
                     if ($rt === null) {
                         $rt = $candidate;
                     } elseif ($rt !== $candidate) {
-                        $warnings[] = 'Label duplikat diabaikan: RT';
+                        $warnings[] =
+                            'Nilai RT ganda tidak konsisten. '
+                            .'Nilai pertama dipertahankan.';
                     }
+
                     break;
 
                 case 'RW':
-                    $candidate = $this->extractNumber($value);
+                    $candidate = $this->extractAreaNumber(
+                        $value,
+                    );
 
                     if ($candidate === null) {
                         break;
@@ -352,43 +601,89 @@ final class OcrParsingService
                     if ($rw === null) {
                         $rw = $candidate;
                     } elseif ($rw !== $candidate) {
-                        $warnings[] = 'Label duplikat diabaikan: RW';
+                        $warnings[] =
+                            'Nilai RW ganda tidak konsisten. '
+                            .'Nilai pertama dipertahankan.';
                     }
+
                     break;
 
                 case 'LINGKUNGAN':
-                    $candidate = trim($value ?? '');
+                    $candidate = trim(
+                        (string) ($value ?? ''),
+                    );
 
                     if ($candidate === '') {
                         break;
                     }
 
                     if ($lingkungan === null) {
-                        $lingkungan = $candidate;
-                    } elseif ($lingkungan !== $candidate) {
-                        $warnings[] = 'Label duplikat diabaikan: LINGKUNGAN';
+                        $lingkungan =
+                            $this->normalizeLingkungan(
+                                $candidate,
+                            );
+                    } elseif (
+                        $lingkungan !==
+                        $this->normalizeLingkungan($candidate)
+                    ) {
+                        $warnings[] =
+                            'Nilai lingkungan ganda tidak konsisten. '
+                            .'Nilai pertama dipertahankan.';
                     }
+
                     break;
             }
         }
 
-        return [$kkNumber, $address, $rt, $rw, $lingkungan];
+        return [
+            $kkNumber,
+            $address,
+            $rt,
+            $rw,
+            $lingkungan,
+        ];
     }
 
     /**
-     * A line may be part of a wrapped address only when it carries no ':'
-     * separator (which would mark it as another label line) and contains
-     * neither a "NIK" token nor a 16-digit number (which would place it in
-     * the member table region).
+     * Tentukan apakah sebuah line merupakan kelanjutan alamat.
      */
-    private function isAddressContinuation(string $line): bool
-    {
+    private function isAddressContinuation(
+        string $line,
+    ): bool {
         if (str_contains($line, ':')) {
             return false;
         }
 
-        foreach ($this->tokenize($line) as [, $norm]) {
-            if ($norm === 'NIK' || preg_match('/^\d{16}$/', $norm) === 1) {
+        $tokens = $this->tokenize($line);
+
+        foreach ($tokens as [, $norm]) {
+            if (
+                $norm === 'NIK'
+                || $norm === 'N1K'
+                || preg_match(
+                    '/^\d{16}$/',
+                    $norm,
+                ) === 1
+            ) {
+                return false;
+            }
+        }
+
+        /*
+         * Jangan memasukkan label header lain ke alamat.
+         */
+        $upper = strtoupper(trim($line));
+
+        foreach (
+            self::HEADER_KEYS as $label
+        ) {
+            if (
+                $upper === $label
+                || str_starts_with(
+                    $upper,
+                    $label.' ',
+                )
+            ) {
                 return false;
             }
         }
@@ -397,161 +692,702 @@ final class OcrParsingService
     }
 
     /**
-     * Recognize a known header label at the start of a line.
+     * Kenali label header.
      *
-     * @return array{0: string|null, 1: string|null} [key, value]; key is
-     *                                               null when the line is
-     *                                               not a header label line
+     * Lebih toleran terhadap:
+     *
+     * NOMOR KARTU KELUARGA:
+     * NOMOR KARTU KELUARGA 123...
+     * NOMOR KK : 123...
+     * NO KK 123...
+     * RT/RW : 001/004
      */
-    private function splitKeyValue(string $line): array
-    {
-        $upper = strtoupper($line);
+    private function splitKeyValue(
+        string $line,
+    ): array {
+        $upper = strtoupper(
+            trim($line),
+        );
 
-        foreach (self::HEADER_KEYS as $key => $token) {
-            if (preg_match('/^'.preg_quote($token, '/').'\s*:\s*(.*)$/', $upper, $m) === 1) {
-                return [$key, trim($m[1])];
+        /*
+         * Bersihkan variasi OCR umum pada label.
+         *
+         * Hanya label, bukan nilai data.
+         */
+        $upper = str_replace(
+            [
+                'N0MOR',
+                'N0.',
+                'N0 ',
+            ],
+            [
+                'NOMOR',
+                'NO.',
+                'NO ',
+            ],
+            $upper,
+        );
+
+        foreach (
+            self::HEADER_KEYS as $key => $token
+        ) {
+            $pattern = preg_quote(
+                $token,
+                '/',
+            );
+
+            /*
+             * Label + colon.
+             */
+            if (
+                preg_match(
+                    '/^'.$pattern.'\s*:\s*(.*)$/u',
+                    $upper,
+                    $matches,
+                ) === 1
+            ) {
+                return [
+                    $key,
+                    trim($matches[1]),
+                ];
             }
 
-            if (preg_match('/^'.preg_quote($token, '/').'\s+(.+)$/', $upper, $m) === 1) {
-                return [$key, trim($m[1])];
+            /*
+             * Label tanpa colon.
+             *
+             * Pastikan ada boundary whitespace agar
+             * "RT" tidak memakan kata lain.
+             */
+            if (
+                preg_match(
+                    '/^'.$pattern.'(?:\s+)(.*)$/u',
+                    $upper,
+                    $matches,
+                ) === 1
+            ) {
+                return [
+                    $key,
+                    trim($matches[1]),
+                ];
+            }
+
+            /*
+             * Label berdiri sendiri.
+             */
+            if ($upper === $token) {
+                return [
+                    $key,
+                    '',
+                ];
             }
         }
 
-        return [null, null];
+        return [
+            null,
+            null,
+        ];
     }
 
     /**
-     * Extract the 16-digit KK number from a header value. When the value is
-     * empty the number may sit alone on the next line (a common OCR wrap).
+     * Ekstrak nomor KK 16 digit.
      *
-     * @param  array<int, string>  $warnings
+     * Mendukung OCR yang memecah nomor:
+     *
+     * 3207122801160001
+     *
+     * atau:
+     *
+     * 3207 1228 0116 0001
+     *
+     * atau karakter OCR tertentu yang salah terbaca.
      */
-    private function extractKkNumber(string $value, ?string $nextLine, array &$warnings): ?string
-    {
-        $source = $value;
+    private function extractKkNumber(
+        string $value,
+        ?string $nextLine,
+        array &$warnings,
+    ): ?string {
+        $sources = [
+            $value,
+        ];
 
-        if ($source === '' && $nextLine !== null && preg_match('/^\d{16}$/', trim($nextLine)) === 1) {
-            $source = trim($nextLine);
+        if (
+            trim($value) === ''
+            && $nextLine !== null
+        ) {
+            $sources[] = trim($nextLine);
         }
 
-        $compact = preg_replace('/\s+/', '', $source) ?? $source;
+        foreach ($sources as $source) {
+            $candidate = $this->extractSixteenDigitNumber(
+                $source,
+                true,
+            );
 
-        if (preg_match('/\b(\d{16})\b/', $compact, $m) === 1) {
-            return $m[1];
+            if ($candidate !== null) {
+                return $candidate;
+            }
         }
 
-        if ($value !== '') {
-            $warnings[] = 'Nomor KK tidak terbaca pada baris: '.$value;
+        if (trim($value) !== '') {
+            $warnings[] =
+                'Nomor KK tidak terbaca pada baris: '
+                .$value;
         }
 
         return null;
     }
 
     /**
-     * Parse an "RT/RW" value like "001/004" or "001 - 004".
-     *
-     * @return array{0: string|null, 1: string|null}
+     * Cari angka 16 digit dalam teks.
      */
-    private function parseRtRwPair(?string $value): array
-    {
-        if ($value === null || $value === '') {
-            return [null, null];
+    private function extractSixteenDigitNumber(
+        string $value,
+        bool $allowOcrDigitCorrection = false,
+    ): ?string {
+        $source = strtoupper($value);
+
+        /*
+         * Hilangkan separator yang lazim muncul di nomor.
+         */
+        $compact = preg_replace(
+            '/[\s.\-\/]+/u',
+            '',
+            $source,
+        ) ?? $source;
+
+        /*
+         * Coba tanpa koreksi OCR terlebih dahulu.
+         * Ini paling aman.
+         */
+        if (
+            preg_match(
+                '/(?<!\d)(\d{16})(?!\d)/',
+                $compact,
+                $matches,
+            ) === 1
+        ) {
+            return $matches[1];
         }
 
-        if (preg_match('~(\d{1,3})\s*[/-]\s*(\d{1,3})~', $value, $m) === 1) {
-            return [$m[1], $m[2]];
-        }
-
-        return [null, null];
-    }
-
-    private function extractNumber(?string $value): ?string
-    {
-        if ($value === null || preg_match('/(\d{1,3})/', $value, $m) !== 1) {
+        if (! $allowOcrDigitCorrection) {
             return null;
         }
 
-        return $m[1];
+        /*
+         * Koreksi karakter OCR hanya pada konteks nomor.
+         *
+         * Contoh:
+         * O -> 0
+         * I/L -> 1
+         * S -> 5
+         * B -> 8
+         */
+        $corrected = strtr(
+            $compact,
+            [
+                'O' => '0',
+                'I' => '1',
+                'L' => '1',
+                'S' => '5',
+                'B' => '8',
+            ],
+        );
+
+        if (
+            preg_match(
+                '/(?<!\d)(\d{16})(?!\d)/',
+                $corrected,
+                $matches,
+            ) === 1
+        ) {
+            return $matches[1];
+        }
+
+        /*
+         * Jika OCR memisahkan nomor menjadi kelompok:
+         *
+         * 3207 1228 0116 0001
+         *
+         * sudah ditangani oleh compact.
+         */
+        return null;
     }
 
     /**
-     * Parse the member table: locate the header row, then read each row that
-     * carries a valid 16-digit NIK. Rows without a readable NIK are skipped
-     * with a warning; duplicate NIKs keep the first row only.
+     * Parse:
+     *
+     * 001/004
+     * 001 - 004
+     * 001 / 004
+     * 001 004
+     *
+     * Return sudah dinormalisasi menjadi:
+     *
+     * RT = 01
+     * RW = 04
+     */
+    private function parseRtRwPair(
+        ?string $value,
+    ): array {
+        if (
+            $value === null
+            || trim($value) === ''
+        ) {
+            return [
+                null,
+                null,
+            ];
+        }
+
+        $source = trim($value);
+
+        /*
+         * Format eksplisit:
+         *
+         * RT 001 RW 004
+         */
+        if (
+            preg_match(
+                '/RT\s*[:.]?\s*(\d{1,3}).*?RW\s*[:.]?\s*(\d{1,3})/i',
+                $source,
+                $matches,
+            ) === 1
+        ) {
+            return [
+                $this->normalizeAreaNumber($matches[1]),
+                $this->normalizeAreaNumber($matches[2]),
+            ];
+        }
+
+        /*
+         * Format umum:
+         *
+         * 001/004
+         * 001-004
+         * 001 / 004
+         */
+        if (
+            preg_match(
+                '/(\d{1,3})\s*[-\/]\s*(\d{1,3})/',
+                $source,
+                $matches,
+            ) === 1
+        ) {
+            return [
+                $this->normalizeAreaNumber($matches[1]),
+                $this->normalizeAreaNumber($matches[2]),
+            ];
+        }
+
+        /*
+         * Format OCR yang kehilangan slash:
+         *
+         * 001 004
+         */
+        if (
+            preg_match(
+                '/^\D*(\d{1,3})\D+(\d{1,3})\D*$/',
+                $source,
+                $matches,
+            ) === 1
+        ) {
+            return [
+                $this->normalizeAreaNumber($matches[1]),
+                $this->normalizeAreaNumber($matches[2]),
+            ];
+        }
+
+        return [
+            null,
+            null,
+        ];
+    }
+
+    /**
+     * Ambil nomor area dari value RT/RW.
+     */
+    private function extractAreaNumber(
+        ?string $value,
+    ): ?string {
+        if (
+            $value === null
+            || trim($value) === ''
+        ) {
+            return null;
+        }
+
+        /*
+         * Coba koreksi sederhana jika OCR membaca
+         * angka dengan O/I/L.
+         */
+        $source = strtoupper(
+            trim($value),
+        );
+
+        $source = strtr(
+            $source,
+            [
+                'O' => '0',
+                'I' => '1',
+                'L' => '1',
+            ],
+        );
+
+        if (
+            preg_match(
+                '/\d{1,3}/',
+                $source,
+                $matches,
+            ) !== 1
+        ) {
+            return null;
+        }
+
+        return $this->normalizeAreaNumber(
+            $matches[0],
+        );
+    }
+
+    /**
+     * RT/RW di database menggunakan format 01, 02, dst.
+     *
+     * Parser mengembalikan format canonical yang sama.
+     */
+    private function normalizeAreaNumber(
+        string $value,
+    ): ?string {
+        $digits = preg_replace(
+            '/\D/',
+            '',
+            $value,
+        );
+
+        if (
+            $digits === null
+            || $digits === ''
+            || strlen($digits) > 3
+        ) {
+            return null;
+        }
+
+        $number = (int) $digits;
+
+        if ($number < 0 || $number > 999) {
+            return null;
+        }
+
+        return str_pad(
+            (string) $number,
+            2,
+            '0',
+            STR_PAD_LEFT,
+        );
+    }
+
+    /**
+     * Normalisasi nilai lingkungan.
+     *
+     * Contoh:
+     *
+     * Lingkungan I
+     * lingkungan 1
+     * LINGKUNGAN I
+     *
+     * tetap menjadi label yang dapat dibaca operator.
+     */
+    private function normalizeLingkungan(
+        string $value,
+    ): string {
+        $value = trim(
+            preg_replace(
+                '/\s+/u',
+                ' ',
+                $value,
+            ) ?? $value,
+        );
+
+        if (
+            preg_match(
+                '/^LINGKUNGAN\s+(.+)$/i',
+                $value,
+                $matches,
+            ) === 1
+        ) {
+            return trim(
+                'Lingkungan '.$matches[1],
+            );
+        }
+
+        return $value;
+    }
+
+    /**
+     * Parse tabel anggota.
+     *
+     * Parser sekarang mendukung row yang terpecah:
+     *
+     * 1 BUDI ... NIK ...
+     *     LAKI-LAKI TANETE ...
+     *
+     * Baris tersebut akan digabung sebelum diproses.
      *
      * @param  array<int, string>  $lines
      * @param  array<int, string>  $warnings
      * @param  array<int, string>  $validationErrors
      * @return array<int, ParsedResident>
      */
-    private function parseMembers(array $lines, float $confidence, bool $lowConfidence, array &$warnings, array &$validationErrors): array
-    {
-        $headerIndex = $this->findTableHeader($lines);
+    private function parseMembers(
+        array $lines,
+        float $confidence,
+        bool $lowConfidence,
+        array &$warnings,
+        array &$validationErrors,
+    ): array {
+        $headerIndex = $this->findTableHeader(
+            $lines,
+        );
 
         if ($headerIndex === null) {
-            $warnings[] = 'Baris tabel anggota tidak terdeteksi';
+            $warnings[] =
+                'Baris tabel anggota tidak terdeteksi.';
 
             return [];
         }
 
         $members = [];
         $seenNiks = [];
-        $count = count($lines);
 
-        for ($i = $headerIndex + 1; $i < $count; $i++) {
-            $tokens = $this->tokenize($lines[$i]);
-            $nikIndex = $this->findNikIndex($tokens);
+        $currentTokens = null;
+        $currentOrdinal = null;
+
+        $flushCurrent = function () use (
+            &$currentTokens,
+            &$currentOrdinal,
+            &$members,
+            &$seenNiks,
+            $confidence,
+            $lowConfidence,
+            &$warnings,
+            &$validationErrors,
+        ): void {
+            if (
+                $currentTokens === null
+                || $currentTokens === []
+            ) {
+                return;
+            }
+
+            $nikIndex = $this->findNikIndex(
+                $currentTokens,
+            );
 
             if ($nikIndex === null) {
-                if ($this->looksLikeMemberRow($lines[$i])) {
-                    $warnings[] = 'Baris anggota tidak dapat diuraikan (NIK tidak terbaca): '.$lines[$i];
+                $warnings[] =
+                    'Baris anggota tidak dapat diuraikan '
+                    .'karena NIK tidak terbaca.';
+
+                $currentTokens = null;
+                $currentOrdinal = null;
+
+                return;
+            }
+
+            $nik = $currentTokens[$nikIndex][1];
+
+            if (isset($seenNiks[$nik])) {
+                $warnings[] =
+                    'NIK duplikat diabaikan: '.$nik;
+
+                $currentTokens = null;
+                $currentOrdinal = null;
+
+                return;
+            }
+
+            $seenNiks[$nik] = true;
+
+            $members[] = $this->parseMemberRow(
+                $currentTokens,
+                $nikIndex,
+                $confidence,
+                $lowConfidence,
+                $warnings,
+                $validationErrors,
+                $currentOrdinal ?? count($members) + 1,
+            );
+
+            $currentTokens = null;
+            $currentOrdinal = null;
+        };
+
+        $count = count($lines);
+
+        for (
+            $i = $headerIndex + 1;
+            $i < $count;
+            $i++
+        ) {
+            $line = $lines[$i];
+
+            /*
+             * Stop jika sudah masuk bagian yang jelas bukan
+             * tabel anggota.
+             */
+            if ($this->isEndOfMemberTable($line)) {
+                $flushCurrent();
+
+                break;
+            }
+
+            $tokens = $this->tokenize($line);
+
+            if ($tokens === []) {
+                continue;
+            }
+
+            $nikIndex = $this->findNikIndex(
+                $tokens,
+            );
+
+            if ($nikIndex !== null) {
+                /*
+                 * NIK baru = row baru.
+                 */
+                $flushCurrent();
+
+                $currentTokens = $tokens;
+                $currentOrdinal =
+                    $i - $headerIndex;
+
+                continue;
+            }
+
+            /*
+             * Jika belum ada row aktif, abaikan.
+             */
+            if ($currentTokens === null) {
+                if (
+                    $this->looksLikeMemberRow($line)
+                ) {
+                    $warnings[] =
+                        'Baris anggota tidak dapat '
+                        .'diuraikan (NIK tidak terbaca): '
+                        .$line;
                 }
 
                 continue;
             }
 
-            $nik = $tokens[$nikIndex][1];
+            /*
+             * Baris yang diawali nomor urut (mis. "2") tetapi tidak
+             * memiliki NIK 16 digit adalah anggota baru yang gagal OCR,
+             * bukan kelanjutan baris sebelumnya. Jangan gabungkan —
+             * laporkan sebagai tidak terbaca agar tidak menelan data.
+             */
+            if (
+                $tokens !== []
+                && preg_match('/^\d{1,2}$/', $tokens[0][1]) === 1
+            ) {
+                $flushCurrent();
 
-            if (isset($seenNiks[$nik])) {
-                $warnings[] = 'NIK duplikat diabaikan: '.$nik;
+                $warnings[] =
+                    'Baris anggota tidak dapat diuraikan (NIK tidak terbaca): '
+                    .$line;
 
                 continue;
             }
 
-            $seenNiks[$nik] = true;
-
-            $members[] = $this->parseMemberRow($tokens, $nikIndex, $confidence, $lowConfidence, $warnings, $validationErrors, $i - $headerIndex);
+            /*
+             * Row lanjutan.
+             *
+             * Gabungkan hanya jika bukan header/footer.
+             */
+            if (
+                ! $this->looksLikeTableNoise($line)
+            ) {
+                $currentTokens = array_merge(
+                    $currentTokens,
+                    $tokens,
+                );
+            }
         }
+
+        /*
+         * Flush row terakhir.
+         */
+        $flushCurrent();
 
         return $members;
     }
 
     /**
-     * Locate the member-table header row: the first line whose tokens include
-     * "NIK" and whose own / previous / next line includes "NAMA" (the header
-     * often wraps across two OCR lines).
+     * Cari header tabel anggota.
      *
-     * @param  array<int, string>  $lines
+     * Mendukung:
+     *
+     * NO NAMA NIK ...
+     *
+     * dan header yang terpecah:
+     *
+     * NO NAMA
+     * NIK JENIS KELAMIN ...
      */
-    private function findTableHeader(array $lines): ?int
-    {
+    private function findTableHeader(
+        array $lines,
+    ): ?int {
         $count = count($lines);
 
         for ($i = 0; $i < $count; $i++) {
-            $norms = array_column($this->tokenize($lines[$i]), 1);
+            $tokens = $this->tokenize(
+                $lines[$i],
+            );
 
-            if (! in_array('NIK', $norms, true)) {
+            $norms = array_column(
+                $tokens,
+                1,
+            );
+
+            $hasNik =
+                in_array('NIK', $norms, true)
+                || in_array('N1K', $norms, true);
+
+            if (! $hasNik) {
                 continue;
             }
 
-            $hasNama = in_array('NAMA', $norms, true);
+            $hasNama =
+                in_array('NAMA', $norms, true);
 
             if (! $hasNama && $i > 0) {
-                $hasNama = in_array('NAMA', array_column($this->tokenize($lines[$i - 1]), 1), true);
+                $previous = array_column(
+                    $this->tokenize(
+                        $lines[$i - 1],
+                    ),
+                    1,
+                );
+
+                $hasNama =
+                    in_array(
+                        'NAMA',
+                        $previous,
+                        true,
+                    );
             }
 
             if (! $hasNama && $i + 1 < $count) {
-                $hasNama = in_array('NAMA', array_column($this->tokenize($lines[$i + 1]), 1), true);
+                $next = array_column(
+                    $this->tokenize(
+                        $lines[$i + 1],
+                    ),
+                    1,
+                );
+
+                $hasNama =
+                    in_array(
+                        'NAMA',
+                        $next,
+                        true,
+                    );
             }
 
             if ($hasNama) {
@@ -563,80 +1399,248 @@ final class OcrParsingService
     }
 
     /**
-     * Parse a single member row into a ParsedResident.
+     * Parse satu row anggota.
      *
-     * Row layout (KK column order): nama, NIK, gender, birth place, birth
-     * date, religion, education, occupation, marital status, family relation.
-     * Tokens before the NIK form the name; tokens after it are attributed in
-     * column order with a longest-match against the vocabularies.
+     * Urutan standar KK:
      *
-     * @param  array<int, array{0: string, 1: string}>  $tokens  [raw, normalized] pairs
-     * @param  array<int, string>  $warnings
-     * @param  array<int, string>  $validationErrors
+     * NAMA
+     * NIK
+     * JENIS KELAMIN
+     * TEMPAT LAHIR
+     * TANGGAL LAHIR
+     * AGAMA
+     * PENDIDIKAN
+     * PEKERJAAN
+     * STATUS PERKAWINAN
+     * HUBUNGAN DALAM KELUARGA
+     *
+     * Field yang hilang tidak ditebak.
      */
-    private function parseMemberRow(array $tokens, int $nikIndex, float $confidence, bool $lowConfidence, array &$warnings, array &$validationErrors, int $ordinal): ParsedResident
-    {
-        $nameTokens = $this->stripRowNumber(array_slice($tokens, 0, $nikIndex));
-        $nama = $nameTokens === [] ? null : implode(' ', array_column($nameTokens, 0));
+    private function parseMemberRow(
+        array $tokens,
+        int $nikIndex,
+        float $confidence,
+        bool $lowConfidence,
+        array &$warnings,
+        array &$validationErrors,
+        int $ordinal,
+    ): ParsedResident {
+        /*
+         * Nama berada sebelum NIK.
+         */
+        $nameTokens = $this->stripRowNumber(
+            array_slice(
+                $tokens,
+                0,
+                $nikIndex,
+            ),
+        );
 
-        $afterNik = array_slice($tokens, $nikIndex + 1);
-        $afterNikCount = count($afterNik);
+        $nama = $nameTokens === []
+            ? null
+            : trim(
+                implode(
+                    ' ',
+                    array_column(
+                        $nameTokens,
+                        0,
+                    ),
+                ),
+            );
 
-        // Gender (may be "LAKI-LAKI" as one token or "LAKI LAKI" as two).
+        if ($nama === '') {
+            $nama = null;
+
+            $validationErrors[] =
+                'Nama tidak terbaca pada anggota ke-'
+                .$ordinal.'.';
+        }
+
+        $nik = $tokens[$nikIndex][1];
+
+        /*
+         * Bagian setelah NIK.
+         */
+        $afterNik = array_slice(
+            $tokens,
+            $nikIndex + 1,
+        );
+
+        $afterNikCount = count(
+            $afterNik,
+        );
+
+        /*
+         * ============================================================
+         * GENDER
+         * ============================================================
+         */
         $gender = null;
         $genderIndex = null;
+        $genderLength = 1;
 
-        foreach ($afterNik as $i => [$raw, $norm]) {
-            if (preg_match('/^PEREMPUAN$/', $norm) === 1) {
+        for (
+            $i = 0;
+            $i < $afterNikCount;
+            $i++
+        ) {
+            $norm = $afterNik[$i][1];
+
+            if ($norm === 'PEREMPUAN') {
                 $gender = 'PEREMPUAN';
                 $genderIndex = $i;
+
                 break;
             }
 
-            if (preg_match('/^LAKI-?LAKI$/', $norm) === 1) {
+            if (
+                $norm === 'LAKI-LAKI'
+                || $norm === 'LAKILAKI'
+            ) {
                 $gender = 'LAKI_LAKI';
                 $genderIndex = $i;
+
                 break;
             }
 
-            if ($norm === 'LAKI' && isset($afterNik[$i + 1]) && $afterNik[$i + 1][1] === 'LAKI') {
+            if (
+                $norm === 'LAKI'
+                && isset($afterNik[$i + 1])
+                && $afterNik[$i + 1][1] === 'LAKI'
+            ) {
                 $gender = 'LAKI_LAKI';
                 $genderIndex = $i;
+                $genderLength = 2;
+
                 break;
             }
         }
 
-        // Birth date: the first dd-mm-yyyy / dd/mm/yyyy token after the
-        // gender (or from the start of the remainder when gender is missing).
+        /*
+         * ============================================================
+         * TANGGAL LAHIR
+         * ============================================================
+         *
+         * Dicari independen dari gender supaya tetap bisa terbaca
+         * jika kolom gender gagal OCR.
+         */
         $birthDate = null;
         $dateIndex = null;
-        $searchStart = $genderIndex !== null ? $genderIndex + 1 : 0;
 
-        for ($i = $searchStart; $i < $afterNikCount; $i++) {
+        for (
+            $i = 0;
+            $i < $afterNikCount;
+            $i++
+        ) {
             $raw = $afterNik[$i][0];
+            $norm = $afterNik[$i][1];
 
-            if (preg_match('~^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$~', $afterNik[$i][1], $m) === 1) {
-                $dateIndex = $i;
-                $birthDate = $this->normalizeBirthDate($m[1], $m[2], $m[3]);
+            $date = $this->extractBirthDate(
+                $norm,
+            );
 
-                if ($birthDate === null) {
-                    $validationErrors[] = 'Tanggal lahir tidak valid pada anggota ke-'.$ordinal.': '.$raw;
+            if ($date === null) {
+                continue;
+            }
+
+            $dateIndex = $i;
+            $birthDate = $date;
+
+            break;
+        }
+
+        /*
+         * Kalau ada token yang terlihat seperti tanggal tetapi
+         * tidak valid, catat sebagai validation error.
+         */
+        if ($dateIndex === null) {
+            foreach (
+                $afterNik as [$raw, $norm]
+            ) {
+                if (
+                    preg_match(
+                        '/^\d{1,2}[-\/.]\d{1,2}[-\/.]\d{2,4}$/',
+                        $norm,
+                    ) === 1
+                ) {
+                    $validationErrors[] =
+                        'Tanggal lahir tidak valid pada anggota ke-'
+                        .$ordinal.': '.$raw;
+
+                    break;
                 }
-
-                break;
             }
         }
 
-        // Birth place: the tokens strictly between gender and birth date.
+        /*
+         * ============================================================
+         * TEMPAT LAHIR
+         * ============================================================
+         */
         $birthPlace = null;
 
-        if ($genderIndex !== null && $dateIndex !== null && $dateIndex > $genderIndex + 1) {
-            $between = array_slice($afterNik, $genderIndex + 1, $dateIndex - $genderIndex - 1);
-            $birthPlace = implode(' ', array_column($between, 0));
+        if (
+            $dateIndex !== null
+            && $genderIndex !== null
+            && $dateIndex > $genderIndex + $genderLength
+        ) {
+            $between = array_slice(
+                $afterNik,
+                $genderIndex + $genderLength,
+                $dateIndex
+                    - $genderIndex
+                    - $genderLength,
+            );
+
+            $birthPlace =
+                $this->joinRawTokens(
+                    $between,
+                );
+        } elseif (
+            $dateIndex !== null
+            && $genderIndex === null
+            && $dateIndex > 0
+        ) {
+            /*
+             * Gender tidak terbaca.
+             *
+             * Kita masih dapat mengambil kandidat tempat lahir
+             * dari token sebelum tanggal.
+             */
+            $between = array_slice(
+                $afterNik,
+                0,
+                $dateIndex,
+            );
+
+            $birthPlace =
+                $this->removeKnownGenderWords(
+                    $this->joinRawTokens(
+                        $between,
+                    ),
+                );
         }
 
-        // Column-order attribution for the remaining tokens (after the date,
-        // or after the gender / from the start when those are missing).
+        if ($birthPlace === '') {
+            $birthPlace = null;
+        }
+
+        /*
+         * ============================================================
+         * FIELD VOCABULARY
+         * ============================================================
+         *
+         * Masing-masing dicari secara independen setelah tanggal.
+         * Ini lebih tahan jika satu kolom OCR hilang.
+         */
+        $searchStart = $dateIndex !== null
+            ? $dateIndex + 1
+            : (
+                $genderIndex !== null
+                    ? $genderIndex + $genderLength
+                    : 0
+            );
+
         $assignments = [
             'religion' => null,
             'education' => null,
@@ -645,26 +1649,83 @@ final class OcrParsingService
             'relation' => null,
         ];
 
-        $pointer = $dateIndex !== null
-            ? $dateIndex + 1
-            : ($genderIndex !== null ? $genderIndex + 1 : 0);
+        $usedRanges = [];
 
-        foreach (array_keys($assignments) as $field) {
-            for ($i = $pointer; $i < $afterNikCount; $i++) {
-                $match = $this->longestMatch($afterNik, $i, $this->phrasesFor($field));
+        foreach (
+            array_keys($assignments) as $field
+        ) {
+            $match = $this->findVocabularyMatch(
+                $afterNik,
+                $searchStart,
+                $this->phrasesFor($field),
+                $usedRanges,
+            );
 
-                if ($match !== null) {
-                    [$label, $length] = $match;
-                    $assignments[$field] = $label;
-                    $pointer = $i + $length;
-                    break;
-                }
+            if ($match === null) {
+                continue;
             }
+
+            [
+                $label,
+                $start,
+                $length,
+            ] = $match;
+
+            $assignments[$field] = $label;
+
+            $usedRanges[] = [
+                $start,
+                $start + $length - 1,
+            ];
+        }
+
+        /*
+         * Validasi nama/NIK minimal.
+         */
+        if ($nik === '') {
+            $validationErrors[] =
+                'NIK kosong pada anggota ke-'.$ordinal.'.';
+        }
+
+        /*
+         * Beri warning jika field penting tidak terbaca.
+         *
+         * Tidak semua field dibuat validation error karena
+         * operator masih dapat melengkapinya secara manual.
+         */
+        $missing = [];
+
+        if ($gender === null) {
+            $missing[] = 'jenis kelamin';
+        }
+
+        if ($birthDate === null) {
+            $missing[] = 'tanggal lahir';
+        }
+
+        if ($assignments['religion'] === null) {
+            $missing[] = 'agama';
+        }
+
+        if ($assignments['familyRelation'] ?? null) {
+            // Tidak digunakan; compatibility guard.
+        }
+
+        if ($assignments['relation'] === null) {
+            $missing[] = 'hubungan keluarga';
+        }
+
+        if ($missing !== []) {
+            $warnings[] =
+                'Anggota ke-'.$ordinal
+                .' belum terbaca lengkap: '
+                .implode(', ', $missing)
+                .'.';
         }
 
         return new ParsedResident(
             nama: $nama,
-            nik: $tokens[$nikIndex][1],
+            nik: $nik,
             gender: $gender,
             birthPlace: $birthPlace,
             birthDate: $birthDate,
@@ -679,10 +1740,232 @@ final class OcrParsingService
     }
 
     /**
-     * @return array<string, array<int, string>>
+     * Ambil tanggal lahir dari token.
      */
-    private function phrasesFor(string $field): array
-    {
+    private function extractBirthDate(
+        string $value,
+    ): ?string {
+        if (
+            preg_match(
+                '/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})$/',
+                $value,
+                $matches,
+            ) !== 1
+        ) {
+            return null;
+        }
+
+        return $this->normalizeBirthDate(
+            $matches[1],
+            $matches[2],
+            $matches[3],
+        );
+    }
+
+    /**
+     * Hapus kata gender jika gender tidak berhasil dipisahkan.
+     */
+    private function removeKnownGenderWords(
+        string $value,
+    ): string {
+        $value = preg_replace(
+            '/\bLAKI(?:-?LAKI)?\b/i',
+            '',
+            $value,
+        ) ?? $value;
+
+        $value = preg_replace(
+            '/\bPEREMPUAN\b/i',
+            '',
+            $value,
+        ) ?? $value;
+
+        return trim(
+            preg_replace(
+                '/\s+/u',
+                ' ',
+                $value,
+            ) ?? $value,
+        );
+    }
+
+    /**
+     * Gabungkan raw token tanpa kehilangan teks asli.
+     *
+     * @param  array<int, array{0:string,1:string}>  $tokens
+     */
+    private function joinRawTokens(
+        array $tokens,
+    ): string {
+        return trim(
+            implode(
+                ' ',
+                array_column(
+                    $tokens,
+                    0,
+                ),
+            ),
+        );
+    }
+
+    /**
+     * Cari vocabulary phrase secara fleksibel.
+     *
+     * Tidak harus langsung setelah field sebelumnya.
+     *
+     * @param  array<int, array{0:string,1:string}>  $tokens
+     * @param  array<string, array<int,string>>  $phrases
+     * @param  array<int, array{0:int,1:int}>  $usedRanges
+     * @return array{0:string,1:int,2:int}|null
+     */
+    private function findVocabularyMatch(
+        array $tokens,
+        int $start,
+        array $phrases,
+        array $usedRanges,
+    ): ?array {
+        $best = null;
+        $bestLength = 0;
+        $bestStart = null;
+
+        $count = count($tokens);
+
+        for (
+            $i = max(0, $start);
+            $i < $count;
+            $i++
+        ) {
+            if (
+                $this->rangeOverlaps(
+                    $i,
+                    $i,
+                    $usedRanges,
+                )
+            ) {
+                continue;
+            }
+
+            foreach (
+                $phrases as $label => $sequence
+            ) {
+                $length = count($sequence);
+
+                if (
+                    $length <= $bestLength
+                    || $i + $length > $count
+                ) {
+                    continue;
+                }
+
+                if (
+                    $this->rangeOverlaps(
+                        $i,
+                        $i + $length - 1,
+                        $usedRanges,
+                    )
+                ) {
+                    continue;
+                }
+
+                $matched = true;
+
+                for (
+                    $k = 0;
+                    $k < $length;
+                    $k++
+                ) {
+                    if (
+                        ! $this->tokensEquivalent(
+                            $tokens[$i + $k][1],
+                            $sequence[$k],
+                        )
+                    ) {
+                        $matched = false;
+
+                        break;
+                    }
+                }
+
+                if (! $matched) {
+                    continue;
+                }
+
+                $best = $label;
+                $bestLength = $length;
+                $bestStart = $i;
+            }
+        }
+
+        if (
+            $best === null
+            || $bestStart === null
+        ) {
+            return null;
+        }
+
+        return [
+            $best,
+            $bestStart,
+            $bestLength,
+        ];
+    }
+
+    /**
+     * Toleransi kecil terhadap OCR typo.
+     *
+     * Tidak melakukan fuzzy matching agresif.
+     */
+    private function tokensEquivalent(
+        string $actual,
+        string $expected,
+    ): bool {
+        if ($actual === $expected) {
+            return true;
+        }
+
+        $aliases = [
+            'N1K' => 'NIK',
+            'KAT0LIK' => 'KATOLIK',
+            'KR1STEN' => 'KRISTEN',
+            'H1NDU' => 'HINDU',
+            'BUDHHA' => 'BUDDHA',
+            'KAW1N' => 'KAWIN',
+            '1STRI' => 'ISTRI',
+            'AN4K' => 'ANAK',
+        ];
+
+        return ($aliases[$actual] ?? $actual)
+            === $expected;
+    }
+
+    /**
+     * Cek apakah range token bertabrakan dengan match lain.
+     *
+     * @param  array<int, array{0:int,1:int}>  $ranges
+     */
+    private function rangeOverlaps(
+        int $start,
+        int $end,
+        array $ranges,
+    ): bool {
+        foreach ($ranges as [$rangeStart, $rangeEnd]) {
+            if (
+                $start <= $rangeEnd
+                && $end >= $rangeStart
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Vocabulary untuk field tertentu.
+     */
+    private function phrasesFor(
+        string $field,
+    ): array {
         return match ($field) {
             'religion' => self::RELIGIONS,
             'education' => self::EDUCATIONS,
@@ -693,103 +1976,184 @@ final class OcrParsingService
     }
 
     /**
-     * Longest matching vocabulary phrase starting at token $start.
+     * Compatibility helper untuk kode lama.
      *
-     * @param  array<int, array{0: string, 1: string}>  $tokens
-     * @param  array<string, array<int, string>>  $phrases
-     * @return array{0: string, 1: int}|null [label, token count]
+     * Dipertahankan supaya tidak merusak pemanggil internal
+     * atau test yang masih menggunakan behavior longest-match.
+     *
+     * @param  array<int, array{0:string,1:string}>  $tokens
+     * @param  array<string, array<int,string>>  $phrases
+     * @return array{0:string,1:int}|null
      */
-    private function longestMatch(array $tokens, int $start, array $phrases): ?array
-    {
-        $best = null;
-        $bestLength = 0;
-        $tokenCount = count($tokens);
+    private function longestMatch(
+        array $tokens,
+        int $start,
+        array $phrases,
+    ): ?array {
+        $match = $this->findVocabularyMatch(
+            $tokens,
+            $start,
+            $phrases,
+            [],
+        );
 
-        foreach ($phrases as $label => $sequence) {
-            $length = count($sequence);
-
-            if ($length <= $bestLength || $start + $length > $tokenCount) {
-                continue;
-            }
-
-            $matched = true;
-
-            for ($k = 0; $k < $length; $k++) {
-                if ($tokens[$start + $k][1] !== $sequence[$k]) {
-                    $matched = false;
-                    break;
-                }
-            }
-
-            if ($matched) {
-                $best = $label;
-                $bestLength = $length;
-            }
+        if ($match === null) {
+            return null;
         }
 
-        return $best === null ? null : [$best, $bestLength];
+        return [
+            $match[0],
+            $match[2],
+        ];
     }
 
     /**
-     * Tokenize a line into [raw, normalized] pairs. Normalization uppercases
-     * and trims punctuation so matching tolerates OCR noise ("LAKI-LAKI,");
-     * raw tokens keep the original text for display.
+     * Tokenize line menjadi:
      *
-     * Runs of pure-digit tokens totalling exactly 16 digits are merged into
-     * a single NIK token (Tesseract often splits long numbers across words).
+     * [
+     *     [raw, normalized],
+     *     ...
+     * ]
      *
-     * @return array<int, array{0: string, 1: string}>
+     * Raw dipertahankan untuk display.
+     * Normalized dipakai untuk matching.
+     *
+     * @return array<int, array{0:string,1:string}>
      */
-    private function tokenize(string $line): array
-    {
+    private function tokenize(
+        string $line,
+    ): array {
         $tokens = [];
 
-        foreach (preg_split('/\s+/', trim($line)) ?: [] as $raw) {
+        foreach (
+            preg_split(
+                '/\s+/u',
+                trim($line),
+            ) ?: [] as $raw
+        ) {
             if ($raw === '') {
                 continue;
             }
 
-            $norm = strtoupper($raw);
-            $norm = preg_replace('/^[^\pL\pN]+|[^\pL\pN]+$/u', '', $norm) ?? $norm;
-            $tokens[] = [$raw, $norm];
+            $norm = strtoupper(
+                trim($raw),
+            );
+
+            /*
+             * Hapus punctuation di ujung token.
+             */
+            $norm = preg_replace(
+                '/^[^\pL\pN]+|[^\pL\pN]+$/u',
+                '',
+                $norm,
+            ) ?? $norm;
+
+            /*
+             * Normalisasi typo header NIK.
+             *
+             * Jangan melakukan O->0 secara global karena
+             * nama orang bisa mengandung huruf O.
+             */
+            if ($norm === 'N1K') {
+                $norm = 'NIK';
+            }
+
+            /*
+             * LAKI - LAKI dengan separator OCR.
+             */
+            if ($norm === 'LAKI_ LAKI') {
+                $norm = 'LAKI';
+            }
+
+            $tokens[] = [
+                $raw,
+                $norm,
+            ];
         }
 
-        return $this->mergeNikRuns($tokens);
+        return $this->mergeNikRuns(
+            $tokens,
+        );
     }
 
     /**
-     * @param  array<int, array{0: string, 1: string}>  $tokens
-     * @return array<int, array{0: string, 1: string}>
+     * Gabungkan angka yang terpecah menjadi NIK 16 digit.
+     *
+     * Contoh:
+     *
+     * 3207 1228 0116 0001
+     *
+     * menjadi:
+     *
+     * 3207122801160001
+     *
+     * @param  array<int, array{0:string,1:string}>  $tokens
+     * @return array<int, array{0:string,1:string}>
      */
-    private function mergeNikRuns(array $tokens): array
-    {
+    private function mergeNikRuns(
+        array $tokens,
+    ): array {
         $merged = [];
         $count = count($tokens);
 
-        for ($i = 0; $i < $count; $i++) {
+        for (
+            $i = 0;
+            $i < $count;
+            $i++
+        ) {
             $rawRun = '';
             $j = $i;
 
-            while ($j < $count && preg_match('/^\d{1,6}$/', $tokens[$j][1]) === 1) {
+            while (
+                $j < $count
+                && preg_match(
+                    '/^\d{1,6}$/',
+                    $tokens[$j][1],
+                ) === 1
+            ) {
                 $rawRun .= $tokens[$j][0];
                 $j++;
             }
 
-            if ($j - $i >= 2 && strlen($rawRun) === 16) {
-                $merged[] = [$rawRun, $rawRun];
+            /*
+             * Minimal dua token agar angka biasa seperti "1"
+             * tidak dianggap sebagai NIK.
+             */
+            if (
+                $j - $i >= 2
+                && strlen($rawRun) === 16
+            ) {
+                $merged[] = [
+                    $rawRun,
+                    $rawRun,
+                ];
+
                 $i = $j - 1;
-            } else {
-                $merged[] = $tokens[$i];
+
+                continue;
             }
+
+            $merged[] = $tokens[$i];
         }
 
         return $merged;
     }
 
-    private function findNikIndex(array $tokens): ?int
-    {
-        foreach ($tokens as $i => [$raw, $norm]) {
-            if (preg_match('/^\d{16}$/', $norm) === 1) {
+    /**
+     * Cari NIK pertama pada token.
+     */
+    private function findNikIndex(
+        array $tokens,
+    ): ?int {
+        foreach (
+            $tokens as $i => [, $norm]
+        ) {
+            if (
+                preg_match(
+                    '/^\d{16}$/',
+                    $norm,
+                ) === 1
+            ) {
                 return $i;
             }
         }
@@ -798,23 +2162,114 @@ final class OcrParsingService
     }
 
     /**
-     * Heuristic for the "unreadable member row" warning: only rows that carry
-     * digits can be near-miss member rows (wrapped table headers have none).
+     * Apakah line terlihat seperti baris anggota tetapi
+     * NIK-nya gagal dibaca.
      */
-    private function looksLikeMemberRow(string $line): bool
-    {
-        return preg_match('/\d{2,}/', $line) === 1;
+    private function looksLikeMemberRow(
+        string $line,
+    ): bool {
+        return preg_match(
+            '/\d{2,}/',
+            $line,
+        ) === 1;
     }
 
     /**
-     * Drop a leading row number ("1", "2", ...) from a member name.
-     *
-     * @param  array<int, array{0: string, 1: string}>  $tokens
-     * @return array<int, array{0: string, 1: string}>
+     * Hentikan parsing tabel ketika menemukan footer/header
+     * yang jelas bukan data anggota.
      */
-    private function stripRowNumber(array $tokens): array
-    {
-        while ($tokens !== [] && preg_match('/^\d{1,2}$/', $tokens[0][1]) === 1) {
+    private function isEndOfMemberTable(
+        string $line,
+    ): bool {
+        $upper = strtoupper(
+            trim($line),
+        );
+
+        $endMarkers = [
+            'KETERANGAN',
+            'PENJELASAN',
+            'CATATAN',
+            'DITETAPKAN DI',
+            'MENGETAHUI',
+            'KEPALA DINAS',
+            'KEPALA DESA',
+            'LURAH',
+            'CAMAT',
+        ];
+
+        foreach ($endMarkers as $marker) {
+            if (
+                str_starts_with(
+                    $upper,
+                    $marker,
+                )
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Abaikan noise yang sering muncul di sekitar tabel.
+     */
+    private function looksLikeTableNoise(
+        string $line,
+    ): bool {
+        $upper = strtoupper(
+            trim($line),
+        );
+
+        if ($upper === '') {
+            return true;
+        }
+
+        $noise = [
+            'NO',
+            'NAMA',
+            'NIK',
+            'JENIS KELAMIN',
+            'TEMPAT LAHIR',
+            'TANGGAL LAHIR',
+            'AGAMA',
+            'PENDIDIKAN',
+            'PEKERJAAN',
+            'STATUS PERKAWINAN',
+            'STATUS HUBUNGAN DALAM KELUARGA',
+        ];
+
+        foreach ($noise as $marker) {
+            if ($upper === $marker) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Hapus row number:
+     *
+     * 1 BUDI SANTOSO
+     *
+     * menjadi:
+     *
+     * BUDI SANTOSO
+     *
+     * @param  array<int, array{0:string,1:string}>  $tokens
+     * @return array<int, array{0:string,1:string}>
+     */
+    private function stripRowNumber(
+        array $tokens,
+    ): array {
+        while (
+            $tokens !== []
+            && preg_match(
+                '/^\d{1,2}$/',
+                $tokens[0][1],
+            ) === 1
+        ) {
             array_shift($tokens);
         }
 
@@ -822,52 +2277,171 @@ final class OcrParsingService
     }
 
     /**
-     * Normalize and sanity-check a dd/mm/yyyy date; returns Y-m-d or null
-     * when the date cannot be a real birth date (year 1900..current).
+     * Normalize tanggal lahir.
+     *
+     * Menghasilkan:
+     *
+     * Y-m-d
+     *
+     * atau null jika tidak valid.
      */
-    private function normalizeBirthDate(string $day, string $month, string $year): ?string
-    {
+    private function normalizeBirthDate(
+        string $day,
+        string $month,
+        string $year,
+    ): ?string {
         $day = (int) $day;
         $month = (int) $month;
 
-        if ($month < 1 || $month > 12) {
+        if (
+            $day < 1
+            || $day > 31
+            || $month < 1
+            || $month > 12
+        ) {
             return null;
         }
 
         if (strlen($year) === 2) {
-            $year = ((int) $year) < 70 ? '20'.$year : '19'.$year;
+            $year = (
+                (int) $year
+            ) < 70
+                ? '20'.$year
+                : '19'.$year;
         }
 
         $year = (int) $year;
 
-        if ($year < 1900 || $year > (int) now()->year) {
+        $currentYear = (int) now()->year;
+
+        if (
+            $year < 1900
+            || $year > $currentYear
+        ) {
             return null;
         }
 
-        if (! checkdate($month, $day, $year)) {
+        if (! checkdate(
+            $month,
+            $day,
+            $year,
+        )) {
             return null;
         }
 
-        return sprintf('%04d-%02d-%02d', $year, $month, $day);
+        return sprintf(
+            '%04d-%02d-%02d',
+            $year,
+            $month,
+            $day,
+        );
     }
 
     /**
-     * Pipeline-stage log line (.ai/ocr.md §9) matching the preprocess stage.
+     * Validasi konsistensi hasil anggota.
+     *
+     * Tidak memblokir data.
+     * Hanya memberikan informasi kepada operator.
+     *
+     * @param  array<int, ParsedResident>  $members
+     * @param  array<int, string>  $warnings
+     * @param  array<int, string>  $validationErrors
      */
-    private function log(float $confidence, bool $lowConfidence, int $memberCount, int $warningCount, float $startedAt): void
-    {
-        Log::info('OCR parsing '.($lowConfidence ? 'low_confidence' : 'success'), [
-            'pipeline_stage' => 'parse',
-            'outcome' => $lowConfidence ? 'low_confidence' : 'success',
-            'duration_ms' => round($this->elapsedMs($startedAt), 2),
-            'confidence' => $confidence,
-            'member_count' => $memberCount,
-            'warning_count' => $warningCount,
-        ]);
+    private function validateMemberConsistency(
+        array $members,
+        array &$warnings,
+        array &$validationErrors,
+    ): void {
+        if ($members === []) {
+            return;
+        }
+
+        $headCount = 0;
+
+        foreach ($members as $member) {
+            if (
+                $member->familyRelation
+                === 'KEPALA_KELUARGA'
+            ) {
+                $headCount++;
+            }
+        }
+
+        if ($headCount === 0) {
+            $warnings[] =
+                'Kepala Keluarga belum terbaca dari hasil OCR.';
+        } elseif ($headCount > 1) {
+            $validationErrors[] =
+                'OCR menemukan lebih dari satu anggota '
+                .'dengan hubungan Kepala Keluarga. '
+                .'Periksa kembali sebelum menyimpan.';
+        }
+
+        /*
+         * NIK sudah dijamin unik oleh parseMembers().
+         *
+         * Pemeriksaan ini hanya sebagai defensive guard.
+         */
+        $niks = array_filter(
+            array_map(
+                static fn (
+                    ParsedResident $member
+                ): ?string => $member->nik,
+                $members,
+            ),
+        );
+
+        if (
+            count($niks)
+            !== count(array_unique($niks))
+        ) {
+            $validationErrors[] =
+                'Terdapat NIK duplikat pada hasil OCR.';
+        }
     }
 
-    private function elapsedMs(float $startedAt): float
-    {
-        return (microtime(true) - $startedAt) * 1000;
+    /**
+     * Pipeline-stage log.
+     */
+    private function log(
+        float $confidence,
+        bool $lowConfidence,
+        int $memberCount,
+        int $warningCount,
+        float $startedAt,
+    ): void {
+        Log::info(
+            'OCR parsing '
+            .($lowConfidence
+                ? 'low_confidence'
+                : 'success'),
+            [
+                'pipeline_stage' => 'parse',
+                'outcome' => $lowConfidence
+                    ? 'low_confidence'
+                    : 'success',
+                'duration_ms' => round(
+                    $this->elapsedMs(
+                        $startedAt,
+                    ),
+                    2,
+                ),
+                'confidence' => $confidence,
+                'member_count' => $memberCount,
+                'warning_count' => $warningCount,
+            ],
+        );
+    }
+
+    /**
+     * Durasi parser dalam milidetik.
+     */
+    private function elapsedMs(
+        float $startedAt,
+    ): float {
+        return (
+            microtime(true)
+            - $startedAt
+        ) * 1000;
     }
 }

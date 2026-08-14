@@ -43,6 +43,16 @@ class KartuKeluargaForm
                         ->label('Foto / Scan Kartu Keluarga')
                         ->disk(KkPhotoService::DISK)
                         ->directory('kk-photos')
+                        ->storeFiles(false)
+
+                        /*
+                         * Penting: tanpa ->live(), penyelesaian upload
+                         * tidak memancarkan event 'updated' ke Livewire,
+                         * sehingga updated() (trigger OCR otomatis) tidak
+                         * terpanggil. ->live() membuat perubahan state foto
+                         * diteruskan sebagai update reaktif.
+                         */
+                        ->live()
                         ->image()
                         ->imageEditor()
                         ->maxSize(5120)
@@ -55,8 +65,8 @@ class KartuKeluargaForm
                         ->previewable()
                         ->helperText(
                             fn (string $operation): string => $operation === 'edit'
-                                    ? 'Upload hanya jika ingin mengganti foto KK lama.'
-                                    : 'Upload foto KK untuk arsip dan pembacaan OCR.'
+                                ? 'Upload hanya jika ingin mengganti foto KK lama.'
+                                : 'Upload foto KK untuk arsip dan pembacaan OCR.'
                         )
                         ->columnSpanFull(),
 
@@ -95,7 +105,7 @@ class KartuKeluargaForm
              *
              * Kartu Keluarga
              *      ↓
-             * RW / Lingkungan
+             * RW
              *      ↓
              * RT
              *
@@ -122,26 +132,73 @@ class KartuKeluargaForm
                     TextInput::make('kk_number')
                         ->label('Nomor KK')
                         ->required()
+
+                        /*
+                         * Tetap dipertahankan sebagai pengaman validasi.
+                         *
+                         * ignoreRecord = true:
+                         * Saat EDIT KK, nomor KK milik record tersebut
+                         * tidak dianggap duplicate terhadap dirinya sendiri.
+                         */
                         ->unique(
                             'kartu_keluarga',
                             'kk_number',
                             ignoreRecord: true,
                         )
+
+                        /*
+                         * Cek database ketika operator selesai mengetik.
+                         *
+                         * Debounce 500ms mencegah query pada setiap
+                         * keystroke secara langsung.
+                         */
+                        ->live(debounce: 500)
+
+                        /*
+                         * Begitu 16 digit terdeteksi dan nomor sudah ada,
+                         * halaman mengisi $duplicateKk sehingga modal
+                         * overlay muncul di tengah layar.
+                         *
+                         * $livewire di-inject BY NAME (schemas Component::
+                         * resolveDefaultClosureDependencyForEvaluationByName),
+                         * karena itu parameter tidak boleh diberi type-hint.
+                         */
+                        ->afterStateUpdated(
+                            function ($state, $livewire): void {
+                                if (
+                                    ! method_exists(
+                                        $livewire,
+                                        'checkDuplicateKk'
+                                    )
+                                ) {
+                                    return;
+                                }
+
+                                $livewire->checkDuplicateKk($state);
+                            }
+                        )
+
                         ->maxLength(16)
                         ->minLength(16)
                         ->regex('/^[0-9]{16}$/')
                         ->rule('digits:16')
                         ->inputMode('numeric')
+
+                        /*
+                         * Simpan hanya digit.
+                         */
                         ->dehydrateStateUsing(
                             fn ($state): ?string => filled($state)
-                                    ? preg_replace(
-                                        '/\D/',
-                                        '',
-                                        (string) $state
-                                    )
-                                    : null
+                                ? preg_replace(
+                                    '/\D/',
+                                    '',
+                                    (string) $state
+                                )
+                                : null
                         )
+
                         ->placeholder('Masukkan 16 digit Nomor KK')
+
                         ->helperText(
                             'Nomor KK harus terdiri dari 16 digit.'
                         ),
@@ -178,18 +235,21 @@ class KartuKeluargaForm
 
                     /*
                      * ========================================================
-                     * RW / LINGKUNGAN
+                     * RW
                      * ========================================================
                      *
-                     * `area_unit_id` BUKAN kolom kartu_keluarga.
+                     * area_unit_id bukan kolom langsung di kartu_keluarga.
                      *
-                     * Ini hanya field bantu untuk memilih RT.
+                     * Field ini hanya membantu memilih RT.
                      *
-                     * Yang disimpan sebenarnya adalah `rt_id`.
+                     * Yang benar-benar disimpan:
+                     *
+                     * KK → rt_id
+                     * RT  → area_unit_id
                      */
 
                     Select::make('area_unit_id')
-                        ->label('RW / Lingkungan')
+                        ->label('RW')
                         ->options(
                             fn (): array => AreaUnit::query()
                                 ->orderBy('name')
@@ -208,8 +268,8 @@ class KartuKeluargaForm
                         ->dehydrated(false)
 
                         /*
-                         * Saat edit KK, tampilkan wilayah
-                         * berdasarkan RT yang sudah tersimpan.
+                         * Saat edit KK:
+                         * tampilkan wilayah berdasarkan RT tersimpan.
                          */
                         ->afterStateHydrated(
                             function (
@@ -229,8 +289,8 @@ class KartuKeluargaForm
                         )
 
                         /*
-                         * Kalau RW/Lingkungan diganti,
-                         * RT lama harus dikosongkan.
+                         * Kalau wilayah berubah,
+                         * RT lama harus dipilih ulang.
                          */
                         ->afterStateUpdated(
                             function (Set $set): void {
@@ -238,44 +298,33 @@ class KartuKeluargaForm
                             }
                         )
 
-                        ->placeholder('Pilih RW / Lingkungan')
+                        ->placeholder('Pilih RW')
                         ->helperText(
                             'Pilih wilayah sebelum memilih RT.'
                         )
 
                         /*
-                         * Tombol tambah RW/Lingkungan.
-                         *
-                         * Tidak meminta kode wilayah.
+                         * Tambah RW.
                          */
                         ->suffixAction(
                             Action::make('addAreaUnit')
-                                ->label('Tambah RW / Lingkungan')
+                                ->label('Tambah RW')
                                 ->icon('heroicon-o-plus')
-                                ->tooltip('Tambah RW / Lingkungan')
+                                ->tooltip('Tambah RW')
                                 ->modalHeading(
-                                    'Tambah RW / Lingkungan'
+                                    'Tambah RW'
                                 )
                                 ->modalSubmitActionLabel('Simpan')
                                 ->form([
 
                                     TextInput::make('name')
-                                        ->label('Nama RW / Lingkungan')
+                                        ->label('Nama RW')
                                         ->required()
                                         ->maxLength(100)
                                         ->placeholder(
-                                            'Contoh: Lingkungan I'
+                                            'Contoh: RW 01'
                                         ),
 
-                                    Select::make('type')
-                                        ->label('Tipe Wilayah')
-                                        ->options([
-                                            'lingkungan' => 'Lingkungan',
-                                            'rw' => 'RW',
-                                        ])
-                                        ->default('lingkungan')
-                                        ->required()
-                                        ->native(false),
                                 ])
                                 ->action(
                                     function (
@@ -286,8 +335,7 @@ class KartuKeluargaForm
                                             'name' => trim(
                                                 (string) $data['name']
                                             ),
-                                            'type' => $data['type']
-                                                ?? 'lingkungan',
+                                            'type' => 'rw',
                                         ]);
 
                                         $set(
@@ -295,10 +343,6 @@ class KartuKeluargaForm
                                             $areaUnit->getKey()
                                         );
 
-                                        /*
-                                         * Karena wilayah baru dipilih,
-                                         * RT harus dipilih kembali.
-                                         */
                                         $set('rt_id', null);
                                     }
                                 )
@@ -314,8 +358,7 @@ class KartuKeluargaForm
                         ->label('RT')
 
                         /*
-                         * RT hanya menampilkan RT
-                         * dari RW/Lingkungan yang dipilih.
+                         * Hanya RT dari wilayah yang dipilih.
                          */
                         ->options(
                             function (Get $get): array {
@@ -351,12 +394,12 @@ class KartuKeluargaForm
                         )
                         ->helperText(
                             fn (Get $get): string => $get('area_unit_id')
-                                    ? 'RT berdasarkan RW / Lingkungan yang dipilih.'
-                                    : 'Pilih RW / Lingkungan terlebih dahulu.'
+                                ? 'RT berdasarkan RW yang dipilih.'
+                                : 'Pilih RW terlebih dahulu.'
                         )
 
                         /*
-                         * Tombol tambah RT.
+                         * Tambah RT.
                          */
                         ->suffixAction(
                             Action::make('addRt')
@@ -390,7 +433,7 @@ class KartuKeluargaForm
 
                                         if (! $areaUnitId) {
                                             throw new \RuntimeException(
-                                                'Pilih RW / Lingkungan terlebih dahulu.'
+                                                'Pilih RW terlebih dahulu.'
                                             );
                                         }
 
@@ -409,8 +452,8 @@ class KartuKeluargaForm
                                         }
 
                                         /*
-                                         * Jangan membuat RT yang sama
-                                         * dua kali dalam satu wilayah.
+                                         * Jangan membuat RT duplicate
+                                         * dalam satu wilayah.
                                          */
                                         $existing = Rt::query()
                                             ->where(
@@ -461,17 +504,172 @@ class KartuKeluargaForm
                         ->columnSpanFull(),
                 ])
                 ->collapsible(),
+
+            /*
+             * ================================================================
+             * 3. MODAL DUPLICATE KK
+             * ================================================================
+             *
+             * BUKAN card di dalam form. Ini overlay fixed yang menutupi
+             * layar dan muncul di tengah ketika nomor KK 16 digit yang
+             * diketik sudah terdaftar.
+             *
+             * Sumber data: properti Livewire $duplicateKk pada halaman
+             * (trait ChecksDuplicateKkNumber), diisi oleh
+             * checkDuplicateKk() dari afterStateUpdated() field kk_number.
+             *
+             * CATATAN STYLING (diverifikasi terhadap CSS ter-build):
+             * utility Tailwind generik (fixed, inset-0, rounded-2xl,
+             * bg-amber-100, bg-primary-600, max-w-lg, ...) TIDAK ada di
+             * public/css/filament/filament/app.css maupun di bundle
+             * sipeta-admin — Filament v4 hanya mengekspos kelas .fi-*.
+             * Karena itu modal memakai kelas `kk-dup-modal-*` yang
+             * didefinisikan di resources/css/sipeta-admin.css.
+             */
+
+            Placeholder::make('duplicate_kk_modal')
+                ->hiddenLabel()
+                ->dehydrated(false)
+                ->content(
+                    fn (): Htmlable => new HtmlString(
+                        self::duplicateKkModalHtml()
+                    )
+                )
+                ->columnSpanFull(),
         ];
+    }
+
+    /**
+     * Markup modal duplicate KK.
+     *
+     * Alpine membaca $wire.duplicateKk sehingga isi modal selalu
+     * mengikuti state terakhir tanpa perlu re-render server.
+     *
+     * Tombol "Tutup" memanggil closeDuplicateKk() pada halaman.
+     */
+    private static function duplicateKkModalHtml(): string
+    {
+        return <<<'HTML'
+<div
+    x-data
+    x-show="$wire.duplicateKk && $wire.duplicateKk.number"
+    x-cloak
+    x-transition.opacity
+    @keydown.escape.window="$wire.closeDuplicateKk()"
+    class="kk-dup-modal-overlay"
+    style="display: none;"
+>
+    <div
+        class="kk-dup-modal-backdrop"
+        @click="$wire.closeDuplicateKk()"
+    ></div>
+
+    <div class="kk-dup-modal-panel" role="dialog" aria-modal="true">
+
+        <div class="kk-dup-modal-header">
+            <div class="kk-dup-modal-icon">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="kk-dup-modal-icon-svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M12 9v3.75m0 3.75h.008M10.29 3.86 2.82 17.14A1.75 1.75 0 0 0 4.34 19.75h15.32a1.75 1.75 0 0 0 1.52-2.61L13.71 3.86a1.75 1.75 0 0 0-3.42 0Z"
+                    />
+                </svg>
+            </div>
+
+            <div class="kk-dup-modal-heading">
+                <h2 class="kk-dup-modal-title">
+                    Nomor KK sudah terdaftar
+                </h2>
+
+                <p class="kk-dup-modal-subtitle">
+                    Kartu Keluarga dengan nomor ini sudah ada di SIPETA.
+                </p>
+            </div>
+        </div>
+
+        <div class="kk-dup-modal-body">
+            <div class="kk-dup-modal-box">
+                <div class="kk-dup-modal-row">
+                    <div class="kk-dup-modal-label">Nomor KK</div>
+                    <div
+                        class="kk-dup-modal-value kk-dup-modal-value-strong"
+                        x-text="$wire.duplicateKk.number"
+                    ></div>
+                </div>
+
+                <div class="kk-dup-modal-row">
+                    <div class="kk-dup-modal-label">Kepala Keluarga</div>
+                    <div
+                        class="kk-dup-modal-value"
+                        x-text="$wire.duplicateKk.kepala"
+                    ></div>
+                </div>
+
+                <div class="kk-dup-modal-row">
+                    <div class="kk-dup-modal-label">Wilayah</div>
+                    <div
+                        class="kk-dup-modal-value"
+                        x-text="$wire.duplicateKk.wilayah"
+                    ></div>
+                </div>
+            </div>
+
+            <p class="kk-dup-modal-note">
+                Jika ingin memperbarui data KK tersebut, buka data KK lama.
+                Jangan membuat KK baru dengan nomor yang sama.
+            </p>
+        </div>
+
+        <div class="kk-dup-modal-footer">
+            <button
+                type="button"
+                class="kk-dup-modal-btn kk-dup-modal-btn-secondary"
+                @click="$wire.closeDuplicateKk()"
+            >
+                Tutup
+            </button>
+
+            <a
+                class="kk-dup-modal-btn kk-dup-modal-btn-primary"
+                :href="$wire.duplicateKk.edit_url"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="kk-dup-modal-btn-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="m16.86 4.49 1.69-1.69a1.88 1.88 0 1 1 2.65 2.65l-1.69 1.69m-2.65-2.65L7.5 13.85V16.5h2.65l9.36-9.36m-2.65-2.65 2.65 2.65M19.5 13.5v5.63A1.88 1.88 0 0 1 17.63 21H4.88A1.88 1.88 0 0 1 3 19.13V6.38A1.88 1.88 0 0 1 4.88 4.5h5.62"
+                    />
+                </svg>
+
+                Buka &amp; Edit KK
+            </a>
+        </div>
+
+    </div>
+</div>
+HTML;
     }
 
     /**
      * Label wilayah yang ditampilkan di form.
      *
-     * Tidak menggunakan kolom `code`.
-     *
      * Prioritas:
-     *
-     * 1. display_label jika tersedia sebagai accessor.
+     * 1. display_label jika tersedia.
      * 2. type + name sebagai fallback.
      */
     private static function areaUnitLabel(
@@ -483,8 +681,7 @@ class KartuKeluargaForm
 
         $type = match ($area->type) {
             'rw' => 'RW',
-            'lingkungan' => 'Lingkungan',
-            default => null,
+            default => 'RW',
         };
 
         return $type

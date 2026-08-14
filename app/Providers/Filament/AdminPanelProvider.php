@@ -35,7 +35,19 @@ class AdminPanelProvider extends PanelProvider
             ->sidebarWidth('16rem')
             ->collapsedSidebarWidth('4.5rem')
             ->colors([
-                'primary' => Color::Amber,
+                'primary' => [
+                    50 => '#f4f8f3',
+                    100 => '#e5eee3',
+                    200 => '#cdddc9',
+                    300 => '#a8c3a2',
+                    400 => '#7ba273',
+                    500 => '#598451',
+                    600 => '#456b4f', // Color main target #456B4F
+                    700 => '#385640',
+                    800 => '#2f4635',
+                    900 => '#283b2d',
+                    950 => '#141f17',
+                ],
             ])
             ->navigationGroups([
                 'Kependudukan',

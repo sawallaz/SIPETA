@@ -84,7 +84,7 @@ class PenduduksRelationManager extends RelationManager
 
                                 TextEntry::make('age')
                                     ->label('Usia')
-                                    ->state(fn ($record): string => $record->age . ' tahun'),
+                                    ->state(fn ($record): string => $record->age.' tahun'),
                             ]),
                     ])
                     ->columnSpanFull(),
@@ -122,7 +122,7 @@ class PenduduksRelationManager extends RelationManager
                                     ->label('RT')
                                     ->formatStateUsing(
                                         fn ($state): string => filled($state)
-                                            ? 'RT ' . $state
+                                            ? 'RT '.$state
                                             : '-',
                                     ),
                             ]),

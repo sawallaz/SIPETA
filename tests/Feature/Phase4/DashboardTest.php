@@ -9,8 +9,9 @@ use Tests\TestCase;
 /**
  * Phase 4.1 — dashboard foundation smoke test.
  *
- * Verifies the dashboard page renders with the KPI widget and that the
- * placeholder cards show the expected labels. No statistics/charts yet.
+ * Verifies the dashboard page renders and that the four production KPI cards
+ * (Kartu Keluarga, Penduduk Aktif, Belum Menikah, Jumlah RT) appear with
+ * their labels. No statistics/charts yet.
  */
 class DashboardTest extends TestCase
 {
@@ -35,9 +36,9 @@ class DashboardTest extends TestCase
     public function test_dashboard_shows_kpi_card_labels(): void
     {
         $this->get('/admin')
-            ->assertSee('Total Kartu Keluarga')
-            ->assertSee('Total Penduduk')
-            ->assertSee('Laki-laki')
-            ->assertSee('Perempuan');
+            ->assertSee('Kartu Keluarga')
+            ->assertSee('Penduduk Aktif')
+            ->assertSee('Belum Menikah')
+            ->assertSee('Jumlah RT');
     }
 }

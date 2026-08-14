@@ -148,6 +148,85 @@ class KartuKeluargaResourceTest extends Phase3ResourceTestCase
             ->assertHasNoFormErrors();
     }
 
+    /**
+     * Modal duplicate KK.
+     *
+     * Alert card lama dihapus; penggantinya adalah modal overlay yang
+     * dikendalikan properti Livewire $duplicateKk (trait
+     * ChecksDuplicateKkNumber). Mengetik nomor KK 16 digit yang sudah ada
+     * memicu checkDuplicateKk() lewat afterStateUpdated() sehingga modal
+     * berisi nomor, kepala keluarga, wilayah, dan URL edit KK lama.
+     */
+    public function test_duplicate_kk_modal_state_is_filled_for_existing_number(): void
+    {
+        $existing = KartuKeluarga::factory()->create([
+            'kk_number' => '7371010101010007',
+            'rt_id' => Rt::factory()->create()->id,
+        ]);
+
+        $component = Livewire::test(CreateKartuKeluarga::class)
+            ->set('data.kk_number', $existing->kk_number);
+
+        $duplicate = $component->get('duplicateKk');
+
+        $this->assertSame($existing->kk_number, $duplicate['number']);
+        $this->assertSame($existing->getKey(), $duplicate['id']);
+        $this->assertSame(
+            route('filament.admin.resources.kartu-keluargas.edit', ['record' => $existing->getKey()]),
+            $duplicate['edit_url']
+        );
+
+        // Markup modal (bukan card inline) ikut dirender pada halaman.
+        $this->assertStringContainsString('kk-dup-modal-overlay', $component->html());
+    }
+
+    /**
+     * Nomor KK 16 digit yang benar-benar baru tidak memunculkan modal.
+     */
+    public function test_no_duplicate_kk_modal_for_new_number(): void
+    {
+        $component = Livewire::test(CreateKartuKeluarga::class)
+            ->set('data.kk_number', '7371010101010099');
+
+        $this->assertSame([], $component->get('duplicateKk'));
+    }
+
+    /**
+     * Mengedit KK tidak menandai nomornya sendiri sebagai duplikat.
+     *
+     * checkDuplicateKk() memakai whereKeyNot($record->getKey()) sehingga
+     * record yang sedang dibuka dikecualikan dari pencarian.
+     */
+    public function test_edit_own_kk_number_does_not_open_duplicate_modal(): void
+    {
+        $kk = KartuKeluarga::factory()->create([
+            'kk_number' => '7371010101010011',
+            'rt_id' => Rt::factory()->create()->id,
+        ]);
+
+        $component = Livewire::test(EditKartuKeluarga::class, ['record' => $kk->getKey()])
+            ->set('data.kk_number', $kk->kk_number);
+
+        $this->assertSame([], $component->get('duplicateKk'));
+    }
+
+    /**
+     * Tombol "Tutup" pada modal mengosongkan state duplikat.
+     */
+    public function test_close_duplicate_kk_clears_the_modal_state(): void
+    {
+        $existing = KartuKeluarga::factory()->create([
+            'kk_number' => '7371010101010013',
+            'rt_id' => Rt::factory()->create()->id,
+        ]);
+
+        Livewire::test(CreateKartuKeluarga::class)
+            ->set('data.kk_number', $existing->kk_number)
+            ->assertSet('duplicateKk.number', $existing->kk_number)
+            ->call('closeDuplicateKk')
+            ->assertSet('duplicateKk', []);
+    }
+
     public function test_table_can_search_by_kk_number(): void
     {
         $match = KartuKeluarga::factory()->create(['kk_number' => '7371010101010003']);

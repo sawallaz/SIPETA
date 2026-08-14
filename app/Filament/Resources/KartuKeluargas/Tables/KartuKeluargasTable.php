@@ -6,14 +6,17 @@ use App\Enums\FamilyRelation;
 use App\Filament\Resources\KartuKeluargas\KartuKeluargaDeleteGuard;
 use App\Filament\Resources\KartuKeluargas\KartuKeluargaResource;
 use App\Models\KartuKeluarga;
+use App\Models\Rt;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\Select;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -25,6 +28,25 @@ class KartuKeluargasTable
     {
         return $table
             ->recordUrl(null)
+            ->modifyQueryUsing(
+                fn (Builder $query): Builder => $query->where(function (Builder $query): void {
+                    /*
+                     * KK aktif:
+                     *
+                     * 1. masih mempunyai penduduk current
+                     *
+                     * ATAU
+                     *
+                     * 2. benar-benar baru/kosong dan belum mempunyai histori.
+                     *
+                     * KK yang sudah kosong tetapi mempunyai histori
+                     * otomatis keluar dari daftar KK aktif.
+                     */
+                    $query
+                        ->whereHas('penduduks')
+                        ->orWhereDoesntHave('kkAnggotas');
+                })
+            )
             ->columns([
 
                 /*
@@ -104,7 +126,7 @@ class KartuKeluargasTable
                  * ==========================================================
                  */
                 TextColumn::make('rt_rw')
-                    ->label('RW / Lingkungan')
+                    ->label('RW / RT')
                     ->state(fn (KartuKeluarga $record): ?string => $record->rt_rw_label)
                     ->placeholder('-')
                     ->width('130px')
@@ -184,7 +206,35 @@ class KartuKeluargasTable
              * ==========================================================
              */
             ->filters([
-                //
+                SelectFilter::make('area_unit')
+                    ->label('RW')
+                    ->relationship('rt.areaUnit', 'name')
+                    ->preload()
+                    ->searchable()
+                    ->modifyFormFieldUsing(fn (Select $field): Select => $field
+                        ->placeholder('Pilih RW')
+                        ->live()),
+
+                SelectFilter::make('rt')
+                    ->label('RT')
+                    ->relationship('rt', 'number')
+                    ->searchable()
+                    ->modifyFormFieldUsing(function (Select $field, $livewire): Select {
+                        $selectedRw = data_get($livewire, 'tableFilters.area_unit.value');
+
+                        return $field
+                            ->placeholder('Pilih RT')
+                            ->options(function () use ($selectedRw): array {
+                                $query = Rt::query()->orderBy('number');
+                                if (filled($selectedRw)) {
+                                    $query->where('area_unit_id', $selectedRw);
+                                }
+
+                                return $query->pluck('number', 'id')
+                                    ->map(fn ($num): string => 'RT '.$num)
+                                    ->toArray();
+                            });
+                    }),
             ])
 
             /*
@@ -235,11 +285,14 @@ class KartuKeluargasTable
                 DeleteAction::make()
                     ->label('Hapus')
                     ->icon('heroicon-o-trash')
+                    ->visible(
+                        fn (KartuKeluarga $record): bool => ! KartuKeluargaDeleteGuard::isHistorical($record)
+                    )
                     ->modalHeading('Hapus Kartu Keluarga')
                     ->modalDescription(
-                        'Kartu Keluarga hanya dapat dihapus jika tidak memiliki anggota atau data histori yang masih terhubung. Penghapusan tidak akan menghapus anggota, foto, maupun riwayat secara otomatis.'
+                        'Hapus permanen hanya digunakan untuk data KK yang benar-benar kosong dan belum memiliki histori, foto, atau proses OCR.'
                     )
-                    ->modalSubmitActionLabel('Ya, Hapus')
+                    ->modalSubmitActionLabel('Ya, Hapus Permanen')
                     ->modalCancelActionLabel('Batal')
                     ->before(
                         function (KartuKeluarga $record): void {

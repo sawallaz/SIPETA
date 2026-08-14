@@ -16,7 +16,7 @@ class PendudukPerLingkunganChart extends ChartWidget
     protected ?string $heading = 'Penduduk per Lingkungan';
 
     protected ?string $description =
-        'Jumlah penduduk aktif berdasarkan lingkungan';
+        'Jumlah penduduk berdasarkan RW';
 
     protected ?string $maxHeight = '300px';
 
@@ -65,10 +65,9 @@ class PendudukPerLingkunganChart extends ChartWidget
 
                     'data' => $areas
                         ->map(
-                            fn (AreaUnit $area) =>
-                                (int) (
-                                    $counts[$area->id] ?? 0
-                                )
+                            fn (AreaUnit $area) => (int) (
+                                $counts[$area->id] ?? 0
+                            )
                         )
                         ->all(),
 

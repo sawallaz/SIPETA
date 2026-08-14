@@ -33,11 +33,11 @@ class AreaUnit extends Model
     /**
      * Label wilayah yang ditampilkan ke operator.
      *
-     * SATU sumber label untuk seluruh aplikasi (form KK, tabel KK, wilayah
-     * read-only pada Penduduk) sehingga tidak ada implementasi ganda.
+     * Semua istilah "Lingkungan" yang sebenarnya merujuk RW diubah menjadi RW.
      *
      * Contoh:
-     * - type = lingkungan, name = "Lingkungan I"  -> "Lingkungan I"
+     * - type = lingkungan, name = "Lingkungan I"  -> "RW I"
+     * - type = lingkungan, name = "Lingkungan II" -> "RW II"
      * - type = rw,         code = "01"            -> "RW 01"
      * - type = rw,         name = "RW 01"         -> "RW 01" (tanpa prefiks ganda)
      * - type = rw,         name = "01"            -> "RW 01"
@@ -47,22 +47,27 @@ class AreaUnit extends Model
         $name = trim((string) $this->name);
         $type = strtolower(trim((string) $this->type));
 
-        if ($type !== 'rw') {
-            return $name;
-        }
+        if ($type === 'rw') {
+            if (filled($this->code)) {
+                return 'RW '.trim((string) $this->code);
+            }
 
-        if (filled($this->code)) {
-            return 'RW '.trim((string) $this->code);
+            /*
+             * Kolom `code` tidak lagi diisi dari form (operator hanya mengetik
+             * nama), jadi nama bisa saja sudah mengandung prefiks "RW".
+             */
+            if (preg_match('/^rw\b/i', $name) === 1) {
+                return $name;
+            }
+
+            return 'RW '.$name;
         }
 
         /*
-         * Kolom `code` tidak lagi diisi dari form (operator hanya mengetik
-         * nama), jadi nama bisa saja sudah mengandung prefiks "RW".
+         * type = lingkungan atau tipe lain.
+         * Kembalikan nama apa adanya. Jangan ubah "Lingkungan I" menjadi "RW I"
+         * karena konteks ini memang merepresentasikan tingkatan lingkungan.
          */
-        if (preg_match('/^rw\b/i', $name) === 1) {
-            return $name;
-        }
-
-        return 'RW '.$name;
+        return $name;
     }
 }

@@ -52,8 +52,8 @@ class KartuKeluargaViewPageTest extends Phase3ResourceTestCase
         Livewire::test(ViewKartuKeluarga::class, ['record' => $kk->getKey()])
             ->assertOk()
             ->assertSee('Foto Kartu Keluarga')
-            ->assertSee('Data Kartu Keluarga')
-            ->assertSee('Wilayah & Keluarga')
+            ->assertSee('Kartu Keluarga')
+            ->assertSee('Kepala Keluarga')
             ->assertSee('7371019900010001')
             ->assertSee('Jl. Poros Tanete No. 7');
     }
