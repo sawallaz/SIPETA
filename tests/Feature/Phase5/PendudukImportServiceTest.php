@@ -16,7 +16,6 @@ use App\Models\OcrJob;
 use App\Models\Penduduk;
 use App\Models\Rt;
 use App\Models\User;
-use App\Services\OcrImportService;
 use App\Services\OcrParsingService;
 use App\Services\OcrReviewService;
 use App\Services\PendudukImportResult;
@@ -95,8 +94,10 @@ TXT;
     }
 
     /**
-     * Run Phase 5.7's real import to produce the saved KK + job that the
-     * Penduduk import consumes.
+     * Build the Phase 5.7 saved KK + job state that the Penduduk import
+     * consumes. The Phase 5.7 service is intentionally removed with the
+     * retired OCR review workflow, so this fixture mirrors its persisted
+     * contract directly.
      *
      * @return array{0: OcrJob, 1: KartuKeluarga}
      */
@@ -108,10 +109,20 @@ TXT;
 
         $job = $this->reviewableJob();
 
-        $kk = (new OcrImportService(new OcrParsingService, new OcrReviewService))
-            ->import($job, $this->corrections());
+        $data = $this->corrections();
+        $kartuKeluarga = KartuKeluarga::create([
+            'kk_number' => $data['kk_number'],
+            'address' => $data['address'],
+        ]);
 
-        return [$job->fresh(), KartuKeluarga::findOrFail($kk->kartuKeluargaId)];
+        $job->update([
+            'kk_id' => $kartuKeluarga->id,
+            'outcome' => OcrOutcome::SAVED->value,
+            'reviewed_at' => now(),
+            'extracted_data' => $data,
+        ]);
+
+        return [$job->fresh(), $kartuKeluarga->fresh()];
     }
 
     public function test_successful_import_creates_all_family_members(): void

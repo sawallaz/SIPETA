@@ -738,10 +738,22 @@ final class OcrParsingService
 
             /*
              * Label + colon.
+             *
+             * Toleran terhadap OCR run-on di mana satu karakter
+             * menyatu ke label sebelum titik dua, contoh:
+             *   Lingkunganl:
+             *   LINGKUNGANl:
+             *   lingkunganx:
+             *
+             * Satu karakter alfanumerik opsional diperbolehkan
+             * antara token dan colon. Ini aman karena hanya
+             * label yang diperiksa; nilai nilainya tetap diekstrak
+             * utuh.
              */
             if (
                 preg_match(
-                    '/^'.$pattern.'\s*:\s*(.*)$/u',
+                    '/^'.$pattern.
+                    '\\s*[A-Z0-9]?\\s*:\\s*(.*)$/u',
                     $upper,
                     $matches,
                 ) === 1
@@ -760,7 +772,7 @@ final class OcrParsingService
              */
             if (
                 preg_match(
-                    '/^'.$pattern.'(?:\s+)(.*)$/u',
+                    '/^'.$pattern.'(?:\\s+)(.*)$/u',
                     $upper,
                     $matches,
                 ) === 1

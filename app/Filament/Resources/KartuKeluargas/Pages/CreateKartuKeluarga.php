@@ -672,6 +672,11 @@ class CreateKartuKeluarga extends CreateRecord
             // has no bloodType field — so a scanned member defaults to
             // TIDAK_DIKETAHUI and the operator corrects it manually.
             'blood_type' => BloodType::TIDAK_DIKETAHUI->value,
+            // FileUpload fields are entangled immediately when the OCR
+            // repeater state is rendered; initialize optional documents so
+            // Livewire has both paths available before an operator uploads.
+            'ktp_document' => null,
+            'akta_kelahiran_document' => null,
         ];
     }
 

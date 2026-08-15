@@ -307,6 +307,86 @@ TXT;
         $this->assertSame([], $result->validationErrors);
     }
 
+    /**
+     * Regression: OCR run-on di mana satu karakter menyatu ke label sebelum
+     * titik dua (contoh: Lingkunganl:, LINGKUNGANl:, lingkunganx:).
+     *
+     * Satu karakter alfanumerik yang menyatu tetap harus dikenali sebagai
+     * label Lingkungan, bukan diabaikan.
+     */
+    public function test_lingkungan_ocr_run_on_variants_are_extracted(): void
+    {
+        $variants = [
+            'Lingkunganl: I',
+            'LINGKUNGANl: I',
+            'lingkunganx: I',
+            'Lingkunganx : I',
+            'LINGKUNGANl : II',
+        ];
+
+        foreach ($variants as $headerLine) {
+            $text = implode("\n", [
+                'NOMOR KK : 3207122801160001',
+                'ALAMAT : JL. MELATI NO. 5',
+                'RT/RW : 001/004',
+                $headerLine,
+                '',
+                self::TABLE_HEADER,
+                '1 BUDI SANTOSO 3207122801160001 LAKI-LAKI TANETE 28-01-2016 ISLAM SLTA/SEDERAJAT BURUH HARIAN LEPAS KAWIN KEPALA KELUARGA',
+            ]);
+
+            $result = $this->parse($text, 90.0);
+
+            $this->assertNotSame(
+                null,
+                $result->lingkungan,
+                'OCR run-on "'.$headerLine.'" seharusnya tetap mengenali field lingkungan.'
+            );
+            $this->assertSame(
+                [],
+                $result->validationErrors,
+                'OCR run-on "'.$headerLine.'" seharusnya tidak menimbulkan validasi error.'
+            );
+        }
+    }
+
+    /**
+     * Regression: kapitalisasi dan spacing yang sudah didukung sebelumnya
+     * (Lingkungan:, LINGKUNGAN:, lingkungan :, Lingkungan  :) tetap bekerja
+     * setelah perubahan regex.
+     */
+    public function test_existing_lingkungan_variants_still_work(): void
+    {
+        $variants = [
+            ['Lingkungan: I', 'I'],
+            ['LINGKUNGAN: II', 'II'],
+            ['lingkungan : III', 'III'],
+            ['Lingkungan  : IV', 'IV'],
+            ['LINGKUNGAN : V', 'V'],
+        ];
+
+        foreach ($variants as [$headerLine, $expected]) {
+            $text = implode("\n", [
+                'NOMOR KK : 3207122801160001',
+                'ALAMAT : JL. MELATI NO. 5',
+                'RT/RW : 001/004',
+                $headerLine,
+                '',
+                self::TABLE_HEADER,
+                '1 BUDI SANTOSO 3207122801160001 LAKI-LAKI TANETE 28-01-2016 ISLAM SLTA/SEDERAJAT BURUH HARIAN LEPAS KAWIN KEPALA KELUARGA',
+            ]);
+
+            $result = $this->parse($text, 90.0);
+
+            $this->assertSame(
+                $expected,
+                $result->lingkungan,
+                'Variasi "'.$headerLine.'" seharusnya mengenali lingkungan="'.$expected.'".'
+            );
+            $this->assertSame([], $result->validationErrors);
+        }
+    }
+
     private function parse(string $rawText, float $confidence): ParsedOcrResult
     {
         return (new OcrParsingService)->parse($rawText, $confidence);

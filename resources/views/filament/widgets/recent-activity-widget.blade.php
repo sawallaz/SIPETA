@@ -28,7 +28,7 @@
 
                         <time
                             class="fi-wi-recent-activity-time"
-                            :datetime="$activity['created_at']->toIso8601String()"
+                            datetime="{{ $activity['created_at']->toIso8601String() }}"
                         >{{ $activity['created_at']->locale('id')->diffForHumans() }}</time>
                     </a>
                 @endforeach
