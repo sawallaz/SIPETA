@@ -10,13 +10,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * Append-only backup history. No updated_at by design.
+ * Google Drive backup history. Rows are removed only after a confirmed remote
+ * Drive deletion succeeds; failed deletes retain the history row.
  *
  * @property int $id
  * @property string $filename
+ * @property string|null $drive_file_id
+ * @property string|null $drive_folder_id
  * @property BackupType $backup_type
  * @property BackupStatus $backup_status
  * @property int $backup_size
+ * @property string|null $checksum
  * @property int|null $operator_id
  * @property Carbon $started_at
  * @property Carbon|null $finished_at
@@ -33,9 +37,12 @@ class BackupLog extends Model
 
     protected $fillable = [
         'filename',
+        'drive_file_id',
+        'drive_folder_id',
         'backup_type',
         'backup_status',
         'backup_size',
+        'checksum',
         'operator_id',
         'started_at',
         'finished_at',

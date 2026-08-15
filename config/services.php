@@ -35,4 +35,19 @@ return [
         ],
     ],
 
+    'google_drive' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect_uri' => env('GOOGLE_REDIRECT_URI', env('APP_URL', 'http://localhost').'/admin/backup/google/callback'),
+        'auth_uri' => 'https://accounts.google.com/o/oauth2/v2/auth',
+        'token_uri' => 'https://oauth2.googleapis.com/token',
+        'drive_uri' => 'https://www.googleapis.com/drive/v3',
+        'upload_uri' => 'https://www.googleapis.com/upload/drive/v3/files',
+        'scope' => 'https://www.googleapis.com/auth/drive.file',
+        'backup_folder_name' => 'SIPETA Backup',
+        'timeout' => 120,
+        'upload_timeout' => 600,
+        'max_retries' => 3,
+    ],
+
 ];

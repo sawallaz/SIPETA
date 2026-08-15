@@ -12,24 +12,26 @@ use ZipArchive;
 /**
  * Phase 6.3 — Restore from ZIP backup (FR-BR-04 / FR-BR-05 / FR-BR-06).
  *
- * Applies the archive produced by BackupService (FR-BR-01) to bring the
- * application back to a backed-up state. The service:
+ * Applies a temporary download of a Google Drive archive (FR-BR-01) to bring
+ * the application back to a backed-up state. The service:
  *   - refuses to run without explicit confirmation (FR-BR-05);
  *   - validates the archive integrity BEFORE applying anything (FR-BR-04);
  *   - applies the SQL dump (database.sql) through the injected DatabaseImporter,
  *     then re-applies the settings singleton and the KK photos;
  *   - always advises the operator to restart the application (FR-BR-06).
  *
- * Service-layer only (same pattern as the Phase 5.7/5.8 imports and 6.2 backup);
- * the operator-facing restore control ships with the later UI sub-phase.
+ * Service-layer only; the downloaded archive is always removed after use.
  */
 class RestoreService
 {
-    /** Private disk holding the ZIP archives (matches BackupService). */
-    public const DISK = 'db_backups';
-
     /** Disk KK photos are written back to (backup stores them under `kk/*`). */
     public const PHOTO_DISK = 'kk_uploads';
+
+    private const MAX_ARCHIVE_ENTRIES = 10000;
+
+    private const MAX_ENTRY_BYTES = 262144000;
+
+    private const MAX_TOTAL_BYTES = 2147483648;
 
     /** Settings columns restored from the archive's settings.json. */
     private const SETTING_FIELDS = [
@@ -38,34 +40,70 @@ class RestoreService
         'kabupaten_name',
         'province_name',
         'logo_path',
-        'backup_path',
     ];
 
-    public function __construct(private DatabaseImporter $importer) {}
+    public function __construct(
+        private DatabaseImporter $importer,
+        private GoogleDriveClient $drive,
+    ) {}
 
-    /**
-     * Restore the application state from a backup archive.
-     *
-     * @param  string  $filename  the archive filename on the db_backups disk
-     * @param  ?User  $operator  the operator performing the restore (diagnostics)
-     * @param  bool  $confirmed  FR-BR-05 explicit confirmation gate
-     *
-     * @throws RestoreException when the archive is missing, invalid, or cannot be applied
-     */
-    public function restore(string $filename, ?User $operator = null, bool $confirmed = false): RestoreResult
+    public function restoreFromDrive(string $fileId, ?User $operator = null, bool $confirmed = false): RestoreResult
     {
-        // FR-BR-05: an explicit confirmation must precede any restore, and the
-        // caller must reference an existing archive.
         if (! $confirmed) {
-            return RestoreResult::confirmationRequired($filename);
+            return RestoreResult::confirmationRequired($fileId);
         }
 
-        if (! Storage::disk(self::DISK)->exists($filename)) {
-            throw new RestoreException(sprintf('Arsip backup %s tidak ditemukan.', $filename));
+        $tmp = tempnam(sys_get_temp_dir(), 'sipeta_drive_restore_');
+        if ($tmp === false) {
+            throw new RestoreException('File sementara restore tidak dapat dibuat.');
         }
+
+        try {
+            $metadata = $this->drive->metadata($fileId);
+            $expectedChecksum = $metadata['appProperties']['sipeta_checksum'] ?? null;
+            if (blank($expectedChecksum)) {
+                throw new RestoreException('Checksum backup Google Drive tidak tersedia.');
+            }
+
+            $this->drive->download($fileId, $tmp);
+
+            $actualChecksum = $this->manifestChecksum($tmp) ?? hash_file('sha256', $tmp);
+            if ($actualChecksum === false || ! hash_equals((string) $expectedChecksum, $actualChecksum)) {
+                throw new RestoreException('Checksum backup tidak valid.');
+            }
+
+            return $this->restoreArchive('Google Drive: '.$fileId, $tmp, $operator);
+        } finally {
+            @unlink($tmp);
+        }
+    }
+
+    private function manifestChecksum(string $path): ?string
+    {
+        $zip = new ZipArchive;
+
+        if ($zip->open($path) !== true) {
+            return null;
+        }
+
+        try {
+            $manifest = $zip->getFromName('manifest.json');
+            $data = $manifest === false ? null : json_decode($manifest, true);
+
+            return is_array($data) && filled($data['checksum'] ?? null)
+                ? (string) $data['checksum']
+                : null;
+        } finally {
+            $zip->close();
+        }
+    }
+
+    private function restoreArchive(string $filename, string $path, ?User $operator): RestoreResult
+    {
+        Log::info('Restore started.', ['filename' => $filename, 'operator_id' => $operator?->id]);
 
         // FR-BR-04: validate the archive integrity before applying anything.
-        [$sql, $settingsJson, $photoFiles] = $this->extractValidated($filename, Storage::disk(self::DISK)->path($filename));
+        [$sql, $settingsJson, $photoFiles, $storageFiles] = $this->extractValidated($filename, $path);
 
         try {
             // 1. The SQL dump is the authoritative state; if it fails, nothing
@@ -85,12 +123,19 @@ class RestoreService
                 }
             }
 
+            foreach ($storageFiles as $entry) {
+                if (Storage::disk($entry['disk'])->put($entry['path'], $entry['bytes']) === false) {
+                    throw new RestoreException(sprintf('File %s gagal dipulihkan ke disk.', $entry['path']));
+                }
+            }
+
             Log::info('Arsip backup diterapkan.', [
                 'filename' => $filename,
                 'operator_id' => $operator?->id,
                 'photo_count' => count($photoFiles),
             ]);
         } catch (\Throwable $e) {
+            Log::error('Restore failed.', ['filename' => $filename, 'operator_id' => $operator?->id]);
             throw new RestoreException($e->getMessage(), (int) $e->getCode(), $e);
         }
 
@@ -102,8 +147,7 @@ class RestoreService
      * Open the archive and read every applied entry, rejecting it before any
      * change is made when integrity fails (FR-BR-04).
      *
-     * @return array{0: string, 1: string, 2: array<string, string>}
-     *                                                               [SQL dump, settings.json, kk/* file entries keyed by entry name]
+     * @return array{0: string, 1: string, 2: array<string, string>, 3: array<string, array{disk: string, path: string, bytes: string}>}
      *
      * @throws RestoreException
      */
@@ -129,24 +173,97 @@ class RestoreService
                 throw new RestoreException(sprintf('Isi arsip backup %s tidak dapat dibaca.', $filename));
             }
 
+            if ($zip->numFiles > self::MAX_ARCHIVE_ENTRIES) {
+                throw new RestoreException('Arsip backup melebihi batas jumlah file yang aman.');
+            }
+
+            $manifest = $zip->getFromName('manifest.json');
+            if ($manifest !== false) {
+                $manifestData = json_decode($manifest, true);
+                if (! is_array($manifestData)) {
+                    throw new RestoreException('Manifest backup tidak valid.');
+                }
+
+                $context = hash_init('sha256');
+                $payloadCount = 0;
+                $payloadSize = 0;
+                for ($i = 0; $i < $zip->numFiles; $i++) {
+                    $entry = $zip->getNameIndex($i);
+                    if ($entry === false || $entry === 'manifest.json' || str_ends_with($entry, '/')) {
+                        continue;
+                    }
+                    $this->assertSafeArchiveName($entry);
+                    $bytes = $zip->getFromIndex($i);
+                    if ($bytes === false) {
+                        throw new RestoreException('Isi arsip backup tidak dapat dibaca.');
+                    }
+                    $payloadCount++;
+                    $payloadSize += strlen($bytes);
+                    hash_update($context, $entry."\0".$bytes);
+                }
+
+                if (
+                    ($manifestData['application_identifier'] ?? null) !== 'SIPETA'
+                    || (int) ($manifestData['file_count'] ?? -1) !== $payloadCount
+                    || (int) ($manifestData['total_size'] ?? -1) !== $payloadSize
+                    || ! hash_equals((string) ($manifestData['checksum'] ?? ''), hash_final($context))
+                ) {
+                    throw new RestoreException('Checksum backup tidak valid.');
+                }
+            }
+
             $photoFiles = [];
+            $storageFiles = [];
+            $totalExtracted = 0;
 
             for ($i = 0; $i < $zip->numFiles; $i++) {
                 $name = $zip->getNameIndex($i);
+                if ($name === false || str_ends_with($name, '/')) {
+                    continue;
+                }
+                $this->assertSafeArchiveName($name);
+                $bytes = $zip->getFromName($name);
+                if ($bytes === false) {
+                    continue;
+                }
+                $this->assertEntrySize($bytes, $totalExtracted);
 
                 if (str_starts_with($name, 'kk/')) {
-                    $bytes = $zip->getFromName($name);
-
-                    if ($bytes !== false) {
-                        $photoFiles[$name] = $bytes;
+                    $photoFiles[$name] = $bytes;
+                } elseif (str_starts_with($name, 'storage/')) {
+                    $parts = explode('/', $name, 3);
+                    if (count($parts) === 3 && in_array($parts[1], ['kk_uploads', 'local'], true)) {
+                        $storageFiles[$name] = ['disk' => $parts[1], 'path' => $parts[2], 'bytes' => $bytes];
                     }
                 }
             }
 
-            return [$sql, $settingsJson, $photoFiles];
+            return [$sql, $settingsJson, $photoFiles, $storageFiles];
         } finally {
             $zip->close();
         }
+    }
+
+    private function assertSafeArchiveName(string $name): void
+    {
+        if (
+            $name === ''
+            || str_starts_with($name, '/')
+            || str_contains($name, '\\')
+            || str_contains($name, "\0")
+            || in_array('..', explode('/', $name), true)
+        ) {
+            throw new RestoreException('Arsip backup memiliki path file yang tidak aman.');
+        }
+    }
+
+    private function assertEntrySize(string $bytes, int &$total): void
+    {
+        $size = strlen($bytes);
+        if ($size > self::MAX_ENTRY_BYTES || $total > self::MAX_TOTAL_BYTES - $size) {
+            throw new RestoreException('Arsip backup melebihi batas ekstraksi yang aman.');
+        }
+        $total += $size;
     }
 
     /**

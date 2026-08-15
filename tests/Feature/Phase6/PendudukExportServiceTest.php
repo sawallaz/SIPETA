@@ -236,7 +236,7 @@ class PendudukExportServiceTest extends TestCase
             'kecamatan_name' => 'Kecamatan Polewali',
             'kabupaten_name' => 'Kabupaten Polewali Mandar',
             'province_name' => 'Sulawesi Barat',
-            'backup_path' => storage_path('backups'),
+
         ]);
         Penduduk::factory()->create(['full_name' => 'Nur Aisyah']);
 

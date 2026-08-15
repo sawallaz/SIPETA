@@ -47,7 +47,6 @@ class Settings extends Page
             'kabupaten_name' => $setting->kabupaten_name,
             'province_name' => $setting->province_name,
             'logo_path' => $setting->logo_path,
-            'backup_path' => $setting->backup_path,
         ]);
     }
 
@@ -97,19 +96,6 @@ class Settings extends Page
     public function save(): void
     {
         $data = $this->form->getState();
-
-        $currentSettings = app(SettingsService::class)->get();
-
-        /*
-         * Jangan sampai backup_path menjadi null jika
-         * field tidak mengirimkan nilainya.
-         */
-        if (
-            ! array_key_exists('backup_path', $data)
-            || blank($data['backup_path'])
-        ) {
-            $data['backup_path'] = $currentSettings->backup_path;
-        }
 
         app(SettingsService::class)->update($data);
 

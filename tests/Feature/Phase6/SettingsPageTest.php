@@ -18,12 +18,6 @@ use Tests\TestCase;
  * identity and logo fields are editable and persist (FR-SET-01), the logo is
  * stored on the `local` disk under the `logos/` prefix with only the relative
  * path persisted.
- *
- * The "Lokasi Backup" (backup location) field has been removed from the
- * Settings UI: backup is no longer configured as a location here. The backend
- * `backup_path` column is intentionally preserved (consumed by BackupService /
- * RestoreService) but is no longer part of the form, so saving the form must
- * NOT wipe a previously stored value.
  */
 class SettingsPageTest extends TestCase
 {
@@ -101,28 +95,6 @@ class SettingsPageTest extends TestCase
         $this->assertNotNull($setting->logo_path);
         $this->assertStringStartsWith('logos/', $setting->logo_path);
         $this->assertTrue(Storage::disk('local')->exists($setting->logo_path));
-    }
-
-    public function test_backup_path_is_preserved_when_not_submitted_from_ui(): void
-    {
-        // The "Lokasi Backup" field was removed from the Settings UI, but the
-        // backup_path column remains a real backend field consumed by
-        // BackupService / RestoreService. Saving the form without a backup_path
-        // input must NOT wipe the stored value.
-        app(SettingsService::class)->get()->update(['backup_path' => '/var/opt/sipeta/protected-backups']);
-
-        Livewire::test(Settings::class)
-            ->fillForm([
-                'kelurahan_name' => 'Kelurahan Tanete',
-                'kecamatan_name' => 'Tanete',
-                'kabupaten_name' => 'Barru',
-                'province_name' => 'Sulawesi Selatan',
-            ])
-            ->call('save');
-
-        $setting = Setting::query()->find(1);
-
-        $this->assertSame('/var/opt/sipeta/protected-backups', $setting->backup_path);
     }
 
     public function test_identity_fields_are_required(): void

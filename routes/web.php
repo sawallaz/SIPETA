@@ -1,13 +1,79 @@
 <?php
 
+use App\Exceptions\GoogleDriveException;
+use App\Filament\Pages\Backup;
 use App\Http\Controllers\PendudukExportController;
 use App\Models\KkPhoto;
 use App\Models\Penduduk;
 use App\Models\PendudukDocument;
+use App\Services\GoogleDriveClient;
+use App\Services\GoogleDriveOAuthService;
+use App\Services\SettingsService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
 Route::redirect('/', '/admin');
+
+Route::middleware(['web', 'auth'])->prefix('admin/backup/google')->group(function (): void {
+    Route::get('connect', function (GoogleDriveOAuthService $oauth) {
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
+
+        $state = $oauth->newState();
+        session(['google_drive_oauth_state' => $state]);
+
+        try {
+            return redirect()->away($oauth->authorizationUrl($state));
+        } catch (GoogleDriveException $e) {
+            Log::warning('Google Drive OAuth unavailable.', ['status' => $e->httpStatus]);
+
+            return redirect(Backup::getUrl())->with(
+                'google_drive_error',
+                'Konfigurasi OAuth Google Drive belum tersedia di lingkungan ini.',
+            );
+        }
+    })->name('google-drive.connect');
+
+    Route::get('callback', function (Request $request, GoogleDriveOAuthService $oauth, GoogleDriveClient $drive) {
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
+
+        $expectedState = session()->pull('google_drive_oauth_state');
+        $receivedState = (string) $request->query('state', '');
+        if (blank($expectedState) || ! hash_equals((string) $expectedState, $receivedState)) {
+            abort(419, 'Sesi OAuth Google Drive tidak valid.');
+        }
+
+        if ($request->filled('error') || ! $request->filled('code')) {
+            return redirect(Backup::getUrl())->with('google_drive_error', 'Otorisasi Google Drive dibatalkan.');
+        }
+
+        try {
+            $credentials = $oauth->exchangeCode((string) $request->query('code'));
+            $oauth->storeCredentials($credentials);
+            $about = $drive->about();
+            $folder = $drive->ensureBackupFolder();
+            $email = $about['user']['emailAddress'] ?? null;
+
+            app(SettingsService::class)->saveGoogleDriveConnection(
+                $credentials,
+                is_string($email) ? $email : null,
+                $folder['id'],
+            );
+            Log::info('Google Drive connected.', ['account_email' => $email]);
+
+            return redirect(Backup::getUrl())->with('google_drive_message', 'Google Drive berhasil terhubung.');
+        } catch (GoogleDriveException $e) {
+            Log::warning('Google Drive connection failed.', ['status' => $e->httpStatus]);
+
+            return redirect(Backup::getUrl())->with('google_drive_error', $e->getMessage());
+        } catch (Throwable $e) {
+            Log::warning('Google Drive connection failed.', ['exception' => $e::class]);
+
+            return redirect(Backup::getUrl())->with('google_drive_error', 'Google Drive gagal terhubung.');
+        }
+    })->name('google-drive.callback');
+});
 
 /*
  * Authenticated KK-photo thumbnail endpoint (Phase UI-3).

@@ -21,7 +21,7 @@ class SettingsSeeder extends Seeder
                 'kabupaten_name' => env('SETTINGS_KABUPATEN_NAME', 'Barru'),
                 'province_name' => env('SETTINGS_PROVINCE_NAME', 'Sulawesi Selatan'),
                 'logo_path' => env('SETTINGS_LOGO_PATH'),
-                'backup_path' => env('SETTINGS_BACKUP_PATH', storage_path('app/backups')),
+
             ],
         );
     }

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\UserRole;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
@@ -24,6 +25,7 @@ class User extends Authenticatable implements FilamentUser
     protected $fillable = [
         'name',
         'email',
+        'role',
         'password',
     ];
 
@@ -46,14 +48,19 @@ class User extends Authenticatable implements FilamentUser
     {
         return [
             'email_verified_at' => 'datetime',
+            'role' => UserRole::class,
             'password' => 'hashed',
         ];
     }
 
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === UserRole::SUPER_ADMIN;
+    }
+
     /**
-     * SIPETA is a single-admin system (ADR-005): any authenticated operator may
-     * use the panel. Implementing this contract means panel access no longer
-     * depends on `app.env` being `local`.
+     * Both supported roles may use the panel. High-risk backup operations are
+     * restricted at the page/integration boundary to SUPER_ADMIN.
      */
     public function canAccessPanel(Panel $panel): bool
     {

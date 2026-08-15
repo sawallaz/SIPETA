@@ -5,19 +5,14 @@ namespace App\Services;
 use App\Models\Setting;
 
 /**
- * Singleton kelurahan identity + backup path (Phase 6.5).
+ * Singleton kelurahan identity and Google Drive connection settings.
  *
  * The `settings` table is a single-row singleton (id = 1). ADR-020 and FR-SET-02
  * require exactly one row, created on first access and never deleted; this is
  * enforced here via `firstOrCreate(['id' => 1])`, never in the Filament page.
  *
- * FR-SET-01 the editable fields are: kelurahan, kecamatan, kabupaten and
- * province names, logo path and backup path. The logo is stored on the `local`
- * disk under a `logos/` prefix — only the relative path is persisted in
- * `logo_path` (no extra filesystem disk is added, and `config/filesystems.php`
- * is not touched). `backup_path` is operator configuration recorded for future
- * phases only: the Phase 6.2 `BackupService` continues to use its own existing
- * implementation and is intentionally not modified here.
+ * The logo is stored on the `local` disk under a `logos/` prefix — only the
+ * relative path is persisted in `logo_path`.
  */
 class SettingsService
 {
@@ -38,12 +33,9 @@ class SettingsService
     }
 
     /**
-     * Persist the settings row (identity, logo path, backup path).
+     * Persist the settings row (identity and logo path).
      *
-     * Only fillable fields are written; the row is never deleted. Logo and
-     * backup-path handling is deliberately minimal: the page passes the
-     * relative logo path it already stored, and `backup_path` is recorded for
-     * future phases only.
+     * Only fillable fields are written; the row is never deleted.
      *
      * @param  array<string, mixed>  $data
      */
@@ -57,7 +49,54 @@ class SettingsService
             'kabupaten_name' => $data['kabupaten_name'] ?? null,
             'province_name' => $data['province_name'] ?? null,
             'logo_path' => $data['logo_path'] ?? null,
-            'backup_path' => $data['backup_path'] ?? null,
+
+        ])->save();
+
+        return $setting;
+    }
+
+    /**
+     * Persist the encrypted Google OAuth credential bundle and connection metadata.
+     *
+     * @param  array<string, mixed>  $credentials
+     */
+    public function saveGoogleDriveConnection(
+        array $credentials,
+        ?string $email,
+        ?string $folderId,
+    ): Setting {
+        $setting = $this->get();
+        $setting->forceFill([
+            'google_drive_account_email' => $email,
+            'google_drive_folder_id' => $folderId,
+            'google_drive_credentials' => $credentials,
+            'google_drive_connected_at' => now(),
+        ])->save();
+
+        return $setting;
+    }
+
+    /**
+     * Update only the encrypted token bundle after a refresh.
+     *
+     * @param  array<string, mixed>  $credentials
+     */
+    public function updateGoogleDriveCredentials(array $credentials): Setting
+    {
+        $setting = $this->get();
+        $setting->forceFill(['google_drive_credentials' => $credentials])->save();
+
+        return $setting;
+    }
+
+    public function disconnectGoogleDrive(): Setting
+    {
+        $setting = $this->get();
+        $setting->forceFill([
+            'google_drive_account_email' => null,
+            'google_drive_folder_id' => null,
+            'google_drive_credentials' => null,
+            'google_drive_connected_at' => null,
         ])->save();
 
         return $setting;
@@ -78,7 +117,7 @@ class SettingsService
             'kabupaten_name' => env('SETTINGS_KABUPATEN_NAME', 'Barru'),
             'province_name' => env('SETTINGS_PROVINCE_NAME', 'Sulawesi Selatan'),
             'logo_path' => env('SETTINGS_LOGO_PATH'),
-            'backup_path' => env('SETTINGS_BACKUP_PATH', storage_path('app/backups')),
+
         ];
     }
 }

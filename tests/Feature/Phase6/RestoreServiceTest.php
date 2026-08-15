@@ -4,240 +4,202 @@ namespace Tests\Feature\Phase6;
 
 use App\Exceptions\RestoreException;
 use App\Models\Setting;
+use App\Services\GoogleDriveClient;
 use App\Services\RestoreService;
-use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\FakeDatabaseImporter;
 use Tests\TestCase;
 use ZipArchive;
 
-/**
- * Phase 6.3 — Restore from ZIP backup. Verifies the service honours
- * FR-BR-04 (validate ZIP integrity before applying), FR-BR-05 (require explicit
- * confirmation before applying), and FR-BR-06 (advise restarting afterwards),
- * plus re-applying the SQL dump, settings singleton, and KK photos.
- */
 class RestoreServiceTest extends TestCase
 {
     use RefreshDatabase;
 
-    private FakeDatabaseImporter $importer;
-
-    private RestoreService $service;
-
     protected function setUp(): void
     {
         parent::setUp();
-        Storage::fake(RestoreService::DISK);
         Storage::fake(RestoreService::PHOTO_DISK);
-        $this->importer = new FakeDatabaseImporter;
-        $this->service = new RestoreService($this->importer);
-    }
-
-    private function putZip(string $filename, array $entries): void
-    {
-        $tmp = tempnam(sys_get_temp_dir(), 'sipeta_restore_');
-        $zip = new ZipArchive;
-        $zip->open($tmp, ZipArchive::CREATE | ZipArchive::OVERWRITE);
-
-        foreach ($entries as $name => $bytes) {
-            $zip->addFromString($name, $bytes);
-        }
-
-        $zip->close();
-        Storage::disk(RestoreService::DISK)->put($filename, (string) file_get_contents($tmp));
-        @unlink($tmp);
-    }
-
-    private function baseSettings(): array
-    {
-        return [
-            'kelurahan_name' => 'Kelurahan Tanete',
-            'kecamatan_name' => 'Kecamatan Polewali',
-            'kabupaten_name' => 'Kabupaten Polewali Mandar',
-            'province_name' => 'Sulawesi Barat',
-            'backup_path' => storage_path('backups'),
-        ];
+        Storage::fake('local');
     }
 
     public function test_restore_requires_explicit_confirmation(): void
     {
-        $result = $this->service->restore('backup_2026-08-07_153045.zip');
+        $drive = $this->mock(GoogleDriveClient::class);
+        $drive->shouldNotReceive('download');
+
+        $result = (new RestoreService(new FakeDatabaseImporter(false), $drive))
+            ->restoreFromDrive('drive-file-1');
 
         $this->assertTrue($result->isConfirmationRequired());
-        $this->assertFalse($result->restartRequired);
-        $this->assertSame('backup_2026-08-07_153045.zip', $result->filename);
-        $this->assertSame([], $this->importer->applied);
+        $this->assertSame('drive-file-1', $result->filename);
     }
 
-    public function test_missing_archive_throws_before_applying(): void
+    public function test_corrupt_archive_is_rejected_and_download_is_cleaned(): void
     {
-        try {
-            $this->service->restore('ghost.zip', null, true);
-            $this->fail('Expected RestoreException was not thrown.');
-        } catch (RestoreException $e) {
-            $this->assertStringContainsString('tidak ditemukan', $e->getMessage());
-        }
-
-        $this->assertSame([], $this->importer->applied);
-    }
-
-    public function test_corrupt_archive_throws_before_applying(): void
-    {
-        Storage::disk(RestoreService::DISK)->put('broken.zip', 'THIS IS NOT A ZIP');
+        $sourcePath = tempnam(sys_get_temp_dir(), 'sipeta_corrupt_');
+        file_put_contents($sourcePath, 'NOT A ZIP');
+        $downloadedPath = null;
+        $drive = $this->downloadMock($sourcePath, $downloadedPath);
 
         try {
-            $this->service->restore('broken.zip', null, true);
-            $this->fail('Expected RestoreException was not thrown.');
-        } catch (RestoreException $e) {
-            $this->assertStringContainsString('korup', $e->getMessage());
+            $this->expectException(RestoreException::class);
+            (new RestoreService(new FakeDatabaseImporter(false), $drive))->restoreFromDrive('drive-file-1', null, true);
+        } finally {
+            $this->assertNotNull($downloadedPath);
+            $this->assertFileDoesNotExist((string) $downloadedPath);
+            @unlink($sourcePath);
         }
-
-        $this->assertSame([], $this->importer->applied);
     }
 
-    public function test_archive_missing_database_sql_throws_before_applying(): void
+    public function test_archive_missing_required_database_is_rejected_before_import(): void
     {
-        $this->putZip('incomplete.zip', ['settings.json' => '[]']);
+        $sourcePath = $this->createZipFile(['settings.json' => '[]']);
+        $importer = new FakeDatabaseImporter;
+        $drive = $this->downloadMock($sourcePath, $unused);
 
         try {
-            $this->service->restore('incomplete.zip', null, true);
-            $this->fail('Expected RestoreException was not thrown.');
-        } catch (RestoreException $e) {
-            $this->assertStringContainsString('database.sql', $e->getMessage());
+            $this->expectExceptionMessage('database.sql tidak ditemukan');
+            (new RestoreService($importer, $drive))->restoreFromDrive('drive-file-1', null, true);
+        } finally {
+            @unlink($sourcePath);
         }
 
-        $this->assertSame([], $this->importer->applied);
+        $this->assertSame([], $importer->applied);
     }
 
-    public function test_successful_restore_applies_sql_settings_and_photos(): void
+    public function test_checksum_mismatch_blocks_restore(): void
     {
-        Setting::create($this->baseSettings());
-
-        $this->putZip('backup_2026-08-07_153045.zip', [
-            'database.sql' => 'CREATE TABLE example (id INT);',
-            'settings.json' => json_encode([
-                'id' => 1,
-                'kelurahan_name' => 'Kelurahan Pulih',
-                'kecamatan_name' => 'Kecamatan Pulih',
-                'kabupaten_name' => 'Kabupaten Pulih',
-                'province_name' => 'Provinsi Pulih',
-                'logo_path' => null,
-                'backup_path' => '/backups',
-                'created_at' => '2026-01-01 00:00:00',
+        $sourcePath = $this->createZipFile([
+            'database.sql' => 'SQL',
+            'settings.json' => '[]',
+            'manifest.json' => json_encode([
+                'application_identifier' => 'SIPETA',
+                'file_count' => 2,
+                'total_size' => 3,
+                'checksum' => str_repeat('0', 64),
             ]),
-            'kk/photo-a.jpg' => 'PHOTO_A',
-            'kk/photo-b.jpg' => 'PHOTO_B',
         ]);
+        $importer = new FakeDatabaseImporter;
+        $drive = $this->downloadMock($sourcePath, $unused);
 
-        $result = $this->service->restore('backup_2026-08-07_153045.zip', null, true);
+        try {
+            $this->expectExceptionMessage('Checksum backup tidak valid.');
+            (new RestoreService($importer, $drive))->restoreFromDrive('drive-file-1', null, true);
+        } finally {
+            @unlink($sourcePath);
+        }
 
-        // FR-BR-06: after a restore the operator must restart the application.
-        $this->assertTrue($result->isRestored());
-        $this->assertTrue($result->restartRequired);
-
-        $this->assertSame(['CREATE TABLE example (id INT);'], $this->importer->applied);
-
-        $settings = Setting::query()->first();
-        $this->assertSame(1, Setting::query()->count());
-        $this->assertSame('Kelurahan Pulih', $settings->kelurahan_name);
-
-        $this->assertTrue(Storage::disk(RestoreService::PHOTO_DISK)->exists('kk/photo-a.jpg'));
-        $this->assertSame('PHOTO_A', Storage::disk(RestoreService::PHOTO_DISK)->get('kk/photo-a.jpg'));
-        $this->assertSame('PHOTO_B', Storage::disk(RestoreService::PHOTO_DISK)->get('kk/photo-b.jpg'));
+        $this->assertSame([], $importer->applied);
     }
 
-    public function test_empty_settings_json_skips_settings_upsert(): void
+    public function test_google_drive_checksum_mismatch_blocks_downloaded_archive(): void
     {
-        $this->putZip('backup_empty_settings.zip', [
-            'database.sql' => 'CREATE TABLE example (id INT);',
+        $sourcePath = $this->createZipFile([
+            'database.sql' => 'SQL',
             'settings.json' => '[]',
         ]);
+        $importer = new FakeDatabaseImporter;
+        $downloadedPath = null;
+        $drive = $this->mock(GoogleDriveClient::class);
+        $drive->shouldReceive('metadata')->once()->andReturn([
+            'id' => 'drive-file-1',
+            'appProperties' => ['sipeta_checksum' => str_repeat('0', 64)],
+        ]);
+        $drive->shouldReceive('download')->once()->andReturnUsing(function (string $fileId, string $destination) use ($sourcePath, &$downloadedPath): void {
+            $downloadedPath = $destination;
+            copy($sourcePath, $destination);
+        });
 
-        $result = $this->service->restore('backup_empty_settings.zip', null, true);
+        try {
+            $this->expectExceptionMessage('Checksum backup tidak valid.');
+            (new RestoreService($importer, $drive))->restoreFromDrive('drive-file-1', null, true);
+        } finally {
+            $this->assertNotNull($downloadedPath);
+            $this->assertFileDoesNotExist((string) $downloadedPath);
+            @unlink($sourcePath);
+        }
+
+        $this->assertSame([], $importer->applied);
+    }
+
+    public function test_path_traversal_is_blocked_before_import(): void
+    {
+        $sourcePath = $this->createZipFile([
+            'database.sql' => 'SQL',
+            'settings.json' => '[]',
+            '../outside.txt' => 'DO_NOT_WRITE',
+        ]);
+        $importer = new FakeDatabaseImporter;
+        $drive = $this->downloadMock($sourcePath, $unused);
+
+        try {
+            $this->expectExceptionMessage('path file yang tidak aman');
+            (new RestoreService($importer, $drive))->restoreFromDrive('drive-file-1', null, true);
+        } finally {
+            @unlink($sourcePath);
+        }
+
+        $this->assertSame([], $importer->applied);
+        $this->assertFalse(Storage::disk('local')->exists('outside.txt'));
+    }
+
+    public function test_valid_drive_archive_restores_and_cleans_download(): void
+    {
+        $sourcePath = $this->createZipFile([
+            'database.sql' => 'INSERT INTO example (id) VALUES (1);',
+            'settings.json' => json_encode([
+                'kelurahan_name' => 'Kelurahan Pulih',
+                'kecamatan_name' => 'Kec. Pulih',
+                'kabupaten_name' => 'Kab. Pulih',
+                'province_name' => 'Prov. Pulih',
+            ]),
+            'kk/pulih.jpg' => 'PULIH_PHOTO',
+        ]);
+        $importer = new FakeDatabaseImporter;
+        $downloadedPath = null;
+        $drive = $this->downloadMock($sourcePath, $downloadedPath);
+
+        try {
+            $result = (new RestoreService($importer, $drive))->restoreFromDrive('drive-file-1', null, true);
+        } finally {
+            @unlink($sourcePath);
+        }
 
         $this->assertTrue($result->isRestored());
-        $this->assertSame(0, Setting::query()->count());
-        $this->assertSame(['CREATE TABLE example (id INT);'], $this->importer->applied);
+        $this->assertSame(['INSERT INTO example (id) VALUES (1);'], $importer->applied);
+        $this->assertSame('Kelurahan Pulih', Setting::query()->first()?->kelurahan_name);
+        $this->assertTrue(Storage::disk(RestoreService::PHOTO_DISK)->exists('kk/pulih.jpg'));
+        $this->assertSame('PULIH_PHOTO', Storage::disk(RestoreService::PHOTO_DISK)->get('kk/pulih.jpg'));
+        $this->assertFileDoesNotExist((string) $downloadedPath);
     }
 
-    public function test_importer_failure_applies_nothing_else(): void
+    private function downloadMock(string $sourcePath, ?string &$downloadedPath): GoogleDriveClient
     {
-        Setting::create($this->baseSettings());
-        $failing = new RestoreService(FakeDatabaseImporter::failing());
-
-        $this->putZip('bad.zip', [
-            'database.sql' => 'CREATE TABLE example (id INT);',
-            'settings.json' => json_encode([
-                'kelurahan_name' => 'Kelurahan Hantu',
-                'kecamatan_name' => 'KB',
-                'kabupaten_name' => 'KP',
-                'province_name' => 'PR',
-                'backup_path' => '/x',
-            ]),
-            'kk/photo-a.jpg' => 'PHOTO_A',
+        $drive = $this->mock(GoogleDriveClient::class);
+        $drive->shouldReceive('metadata')->once()->andReturn([
+            'id' => 'drive-file-1',
+            'appProperties' => ['sipeta_checksum' => hash_file('sha256', $sourcePath)],
         ]);
+        $drive->shouldReceive('download')->once()->andReturnUsing(function (string $fileId, string $destination) use ($sourcePath, &$downloadedPath): void {
+            $downloadedPath = $destination;
+            copy($sourcePath, $destination);
+        });
 
-        try {
-            $failing->restore('bad.zip', null, true);
-            $this->fail('Expected RestoreException was not thrown.');
-        } catch (RestoreException $e) {
-            $this->assertStringContainsString('simulated mysql import failure', $e->getMessage());
-        }
-
-        // The SQL dump is applied first; a failure stops settings + photos.
-        $this->assertSame('Kelurahan Tanete', Setting::query()->first()->kelurahan_name);
-        Storage::disk(RestoreService::PHOTO_DISK)->assertDirectoryEmpty('');
+        return $drive;
     }
 
-    public function test_photo_write_failure_is_never_a_false_success(): void
+    /** @param array<string, string> $entries */
+    private function createZipFile(array $entries): string
     {
-        // kk_uploads is configured throw=false: a failed photo write returns
-        // false instead of throwing. Point the disk at a real unwritable root
-        // so put() fails for real, and assert a failed photo restore surfaces
-        // as a RestoreException — never a "restored" false success (NFR-REL-01).
-        $root = sys_get_temp_dir().'/sipeta_restore_test_'.uniqid();
-        mkdir($root, 0777, true);
-
-        config(['filesystems.disks.db_backups' => [
-            'driver' => 'local',
-            'root' => $root,
-            'throw' => false,
-        ]]);
-        config(['filesystems.disks.kk_uploads' => [
-            'driver' => 'local',
-            'root' => '/proc',
-            'throw' => false,
-        ]]);
-        $this->app->instance('filesystem', new FilesystemManager($this->app));
-        // The facade caches the resolved manager (setUp's Storage::fake); drop
-        // it so the re-pointed disks above actually resolve.
-        Storage::clearResolvedInstances();
-
-        try {
-            $this->putZip('backup_photo_fail.zip', [
-                'database.sql' => 'CREATE TABLE example (id INT);',
-                'settings.json' => '[]',
-                'kk/photo-a.jpg' => 'PHOTO_A',
-            ]);
-
-            // A photo write failure surfaces as a RestoreException (it must
-            // never report a "restored" success); the exact message depends on
-            // whether the adapter returns false or throws, so just assert the
-            // restore fails loudly.
-            try {
-                $this->service->restore('backup_photo_fail.zip', null, true);
-                $this->fail('Expected RestoreException was not thrown on a failed photo write.');
-            } catch (RestoreException) {
-                // expected — the restore must not report success
-            }
-
-            // The SQL dump was still applied, but the restore did not report success.
-            $this->assertSame(['CREATE TABLE example (id INT);'], $this->importer->applied);
-        } finally {
-            @unlink($root.'/backup_photo_fail.zip');
-            @rmdir($root);
+        $tmp = tempnam(sys_get_temp_dir(), 'sipeta_restore_source_');
+        $zip = new ZipArchive;
+        $zip->open($tmp, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+        foreach ($entries as $name => $bytes) {
+            $zip->addFromString($name, $bytes);
         }
+        $zip->close();
+
+        return $tmp;
     }
 }

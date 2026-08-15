@@ -15,7 +15,6 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $kabupaten_name
  * @property string $province_name
  * @property string|null $logo_path
- * @property string $backup_path
  */
 class Setting extends Model
 {
@@ -29,6 +28,17 @@ class Setting extends Model
         'kabupaten_name',
         'province_name',
         'logo_path',
-        'backup_path',
+        'google_drive_account_email',
+        'google_drive_folder_id',
+        'google_drive_credentials',
+        'google_drive_connected_at',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'google_drive_credentials' => 'encrypted:array',
+            'google_drive_connected_at' => 'datetime',
+        ];
+    }
 }

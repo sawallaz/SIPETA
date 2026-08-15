@@ -2,15 +2,18 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\BackupStatus;
+use App\Exceptions\BackupException;
+use App\Exceptions\GoogleDriveException;
 use App\Exceptions\RestoreException;
+use App\Models\BackupLog;
 use App\Services\BackupService;
+use App\Services\GoogleDriveClient;
 use App\Services\RestoreService;
+use App\Services\SettingsService;
 use BackedEnum;
-use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
-use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class Backup extends Page
@@ -23,15 +26,18 @@ class Backup extends Page
 
     protected static ?int $navigationSort = 80;
 
-    /**
-     * File backup yang sedang dipilih untuk restore.
-     */
-    public ?string $restoreCandidate = null;
+    public ?string $driveRestoreCandidate = null;
 
-    /**
-     * File backup yang sedang dipilih untuk dihapus.
-     */
-    public ?string $deleteCandidate = null;
+    public ?string $driveRestoreFilename = null;
+
+    public ?string $driveDeleteCandidate = null;
+
+    public ?string $driveDeleteFilename = null;
+
+    public static function canAccess(): bool
+    {
+        return auth()->user()?->isSuperAdmin() ?? false;
+    }
 
     public function getTitle(): string
     {
@@ -41,343 +47,273 @@ class Backup extends Page
     public function getViewData(): array
     {
         return [
-            'backups' => $this->backups(),
+            'driveBackups' => BackupLog::query()
+                ->whereNotNull('drive_file_id')
+                ->where('backup_status', BackupStatus::SUCCESS)
+                ->latest('started_at')
+                ->get(),
+            'googleDrive' => app(SettingsService::class)->get(),
         ];
     }
 
-    /**
-     * Membuat backup baru.
-     */
-    public function createBackup(): void
+    public function mount(): void
     {
+        if (session()->has('google_drive_message')) {
+            Notification::make()
+                ->title((string) session()->pull('google_drive_message'))
+                ->success()
+                ->send();
+        }
+
+        if (session()->has('google_drive_error')) {
+            Notification::make()
+                ->title('Google Drive gagal')
+                ->body((string) session()->pull('google_drive_error'))
+                ->danger()
+                ->send();
+        }
+    }
+
+    public function createGoogleDriveBackup(): void
+    {
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
+
         try {
-            $result = app(BackupService::class)->create(auth()->user());
-
-            if ($result->isDuplicate()) {
-                Notification::make()
-                    ->title('Backup sudah ada')
-                    ->body(
-                        'Arsip '.$result->filename.
-                        ' sudah pernah dibuat. Buat ulang tidak diperlukan.'
-                    )
-                    ->warning()
-                    ->send();
-
-                return;
-            }
+            app(BackupService::class)->createToDrive(
+                auth()->user(),
+                app(GoogleDriveClient::class),
+            );
 
             Notification::make()
                 ->title('Backup berhasil')
-                ->body(
-                    'Arsip '.$result->filename.
-                    ' berhasil disimpan.'
-                )
+                ->body('Backup berhasil diunggah ke Google Drive.')
                 ->success()
                 ->send();
-        } catch (Throwable $e) {
+        } catch (GoogleDriveException $e) {
             Notification::make()
                 ->title('Backup gagal')
-                ->body(
-                    $e->getMessage() ?: 'Backup tidak dapat dibuat.'
-                )
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        } catch (BackupException $e) {
+            Notification::make()
+                ->title('Backup gagal')
+                ->body($e->getMessage() ?: 'Backup tidak dapat dibuat atau diunggah.')
+                ->danger()
+                ->send();
+        } catch (Throwable) {
+            Notification::make()
+                ->title('Backup gagal')
+                ->body('Backup tidak dapat dibuat atau diunggah.')
                 ->danger()
                 ->send();
         }
     }
 
-    /**
-     * Tahap 1 restore:
-     * memilih file backup.
-     */
-    public function requestRestore(string $filename): void
+    public function testGoogleDriveConnection(): void
     {
-        $filename = basename($filename);
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
 
-        if (! $this->isValidBackupFilename($filename)) {
+        try {
+            $identity = app(GoogleDriveClient::class)->testConnection();
             Notification::make()
-                ->title('Arsip tidak valid')
-                ->body('Hanya file backup ZIP SIPETA yang dapat dipulihkan.')
+                ->title('Koneksi Google Drive aktif')
+                ->body('Terhubung sebagai '.$identity.'.')
+                ->success()
+                ->send();
+        } catch (GoogleDriveException $e) {
+            Notification::make()
+                ->title('Uji koneksi gagal')
+                ->body($e->getMessage())
                 ->danger()
                 ->send();
-
-            return;
         }
+    }
 
-        $disk = Storage::disk(RestoreService::DISK);
+    public function disconnectGoogleDrive(): void
+    {
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
 
-        if (! $disk->exists($filename)) {
+        app(SettingsService::class)->disconnectGoogleDrive();
+        logger()->info('Google Drive disconnected.', ['operator_id' => auth()->id()]);
+
+        Notification::make()
+            ->title('Google Drive diputuskan')
+            ->body('Akun Google Drive berhasil diputuskan.')
+            ->success()
+            ->send();
+    }
+
+    public function requestDriveRestore(string $fileId, string $filename): void
+    {
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
+
+        if (! BackupLog::query()
+            ->where('drive_file_id', $fileId)
+            ->where('backup_status', BackupStatus::SUCCESS)
+            ->exists()) {
             Notification::make()
                 ->title('Backup tidak ditemukan')
-                ->body('File backup tersebut sudah tidak tersedia.')
+                ->body('Riwayat backup Google Drive tersebut tidak tersedia.')
                 ->danger()
                 ->send();
 
             return;
         }
 
-        $this->restoreCandidate = $filename;
-        $this->deleteCandidate = null;
+        $this->driveRestoreCandidate = $fileId;
+        $this->driveRestoreFilename = basename($filename);
     }
 
-    /**
-     * Membatalkan restore.
-     */
-    public function cancelRestore(): void
+    public function cancelDriveRestore(): void
     {
-        $this->restoreCandidate = null;
+        $this->driveRestoreCandidate = null;
+        $this->driveRestoreFilename = null;
     }
 
-    /**
-     * Tahap 2 restore:
-     * benar-benar menjalankan restore setelah konfirmasi.
-     */
-    public function confirmRestore(): void
+    public function confirmDriveRestore(): void
     {
-        $filename = $this->restoreCandidate;
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
 
-        if ($filename === null) {
+        if ($this->driveRestoreCandidate === null) {
+            return;
+        }
+
+        if (! BackupLog::query()
+            ->where('drive_file_id', $this->driveRestoreCandidate)
+            ->where('backup_status', BackupStatus::SUCCESS)
+            ->exists()) {
+            $this->cancelDriveRestore();
+
+            Notification::make()
+                ->title('Backup tidak ditemukan')
+                ->body('Riwayat backup Google Drive tersebut tidak tersedia.')
+                ->danger()
+                ->send();
+
             return;
         }
 
         try {
-            $result = app(RestoreService::class)->restore(
-                $filename,
+            $result = app(RestoreService::class)->restoreFromDrive(
+                $this->driveRestoreCandidate,
                 auth()->user(),
                 true,
             );
 
-            if (! $result->isRestored()) {
+            if ($result->isRestored()) {
                 Notification::make()
-                    ->title('Pemulihan tidak diproses')
-                    ->body('Pemulihan memerlukan konfirmasi.')
+                    ->title('Pemulihan selesai')
+                    ->body('Data berhasil dipulihkan dari Google Drive. Silakan restart aplikasi.')
                     ->warning()
                     ->send();
-
-                return;
+                $this->cancelDriveRestore();
             }
-
-            Notification::make()
-                ->title('Pemulihan selesai')
-                ->body(
-                    'Data berhasil dipulihkan dari '.$filename.
-                    '. Silakan restart aplikasi agar perubahan diterapkan.'
-                )
-                ->warning()
-                ->send();
-
-            $this->restoreCandidate = null;
         } catch (RestoreException $e) {
             Notification::make()
                 ->title('Pemulihan gagal')
-                ->body(
-                    $e->getMessage() ?: 'Arsip tidak dapat dipulihkan.'
-                )
+                ->body($e->getMessage())
                 ->danger()
                 ->send();
         } catch (Throwable $e) {
+            logger()->error('Google Drive restore failed unexpectedly.', [
+                'file_id' => $this->driveRestoreCandidate,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
             Notification::make()
                 ->title('Pemulihan gagal')
-                ->body(
-                    $e->getMessage() ?: 'Terjadi kesalahan saat memulihkan backup.'
-                )
+                ->body('Backup Google Drive tidak dapat dipulihkan.')
                 ->danger()
                 ->send();
         }
     }
 
-    /**
-     * Tahap 1 hapus:
-     * memilih file backup yang ingin dihapus.
-     */
-    public function requestDelete(string $filename): void
+    public function requestDriveDelete(string $fileId, string $filename): void
     {
-        $filename = basename($filename);
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
 
-        if (! $this->isValidBackupFilename($filename)) {
-            Notification::make()
-                ->title('File tidak valid')
-                ->body('Hanya file backup SIPETA yang dapat dihapus.')
-                ->danger()
-                ->send();
+        $exists = BackupLog::query()
+            ->where('drive_file_id', $fileId)
+            ->where('backup_status', BackupStatus::SUCCESS)
+            ->exists();
 
-            return;
-        }
-
-        $disk = Storage::disk(RestoreService::DISK);
-
-        if (! $disk->exists($filename)) {
+        if (! $exists) {
             Notification::make()
                 ->title('Backup tidak ditemukan')
-                ->body('File backup tersebut sudah tidak tersedia.')
+                ->body('Riwayat backup Google Drive tersebut tidak tersedia.')
                 ->danger()
                 ->send();
 
             return;
         }
 
-        $this->deleteCandidate = $filename;
-        $this->restoreCandidate = null;
+        $this->driveDeleteCandidate = $fileId;
+        $this->driveDeleteFilename = basename($filename);
     }
 
-    /**
-     * Membatalkan penghapusan.
-     */
-    public function cancelDelete(): void
+    public function cancelDriveDelete(): void
     {
-        $this->deleteCandidate = null;
+        $this->driveDeleteCandidate = null;
+        $this->driveDeleteFilename = null;
     }
 
-    /**
-     * Tahap 2 hapus:
-     * benar-benar menghapus file backup.
-     *
-     * Catatan:
-     * backup_logs TIDAK dihapus.
-     * Log tetap dipertahankan sebagai histori audit.
-     */
-    public function confirmDelete(): void
+    public function confirmDriveDelete(): void
     {
-        $filename = $this->deleteCandidate;
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
 
-        if ($filename === null) {
+        $fileId = $this->driveDeleteCandidate;
+        if ($fileId === null) {
             return;
         }
 
-        $filename = basename($filename);
+        $log = BackupLog::query()
+            ->where('drive_file_id', $fileId)
+            ->where('backup_status', BackupStatus::SUCCESS)
+            ->first();
 
-        if (! $this->isValidBackupFilename($filename)) {
-            Notification::make()
-                ->title('File tidak valid')
-                ->body('File tersebut bukan backup SIPETA yang valid.')
-                ->danger()
-                ->send();
+        if ($log === null) {
+            $this->cancelDriveDelete();
 
-            $this->deleteCandidate = null;
-
-            return;
-        }
-
-        $disk = Storage::disk(RestoreService::DISK);
-
-        if (! $disk->exists($filename)) {
             Notification::make()
                 ->title('Backup tidak ditemukan')
-                ->body('File backup tersebut sudah tidak tersedia.')
-                ->warning()
+                ->body('Riwayat backup Google Drive tersebut tidak tersedia.')
+                ->danger()
                 ->send();
-
-            $this->deleteCandidate = null;
 
             return;
         }
 
         try {
-            $deleted = $disk->delete($filename);
-
-            if (! $deleted || $disk->exists($filename)) {
-                throw new \RuntimeException(
-                    'File backup tidak berhasil dihapus dari penyimpanan.'
-                );
-            }
+            app(GoogleDriveClient::class)->delete($fileId);
+            $log->delete();
+            $filename = $log->filename;
+            $this->cancelDriveDelete();
 
             Notification::make()
-                ->title('Backup berhasil dihapus')
-                ->body(
-                    $filename.
-                    ' telah dihapus dari penyimpanan backup.'
-                )
+                ->title('Backup Google Drive berhasil dihapus')
+                ->body($filename.' telah dihapus dari Google Drive dan histori.')
                 ->success()
                 ->send();
-
-            /*
-             * Histori backup_logs sengaja tidak dihapus.
-             * Ini menjaga audit trail tetap tersedia.
-             */
-            $this->deleteCandidate = null;
-        } catch (Throwable $e) {
+        } catch (GoogleDriveException $e) {
             Notification::make()
-                ->title('Gagal menghapus backup')
-                ->body(
-                    $e->getMessage() ?: 'Backup tidak dapat dihapus.'
-                )
+                ->title('Gagal menghapus backup Google Drive')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        } catch (Throwable $e) {
+            logger()->error('Google Drive delete failed unexpectedly.', [
+                'file_id' => $fileId,
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
+            Notification::make()
+                ->title('Gagal menghapus backup Google Drive')
+                ->body('File Google Drive tidak dihapus dan histori tetap dipertahankan.')
                 ->danger()
                 ->send();
         }
-    }
-
-    /**
-     * Tombol header.
-     */
-    protected function getHeaderActions(): array
-    {
-        return [
-            Action::make('buatBackup')
-                ->label('Buat Backup')
-                ->icon('heroicon-o-arrow-down-tray')
-                ->action(fn () => $this->createBackup()),
-        ];
-    }
-
-    /**
-     * Ambil HANYA backup ZIP SIPETA.
-     *
-     * .gitignore, folder, file lain, dsb tidak akan ditampilkan.
-     *
-     * @return Collection<int, array{
-     *     filename: string,
-     *     size: int,
-     *     lastModified: int
-     * }>
-     */
-    public function backups(): Collection
-    {
-        $disk = Storage::disk(RestoreService::DISK);
-
-        return collect($disk->files())
-            ->map(function (string $path) use ($disk): ?array {
-                $filename = basename($path);
-
-                /*
-                 * Hanya backup yang dibuat oleh BackupService.
-                 *
-                 * Format:
-                 * backup_YYYY-MM-DD_HHMMSS.zip
-                 */
-                if (! $this->isValidBackupFilename($filename)) {
-                    return null;
-                }
-
-                if (! $disk->exists($path)) {
-                    return null;
-                }
-
-                return [
-                    'filename' => $filename,
-                    'size' => $disk->size($path),
-                    'lastModified' => $disk->lastModified($path),
-                ];
-            })
-            ->filter()
-            ->sortByDesc('lastModified')
-            ->values();
-    }
-
-    /**
-     * Validasi nama backup.
-     *
-     * Contoh valid:
-     * backup_2026-08-07_190114.zip
-     *
-     * Contoh tidak valid:
-     * .gitignore
-     * database.sql
-     * file.zip
-     */
-    private function isValidBackupFilename(string $filename): bool
-    {
-        return preg_match(
-            '/^backup_\d{4}-\d{2}-\d{2}_\d{6}\.zip$/',
-            basename($filename),
-        ) === 1;
     }
 }

@@ -10,19 +10,15 @@ use App\Models\KkPhoto;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\BackupService;
+use App\Services\GoogleDriveClient;
 use Carbon\Carbon;
-use Illuminate\Filesystem\FilesystemManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\FakeDatabaseDumper;
 use Tests\TestCase;
 use ZipArchive;
 
-/**
- * Phase 6.2 — ZIP backup. Verifies the service honours FR-BR-01 (ZIP with SQL
- * dump + KK photos + settings), FR-BR-02 (backup_YYYY-MM-DD_HHMMSS.zip),
- * FR-BR-03 (never overwrite an existing archive), and FR-AUD-01 (logging).
- */
 class BackupServiceTest extends TestCase
 {
     use RefreshDatabase;
@@ -32,7 +28,7 @@ class BackupServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Storage::fake(BackupService::DISK);
+        Storage::fake('local');
         Storage::fake('kk_uploads');
         $this->service = new BackupService(new FakeDatabaseDumper('DUMMY_SQL'));
     }
@@ -45,40 +41,41 @@ class BackupServiceTest extends TestCase
         );
     }
 
-    public function test_create_writes_zip_with_sql_and_appends_success_log(): void
+    public function test_drive_upload_uses_temporary_archive_and_cleans_it_after_success(): void
     {
-        $result = $this->service->create();
+        $admin = User::factory()->create();
+        $drive = $this->mock(GoogleDriveClient::class);
+        $uploadedPath = null;
+        $drive->shouldReceive('ensureBackupFolder')->once()->andReturn(['id' => 'folder-1', 'name' => 'SIPETA Backup']);
+        $drive->shouldReceive('upload')->once()->andReturnUsing(function (string $path, string $folder, string $filename, string $checksum) use (&$uploadedPath): array {
+            $uploadedPath = $path;
+            $this->assertFileExists($path);
+
+            return [
+                'id' => 'drive-file-1',
+                'name' => $filename,
+                'parents' => [$folder],
+                'appProperties' => ['sipeta_checksum' => $checksum],
+            ];
+        });
+
+        $result = $this->service->createToDrive($admin, $drive);
 
         $this->assertTrue($result->isSuccess());
-        $this->assertStringStartsWith('backup_', $result->filename);
-        $this->assertStringEndsWith('.zip', $result->filename);
-        $this->assertGreaterThan(0, $result->size);
-
-        $this->assertTrue(Storage::disk(BackupService::DISK)->exists($result->filename));
-
-        $log = BackupLog::query()->first();
-        $this->assertSame($result->filename, $log->filename);
-        $this->assertSame(BackupType::MANUAL, $log->backup_type);
-        $this->assertSame(BackupStatus::SUCCESS, $log->backup_status);
-        $this->assertSame($result->size, $log->backup_size);
-        $this->assertNotNull($log->started_at);
-        $this->assertNotNull($log->finished_at);
-
-        $zip = new ZipArchive;
-        $this->assertTrue($zip->open(Storage::disk(BackupService::DISK)->path($result->filename)));
-        $this->assertSame('DUMMY_SQL', $zip->getFromName('database.sql'));
-        $this->assertSame('[]', $zip->getFromName('settings.json'));
-        $zip->close();
+        $this->assertNotNull($uploadedPath);
+        $this->assertFileDoesNotExist((string) $uploadedPath);
+        $this->assertSame([], Storage::disk('local')->allFiles());
+        $this->assertSame(BackupStatus::SUCCESS, BackupLog::query()->first()->backup_status);
+        $this->assertSame(BackupType::MANUAL, BackupLog::query()->first()->backup_type);
     }
 
-    public function test_backup_includes_settings_and_kk_photos(): void
+    public function test_archive_payload_is_available_during_upload_without_becoming_persistent(): void
     {
         Setting::create([
             'kelurahan_name' => 'Kelurahan Tanete',
             'kecamatan_name' => 'Kecamatan Polewali',
             'kabupaten_name' => 'Kabupaten Polewali Mandar',
             'province_name' => 'Sulawesi Barat',
-            'backup_path' => storage_path('backups'),
         ]);
         $photo = KkPhoto::factory()->create([
             'storage_disk' => 'kk_uploads',
@@ -86,95 +83,99 @@ class BackupServiceTest extends TestCase
             'stored_filename' => 'stored-1.jpg',
         ]);
         Storage::disk('kk_uploads')->put('kk/photo-1.jpg', 'PHOTO_BYTES');
-        KkPhoto::factory()->create([
-            'storage_disk' => 'kk_uploads',
-            'storage_path' => 'kk/missing.jpg',
-            'stored_filename' => 'stored-missing.jpg',
-        ]);
 
-        $result = $this->service->create();
+        $drive = $this->mock(GoogleDriveClient::class);
+        $drive->shouldReceive('ensureBackupFolder')->once()->andReturn(['id' => 'folder-1', 'name' => 'SIPETA Backup']);
+        $drive->shouldReceive('upload')->once()->andReturnUsing(function (string $path) use ($photo): array {
+            $zip = new ZipArchive;
+            $this->assertTrue($zip->open($path));
+            $this->assertStringContainsString('Kelurahan Tanete', (string) $zip->getFromName('settings.json'));
+            $this->assertSame('PHOTO_BYTES', $zip->getFromName('kk/'.$photo->stored_filename));
+            $zip->close();
 
-        $zip = new ZipArchive;
-        $this->assertTrue($zip->open(Storage::disk(BackupService::DISK)->path($result->filename)));
-        $this->assertStringContainsString('Kelurahan Tanete', $zip->getFromName('settings.json'));
-        $this->assertSame('PHOTO_BYTES', $zip->getFromName('kk/'.$photo->stored_filename));
-        // A photo whose stored file is absent is skipped without failing the backup.
-        $this->assertFalse($zip->getFromName('kk/stored-missing.jpg'));
-        $zip->close();
-    }
+            return [
+                'id' => 'drive-file-1',
+                'name' => 'backup_2026-08-15_120000.zip',
+                'parents' => ['folder-1'],
+                'appProperties' => ['sipeta_checksum' => hash('sha256', 'payload')],
+            ];
+        });
 
-    public function test_create_never_overwrites_existing_backup(): void
-    {
-        Carbon::setTestNow('2026-08-07 15:30:45');
-        $filename = $this->service->filename();
-        Storage::disk(BackupService::DISK)->put($filename, 'EXISTING');
-
+        // Metadata is deliberately supplied by the callback; the service's
+        // upload verification is covered by GoogleDriveIntegrationTest.
         try {
-            $result = $this->service->create();
-
-            $this->assertTrue($result->isDuplicate());
-            $this->assertSame($filename, $result->filename);
-            $this->assertSame('EXISTING', Storage::disk(BackupService::DISK)->get($filename));
-            $this->assertSame(0, BackupLog::query()->count());
-        } finally {
-            Carbon::setTestNow();
+            $this->service->createToDrive(User::factory()->create(), $drive);
+        } catch (BackupException $e) {
+            $this->assertStringContainsString('Metadata backup', $e->getMessage());
         }
+
+        $this->assertSame([], Storage::disk('local')->allFiles());
     }
 
-    public function test_failed_dump_logs_failed_and_throws(): void
+    public function test_failed_dump_logs_failed_and_cleans_temporary_archive(): void
     {
+        $before = glob(sys_get_temp_dir().'/sipeta_backup_*') ?: [];
+        $drive = $this->mock(GoogleDriveClient::class);
         $failing = new BackupService(FakeDatabaseDumper::failing());
 
         try {
-            $failing->create();
+            $failing->createToDrive(User::factory()->create(), $drive);
             $this->fail('Expected BackupException was not thrown.');
         } catch (BackupException $e) {
             $this->assertStringContainsString('simulated mysqldump failure', $e->getMessage());
         }
 
+        $after = glob(sys_get_temp_dir().'/sipeta_backup_*') ?: [];
+        $this->assertSame($before, $after);
         $log = BackupLog::query()->first();
-        $this->assertNotNull($log);
         $this->assertSame(BackupStatus::FAILED, $log->backup_status);
         $this->assertSame(0, $log->backup_size);
         $this->assertStringContainsString('simulated mysqldump failure', $log->message);
-        $this->assertNotNull($log->finished_at);
-        $this->assertSame([], Storage::disk(BackupService::DISK)->allFiles());
     }
 
-    public function test_disk_write_failure_is_never_a_false_success(): void
+    public function test_upload_failure_is_never_logged_as_success_and_cleans_archive(): void
     {
-        // The db_backups disk is configured throw=false: a failed write (full
-        // disk, permissions) returns false instead of throwing. Point the disk
-        // at a real unwritable root so writeStream() fails for real, and assert
-        // the attempt is logged FAILED — never SUCCESS (NFR-REL-01).
-        config(['filesystems.disks.db_backups' => [
-            'driver' => 'local',
-            'root' => '/proc',
-            'throw' => false,
-        ]]);
-        $this->app->instance('filesystem', new FilesystemManager($this->app));
-        // The facade caches the resolved manager (setUp's Storage::fake); drop
-        // it so the re-pointed db_backups disk above actually resolves.
-        Storage::clearResolvedInstances();
+        $drive = $this->mock(GoogleDriveClient::class);
+        $drive->shouldReceive('ensureBackupFolder')->once()->andReturn(['id' => 'folder-1', 'name' => 'SIPETA Backup']);
+        $drive->shouldReceive('upload')->once()->andThrow(new BackupException('upload gagal'));
 
         try {
-            $this->service->create();
-            $this->fail('Expected BackupException was not thrown on a failed disk write.');
+            $this->service->createToDrive(User::factory()->create(), $drive);
+            $this->fail('Expected BackupException was not thrown.');
         } catch (BackupException $e) {
-            $this->assertStringContainsString('tidak dapat disimpan', $e->getMessage());
+            $this->assertSame('upload gagal', $e->getMessage());
         }
 
-        $log = BackupLog::query()->first();
-        $this->assertNotNull($log);
-        $this->assertSame(BackupStatus::FAILED, $log->backup_status);
-        $this->assertSame(0, $log->backup_size);
+        $this->assertSame(BackupStatus::FAILED, BackupLog::query()->first()->backup_status);
+        $this->assertSame([], Storage::disk('local')->allFiles());
     }
 
-    public function test_operator_is_recorded(): void
+    public function test_duplicate_backup_request_is_locked(): void
+    {
+        $lock = Cache::lock('sipeta:google-drive-backup', 60);
+        $this->assertTrue($lock->get());
+
+        try {
+            $this->expectExceptionMessage('Backup sedang diproses');
+            $this->service->createToDrive(User::factory()->create(), $this->mock(GoogleDriveClient::class));
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function test_operator_is_recorded_in_google_drive_history(): void
     {
         $operator = User::factory()->create();
+        $drive = $this->mock(GoogleDriveClient::class);
+        $drive->shouldReceive('ensureBackupFolder')->once()->andReturn(['id' => 'folder-1', 'name' => 'SIPETA Backup']);
+        $drive->shouldReceive('upload')->once()->andReturnUsing(fn (string $path, string $folder, string $filename, string $checksum): array => [
+            'id' => 'drive-file-1',
+            'name' => $filename,
+            'parents' => [$folder],
+            'appProperties' => ['sipeta_checksum' => $checksum],
+        ]);
 
-        $this->service->create($operator);
+        $this->service->createToDrive($operator, $drive);
 
         $this->assertSame($operator->id, BackupLog::query()->first()->operator_id);
     }

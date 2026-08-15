@@ -20,7 +20,7 @@ class SettingFactory extends Factory
             'kabupaten_name' => 'Kabupaten Barru',
             'province_name' => 'Sulawesi Selatan',
             'logo_path' => null,
-            'backup_path' => storage_path('app/backups'),
+
         ];
     }
 
