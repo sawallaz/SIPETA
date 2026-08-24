@@ -36,7 +36,7 @@ class SipetaStatsOverview extends StatsOverviewWidget
 
     protected function getStats(): array
     {
-        $totalKk = KartuKeluarga::query()->count();
+        $totalKk = KartuKeluarga::query()->active()->count();
 
         $pendudukAktif = Penduduk::query()
             ->where('resident_status', ResidentStatus::ACTIVE->value)

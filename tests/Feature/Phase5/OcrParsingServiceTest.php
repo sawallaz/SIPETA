@@ -54,8 +54,9 @@ TXT;
         // KK-level fields (FR-OCR-02).
         $this->assertSame('3207122801160001', $result->kkNumber);
         $this->assertSame('JL. MELATI NO. 5', $result->address);
-        $this->assertSame('01', $result->rt);
-        $this->assertSame('04', $result->rw);
+        $this->assertSame('001', $result->rt);
+        $this->assertSame('004', $result->rw);
+        $this->assertSame('16340', $result->postalCode);
         $this->assertNull($result->lingkungan);
 
         $this->assertCount(3, $result->members);
@@ -70,7 +71,7 @@ TXT;
         $this->assertSame('2016-01-28', $head->birthDate);
         $this->assertSame('ISLAM', $head->religion);
         $this->assertSame('SLTA/SEDERAJAT', $head->education);
-        $this->assertSame('BURUH HARIAN LEPAS', $head->occupation);
+        $this->assertSame('BURUH', $head->occupation);
         $this->assertSame('KAWIN', $head->maritalStatus);
         $this->assertSame('KEPALA_KELUARGA', $head->familyRelation);
         $this->assertSame(92.5, $head->confidence);
@@ -89,7 +90,7 @@ TXT;
         // Raw OCR casing is preserved for display fields.
         $this->assertSame('Andi Prasetyo', $child->nama);
         $this->assertSame('2005-03-15', $child->birthDate);
-        $this->assertSame('SMP', $child->education);
+        $this->assertSame('SLTP/SEDERAJAT', $child->education);
         $this->assertSame('PELAJAR/MAHASISWA', $child->occupation);
         $this->assertSame('BELUM_KAWIN', $child->maritalStatus);
         $this->assertSame('ANAK', $child->familyRelation);
@@ -179,7 +180,7 @@ TXT;
         $child = $result->members[1];
         $this->assertNull($child->birthDate);
         $this->assertContains('Tanggal lahir tidak valid pada anggota ke-3: 32-13-2005', $result->validationErrors);
-        $this->assertSame('SMP', $child->education);
+        $this->assertSame('SLTP/SEDERAJAT', $child->education);
         $this->assertSame('ANAK', $child->familyRelation);
     }
 
@@ -203,8 +204,8 @@ TXT;
         // First occurrence wins everywhere.
         $this->assertSame('3207122801160001', $result->kkNumber);
         $this->assertSame('JL. MELATI NO. 5', $result->address);
-        $this->assertSame('01', $result->rt);
-        $this->assertSame('04', $result->rw);
+        $this->assertSame('001', $result->rt);
+        $this->assertSame('004', $result->rw);
 
         // Duplicate NIK row dropped: exactly one member.
         $this->assertCount(1, $result->members);
@@ -279,8 +280,8 @@ TXT;
         $result = $this->parse($text, 90.0);
 
         $this->assertSame('3207122801160001', $result->kkNumber);
-        $this->assertSame('03', $result->rt);
-        $this->assertSame('06', $result->rw);
+        $this->assertSame('003', $result->rt);
+        $this->assertSame('006', $result->rw);
         $this->assertSame('I', $result->lingkungan);
         $this->assertSame([], $result->validationErrors);
     }
@@ -385,6 +386,414 @@ TXT;
             );
             $this->assertSame([], $result->validationErrors);
         }
+    }
+
+    public function test_rt_rw_canonicalization_three_digits(): void
+    {
+        $cases = [
+            ['RT.001 RW.004', '001', '004'],
+            ['RT 01 / RW 04', '001', '004'],
+            ['1/4', '001', '004'],
+            ['RT/RW : 010/020', '010', '020'],
+        ];
+
+        foreach ($cases as [$rtRwLine, $expectedRt, $expectedRw]) {
+            $text = implode("\n", [
+                'NOMOR KK : 3207122801160001',
+                'ALAMAT : JL. MELATI NO. 5',
+                $rtRwLine,
+                '',
+                self::TABLE_HEADER,
+                '1 BUDI SANTOSO 3207122801160001 LAKI-LAKI TANETE 28-01-2016 ISLAM SLTA/SEDERAJAT BURUH HARIAN LEPAS KAWIN KEPALA KELUARGA',
+            ]);
+
+            $result = $this->parse($text, 90.0);
+
+            $this->assertSame($expectedRt, $result->rt, "Testing RT for {$rtRwLine}");
+            $this->assertSame($expectedRw, $result->rw, "Testing RW for {$rtRwLine}");
+        }
+    }
+
+    public function test_ktp_document_parsing_strategy(): void
+    {
+        $ktpText = implode("\n", [
+            'PROVINSI SULAWESI SELATAN',
+            'KABUPATEN BULUKUMBA',
+            'NIK : 7302010101900001',
+            'NAMA : AHMAD DAHLAN',
+            'TEMPAT/TGL LAHIR : BULUKUMBA, 01-01-1990',
+            'JENIS KELAMIN : LAKI-LAKI  GOL. DARAH : O',
+            'ALAMAT : DUSUN TANETE',
+            'RT/RW : 001/002',
+            'KEL/DESA : TANETE',
+            'KECAMATAN : BULUKUMPA',
+            'AGAMA : ISLAM',
+            'STATUS PERKAWINAN : KAWIN',
+            'PEKERJAAN : PETANI/PEKEBUN',
+            'KEWARGANEGARAAN : WNI',
+            'BERLAKU HINGGA : SEUMUR HIDUP',
+        ]);
+
+        $result = $this->parse($ktpText, 88.0);
+
+        $this->assertInstanceOf(ParsedOcrResult::class, $result);
+        $this->assertFalse($result->isEmpty());
+        $this->assertSame('001', $result->rt);
+        $this->assertSame('002', $result->rw);
+        $this->assertSame('DUSUN TANETE', $result->address);
+        $this->assertSame('TANETE', $result->lingkungan);
+        $this->assertCount(1, $result->members);
+
+        $resident = $result->members[0];
+        $this->assertSame('7302010101900001', $resident->nik);
+        $this->assertSame('AHMAD DAHLAN', $resident->nama);
+        $this->assertSame('BULUKUMBA', $resident->birthPlace);
+        $this->assertSame('1990-01-01', $resident->birthDate);
+        $this->assertSame('LAKI_LAKI', $resident->gender);
+        $this->assertSame('ISLAM', $resident->religion);
+        $this->assertSame('KAWIN', $resident->maritalStatus);
+        $this->assertSame('PETANI', $resident->occupation);
+        $this->assertSame('KEPALA_KELUARGA', $resident->familyRelation);
+    }
+
+    public function test_two_table_kk_row_stitching(): void
+    {
+        $twoTableKk = implode("\n", [
+            'NOMOR KARTU KELUARGA : 7302010101900001',
+            'ALAMAT : TANETE',
+            'RT/RW : 001/004',
+            'NO NAMA NIK JENIS KELAMIN TEMPAT LAHIR TANGGAL LAHIR AGAMA PENDIDIKAN PEKERJAAN',
+            '1 BUDI SANTOSO 7302010101900001 LAKI-LAKI TANETE 28-01-1980 ISLAM SLTA/SEDERAJAT PETANI/PEKEBUN',
+            '2 SITI AMINAH 7302014501850002 PEREMPUAN TANETE 05-04-1985 ISLAM SLTA/SEDERAJAT IBU RUMAH TANGGA',
+            '3 ANDI PRATAMA 7302011010100003 LAKI-LAKI TANETE 10-10-2010 ISLAM BELUM/TIDAK BEKERJA',
+            'NO STATUS PERKAWINAN STATUS HUBUNGAN DALAM KELUARGA KEWARGANEGARAAN NAMA AYAH NAMA IBU',
+            '1 KAWIN KEPALA KELUARGA WNI HASAN FATIMAH',
+            '2 KAWIN ISTRI WNI AHMAD AISYAH',
+            '3 BELUM KAWIN ANAK WNI BUDI SANTOSO SITI AMINAH',
+        ]);
+
+        $result = $this->parse($twoTableKk, 92.0);
+
+        $this->assertCount(3, $result->members);
+
+        $this->assertSame('BUDI SANTOSO', $result->members[0]->nama);
+        $this->assertSame('KAWIN', $result->members[0]->maritalStatus);
+        $this->assertSame('KEPALA_KELUARGA', $result->members[0]->familyRelation);
+
+        $this->assertSame('SITI AMINAH', $result->members[1]->nama);
+        $this->assertSame('KAWIN', $result->members[1]->maritalStatus);
+        $this->assertSame('ISTRI', $result->members[1]->familyRelation);
+
+        $this->assertSame('ANDI PRATAMA', $result->members[2]->nama);
+        $this->assertSame('BELUM_KAWIN', $result->members[2]->maritalStatus);
+        $this->assertSame('ANAK', $result->members[2]->familyRelation);
+    }
+
+    public function test_education_canonical_mapping_and_aliases(): void
+    {
+        $cases = [
+            'SMA/SEDERAJAT' => 'SLTA/SEDERAJAT',
+            'SLTA/SEDERAJAT' => 'SLTA/SEDERAJAT',
+            'SMA' => 'SLTA/SEDERAJAT',
+            'SMK' => 'SLTA/SEDERAJAT',
+            'SMP' => 'SLTP/SEDERAJAT',
+            'SMP/SEDERAJAT' => 'SLTP/SEDERAJAT',
+            'SD' => 'TAMAT SD/SEDERAJAT',
+            'SD/SEDERAJAT' => 'TAMAT SD/SEDERAJAT',
+            'TAMAT SD' => 'TAMAT SD/SEDERAJAT',
+            'BELUM TAMAT SD' => 'BELUM TAMAT SD/SEDERAJAT',
+            'TIDAK/BELUM SEKOLAH' => 'TIDAK/BELUM SEKOLAH',
+            'D1' => 'DIPLOMA I/II',
+            'D2' => 'DIPLOMA I/II',
+            'D3' => 'AKADEMI/DIPLOMA III/SARJANA MUDA',
+            'S1' => 'DIPLOMA IV/STRATA I',
+            'S2' => 'STRATA II',
+            'S3' => 'STRATA III',
+        ];
+
+        foreach ($cases as $ocrInput => $expectedCanonical) {
+            $text = implode("\n", [
+                'NOMOR KARTU KELUARGA : 3207120101234567',
+                'ALAMAT : JL. MERDEKA NO. 10',
+                'RT/RW : 001/004',
+                '',
+                self::TABLE_HEADER,
+                "1 BUDI SANTOSO 3207122801160001 LAKI-LAKI TANETE 28-01-1980 ISLAM {$ocrInput} BURUH HARIAN LEPAS KAWIN KEPALA KELUARGA",
+            ]);
+
+            $result = $this->parse($text, 90.0);
+            $this->assertCount(1, $result->members, "Failed to parse member for input '{$ocrInput}'");
+            $this->assertSame($expectedCanonical, $result->members[0]->education, "Failed canonical mapping for input '{$ocrInput}'");
+        }
+
+        // Ambiguous / Garbage education input degrades gracefully to null
+        $garbageText = implode("\n", [
+            'NOMOR KARTU KELUARGA : 3207120101234567',
+            'ALAMAT : JL. MERDEKA NO. 10',
+            'RT/RW : 001/004',
+            '',
+            self::TABLE_HEADER,
+            '1 BUDI SANTOSO 3207122801160001 LAKI-LAKI TANETE 28-01-1980 ISLAM XYZ999GARBAGE BURUH HARIAN LEPAS KAWIN KEPALA KELUARGA',
+        ]);
+        $garbageResult = $this->parse($garbageText, 90.0);
+        $this->assertCount(1, $garbageResult->members);
+        $this->assertNull($garbageResult->members[0]->education);
+    }
+
+    public function test_marital_status_canonical_mapping_and_aliases(): void
+    {
+        $cases = [
+            'BELUM KAWIN' => 'BELUM_KAWIN',
+            'BELUMKAWIN' => 'BELUM_KAWIN',
+            'BELUM KAWN' => 'BELUM_KAWIN',
+            'BELUMKAWN' => 'BELUM_KAWIN',
+            'KAWIN' => 'KAWIN',
+            'KAW1N' => 'KAWIN',
+            'KAWIN TERCATAT' => 'KAWIN',
+            'CERAI HIDUP' => 'CERAI_HIDUP',
+            'CERAIHIDUP' => 'CERAI_HIDUP',
+            'CERAI MATI' => 'CERAI_MATI',
+            'CERAIMATI' => 'CERAI_MATI',
+        ];
+
+        foreach ($cases as $ocrInput => $expectedCanonical) {
+            $twoTable = implode("\n", [
+                'NOMOR KARTU KELUARGA : 3207120101234567',
+                'ALAMAT : JL. MERDEKA NO. 10',
+                'RT/RW : 001/004',
+                'NO NAMA NIK JENIS KELAMIN TEMPAT LAHIR TANGGAL LAHIR AGAMA PENDIDIKAN PEKERJAAN',
+                '1 BUDI SANTOSO 3207122801160001 LAKI-LAKI TANETE 28-01-1980 ISLAM SLTA/SEDERAJAT PETANI',
+                'NO STATUS PERKAWINAN STATUS HUBUNGAN DALAM KELUARGA KEWARGANEGARAAN NAMA AYAH NAMA IBU',
+                "1 {$ocrInput} KEPALA KELUARGA WNI HASAN FATIMAH",
+            ]);
+
+            $result = $this->parse($twoTable, 90.0);
+            $this->assertCount(1, $result->members, "Failed to parse member for marital status input '{$ocrInput}'");
+            $this->assertSame($expectedCanonical, $result->members[0]->maritalStatus, "Failed canonical marital status for input '{$ocrInput}'");
+        }
+    }
+
+    public function test_family_relation_canonical_mapping_and_aliases(): void
+    {
+        $cases = [
+            'KEPALA KELUARGA' => 'KEPALA_KELUARGA',
+            'KEPALA KEL.' => 'KEPALA_KELUARGA',
+            'ISTRI' => 'ISTRI',
+            'ISTERI' => 'ISTRI',
+            'ANAK' => 'ANAK',
+            'ANAK KANDUNG' => 'ANAK',
+            'MENANTU' => 'MENANTU',
+            'CUCU' => 'CUCU',
+            'ORANG TUA' => 'ORANG_TUA',
+            'ORANGTUA' => 'ORANG_TUA',
+            'MERTUA' => 'MERTUA',
+            'FAMILI LAIN' => 'FAMILI_LAIN',
+        ];
+
+        foreach ($cases as $ocrInput => $expectedCanonical) {
+            $twoTable = implode("\n", [
+                'NOMOR KARTU KELUARGA : 3207120101234567',
+                'ALAMAT : JL. MERDEKA NO. 10',
+                'RT/RW : 001/004',
+                'NO NAMA NIK JENIS KELAMIN TEMPAT LAHIR TANGGAL LAHIR AGAMA PENDIDIKAN PEKERJAAN',
+                '1 BUDI SANTOSO 3207122801160001 LAKI-LAKI TANETE 28-01-1980 ISLAM SLTA/SEDERAJAT PETANI',
+                'NO STATUS PERKAWINAN STATUS HUBUNGAN DALAM KELUARGA KEWARGANEGARAAN NAMA AYAH NAMA IBU',
+                "1 KAWIN {$ocrInput} WNI HASAN FATIMAH",
+            ]);
+
+            $result = $this->parse($twoTable, 90.0);
+            $this->assertCount(1, $result->members, "Failed to parse member for relation input '{$ocrInput}'");
+            $this->assertSame($expectedCanonical, $result->members[0]->familyRelation, "Failed canonical family relation for input '{$ocrInput}'");
+        }
+    }
+
+    public function test_occupation_canonical_mapping_and_aliases(): void
+    {
+        $cases = [
+            'WIRASWASTA' => 'WIRASWASTA',
+            'MENGURUS RUMAH TANGGA' => 'IBU RUMAH TANGGA',
+            'IBU RUMAH TANGGA' => 'IBU RUMAH TANGGA',
+            'PELAJAR/MAHASISWA' => 'PELAJAR/MAHASISWA',
+            'PELAJARIMAHASISWA' => 'PELAJAR/MAHASISWA',
+            'PELAJAR' => 'PELAJAR/MAHASISWA',
+            'MAHASISWA' => 'PELAJAR/MAHASISWA',
+            'PETANI/PEKEBUN' => 'PETANI',
+            'PETANI' => 'PETANI',
+            'BURUH HARIAN LEPAS' => 'BURUH',
+            'BURUH' => 'BURUH',
+            'KARYAWAN SWASTA' => 'KARYAWAN SWASTA',
+            'PEGAWAI NEGERI SIPIL' => 'PEGAWAI NEGERI SIPIL',
+            'PNS' => 'PEGAWAI NEGERI SIPIL',
+            'PEDAGANG' => 'PEDAGANG',
+            'NELAYAN' => 'NELAYAN',
+            'PENSIUNAN' => 'PENSIUNAN',
+            'TUKANG' => 'TUKANG',
+            'BELUM/TIDAK BEKERJA' => 'LAINNYA',
+        ];
+
+        foreach ($cases as $ocrInput => $expectedCanonical) {
+            $text = implode("\n", [
+                'NOMOR KARTU KELUARGA : 3207120101234567',
+                'ALAMAT : JL. MERDEKA NO. 10',
+                'RT/RW : 001/004',
+                '',
+                self::TABLE_HEADER,
+                "1 BUDI SANTOSO 3207122801160001 LAKI-LAKI TANETE 28-01-1980 ISLAM SLTA/SEDERAJAT {$ocrInput} KAWIN KEPALA KELUARGA",
+            ]);
+
+            $result = $this->parse($text, 90.0);
+            $this->assertCount(1, $result->members, "Failed to parse member for occupation input '{$ocrInput}'");
+            $this->assertSame($expectedCanonical, $result->members[0]->occupation, "Failed canonical occupation for input '{$ocrInput}'");
+        }
+    }
+
+    public function test_family_relation_header_independence_and_variations(): void
+    {
+        $cases = [
+            'KEPALAKELUARGA' => 'KEPALA_KELUARGA',
+            'KEPALAKEUARGA' => 'KEPALA_KELUARGA',
+            'KEPALA KEL.' => 'KEPALA_KELUARGA',
+            'KEPALA KEL' => 'KEPALA_KELUARGA',
+            'KEPALA' => 'KEPALA_KELUARGA',
+            '1STRI' => 'ISTRI',
+            'ISTERI' => 'ISTRI',
+            'ISTRI' => 'ISTRI',
+            'ANAK2' => 'ANAK',
+            'ANAK-' => 'ANAK',
+            'AN4K' => 'ANAK',
+            'ANAK KANDUNG' => 'ANAK',
+            'ORANG TUA' => 'ORANG_TUA',
+            'ORANGTUA' => 'ORANG_TUA',
+            'FAMILI LAIN' => 'FAMILI_LAIN',
+            'FAMILI LAINNYA' => 'FAMILI_LAIN',
+            'FAMILI' => 'FAMILI_LAIN',
+            'PEMBANTU' => 'LAINNYA',
+            'LAINNYA' => 'LAINNYA',
+        ];
+
+        foreach ($cases as $ocrInput => $expectedCanonical) {
+            $twoTable = implode("\n", [
+                'NOMOR KARTU KELUARGA : 3207120101234567',
+                'ALAMAT : JL. MERDEKA NO. 10',
+                'RT/RW : 001/004',
+                'NO NAMA NIK JENIS KELAMIN TEMPAT LAHIR TANGGAL LAHIR AGAMA PENDIDIKAN PEKERJAAN',
+                '1 BUDI SANTOSO 3207122801160001 LAKI-LAKI TANETE 28-01-1980 ISLAM SLTA/SEDERAJAT PETANI',
+                'STATUS PERKAWINAN STATUS HUBUNGAN DALAM KELUARGA',
+                "1 KAWIN {$ocrInput} WNI HASAN FATIMAH",
+            ]);
+
+            $result = $this->parse($twoTable, 90.0);
+            $this->assertCount(1, $result->members, "Failed for relation variation: {$ocrInput}");
+            $this->assertSame($expectedCanonical, $result->members[0]->familyRelation, "Canonical relation mismatch for: {$ocrInput}");
+        }
+    }
+
+    public function test_two_table_kk_four_members_stitching(): void
+    {
+        $text = implode("\n", [
+            'NOMOR KARTU KELUARGA : 7372010101230001',
+            'ALAMAT : JL. POROS TANETE NO. 12',
+            'RT/RW : 001/004',
+            'KODE POS : 91111',
+            'NO NAMA NIK JENIS KELAMIN TEMPAT LAHIR TANGGAL LAHIR AGAMA PENDIDIKAN PEKERJAAN',
+            '1 ANDI SURYAMAN 7372010101800001 LAKI-LAKI PAREPARE 10-01-1980 ISLAM SLTA/SEDERAJAT WIRASWASTA',
+            '2 SITI NURHALIZA 7372014502850002 PEREMPUAN PAREPARE 15-02-1985 ISLAM SLTA/SEDERAJAT IBU RUMAH TANGGA',
+            '3 MUHAMMAD FIKRI 7372011003100003 LAKI-LAKI PAREPARE 20-03-2010 ISLAM SLTP/SEDERAJAT PELAJAR/MAHASISWA',
+            '4 NUR AULIA 7372015004150004 PEREMPUAN PAREPARE 25-04-2015 ISLAM TAMAT SD/SEDERAJAT PELAJAR/MAHASISWA',
+            'NO STATUS PERKAWINAN STATUS HUBUNGAN DALAM KELUARGA KEWARGANEGARAAN NAMA AYAH NAMA IBU',
+            '1 KAWIN KEPALA KELUARGA WNI HASAN SITI',
+            '2 KAWIN ISTERI WNI AHMAD FATIMAH',
+            '3 BELUM KAWIN ANAK WNI ANDI SURYAMAN SITI NURHALIZA',
+            '4 BELUM KAWIN ANAK2 WNI ANDI SURYAMAN SITI NURHALIZA',
+        ]);
+
+        $result = $this->parse($text, 95.0);
+
+        $this->assertCount(4, $result->members);
+        $this->assertSame('91111', $result->postalCode);
+
+        // Row 1
+        $this->assertSame('ANDI SURYAMAN', $result->members[0]->nama);
+        $this->assertSame('KEPALA_KELUARGA', $result->members[0]->familyRelation);
+        $this->assertSame('KAWIN', $result->members[0]->maritalStatus);
+
+        // Row 2
+        $this->assertSame('SITI NURHALIZA', $result->members[1]->nama);
+        $this->assertSame('ISTRI', $result->members[1]->familyRelation);
+        $this->assertSame('KAWIN', $result->members[1]->maritalStatus);
+
+        // Row 3
+        $this->assertSame('MUHAMMAD FIKRI', $result->members[2]->nama);
+        $this->assertSame('ANAK', $result->members[2]->familyRelation);
+        $this->assertSame('BELUM_KAWIN', $result->members[2]->maritalStatus);
+
+        // Row 4
+        $this->assertSame('NUR AULIA', $result->members[3]->nama);
+        $this->assertSame('ANAK', $result->members[3]->familyRelation);
+        $this->assertSame('BELUM_KAWIN', $result->members[3]->maritalStatus);
+    }
+
+    public function test_family_relation_broken_or_split_header(): void
+    {
+        // Split header across two lines
+        $text = implode("\n", [
+            'NOMOR KARTU KELUARGA : 7372010101230001',
+            'ALAMAT : JL. POROS TANETE NO. 12',
+            'RT/RW : 001/004',
+            'NO NAMA NIK JENIS KELAMIN TEMPAT LAHIR TANGGAL LAHIR AGAMA PENDIDIKAN PEKERJAAN',
+            '1 ANDI SURYAMAN 7372010101800001 LAKI-LAKI PAREPARE 10-01-1980 ISLAM SLTA/SEDERAJAT WIRASWASTA',
+            '2 SITI NURHALIZA 7372014502850002 PEREMPUAN PAREPARE 15-02-1985 ISLAM SLTA/SEDERAJAT IBU RUMAH TANGGA',
+            'STATUS PERKAWINAN STATUS HUBUNGAN DALAM',
+            'KELUARGA',
+            '(1) (2) (3)',
+            '1 KAWIN KEPALA KEL. WNI HASAN SITI',
+            '2 KAWIN ISTRI WNI AHMAD FATIMAH',
+        ]);
+
+        $result = $this->parse($text, 92.0);
+
+        $this->assertCount(2, $result->members);
+        $this->assertSame('KEPALA_KELUARGA', $result->members[0]->familyRelation);
+        $this->assertSame('ISTRI', $result->members[1]->familyRelation);
+    }
+
+    public function test_family_relation_missing_header_fallback(): void
+    {
+        // Table 2 without header at all
+        $text = implode("\n", [
+            'NOMOR KARTU KELUARGA : 7372010101230001',
+            'ALAMAT : JL. POROS TANETE NO. 12',
+            'RT/RW : 001/004',
+            'NO NAMA NIK JENIS KELAMIN TEMPAT LAHIR TANGGAL LAHIR AGAMA PENDIDIKAN PEKERJAAN',
+            '1 ANDI SURYAMAN 7372010101800001 LAKI-LAKI PAREPARE 10-01-1980 ISLAM SLTA/SEDERAJAT WIRASWASTA',
+            '2 SITI NURHALIZA 7372014502850002 PEREMPUAN PAREPARE 15-02-1985 ISLAM SLTA/SEDERAJAT IBU RUMAH TANGGA',
+            '1 KAWIN KEPALAKELUARGA WNI HASAN SITI',
+            '2 KAWIN ISTERI WNI AHMAD FATIMAH',
+        ]);
+
+        $result = $this->parse($text, 92.0);
+
+        $this->assertCount(2, $result->members);
+        $this->assertSame('KEPALA_KELUARGA', $result->members[0]->familyRelation);
+        $this->assertSame('ISTRI', $result->members[1]->familyRelation);
+    }
+
+    public function test_family_relation_garbage_degradation(): void
+    {
+        $text = implode("\n", [
+            'NOMOR KARTU KELUARGA : 7372010101230001',
+            'ALAMAT : JL. POROS TANETE NO. 12',
+            'RT/RW : 001/004',
+            'NO NAMA NIK JENIS KELAMIN TEMPAT LAHIR TANGGAL LAHIR AGAMA PENDIDIKAN PEKERJAAN',
+            '1 ANDI SURYAMAN 7372010101800001 LAKI-LAKI PAREPARE 10-01-1980 ISLAM SLTA/SEDERAJAT WIRASWASTA',
+            'STATUS PERKAWINAN STATUS HUBUNGAN DALAM KELUARGA',
+            '1 KAWIN XYZGARBAGE999 WNI HASAN SITI',
+        ]);
+
+        $result = $this->parse($text, 92.0);
+
+        $this->assertCount(1, $result->members);
+        $this->assertNull($result->members[0]->familyRelation);
     }
 
     private function parse(string $rawText, float $confidence): ParsedOcrResult

@@ -33,7 +33,7 @@ class QuickActionsWidgetTest extends TestCase
     {
         $this->get('/admin')
             ->assertOk()
-            ->assertSee('Aksi Cepat');
+            ->assertSee('Akses Cepat');
     }
 
     public function test_widget_exposes_four_actions(): void
@@ -43,10 +43,10 @@ class QuickActionsWidgetTest extends TestCase
         $this->assertCount(4, $actions);
         $this->assertSame(
             [
-                'Tambah Kartu Keluarga',
+                'Data Penduduk',
                 'Tambah Penduduk',
                 'Data Kartu Keluarga',
-                'Data Penduduk',
+                'Tambah Kartu Keluarga',
             ],
             collect($actions)->pluck('label')->all(),
         );
@@ -56,11 +56,11 @@ class QuickActionsWidgetTest extends TestCase
     {
         $this->get('/admin')
             ->assertOk()
-            ->assertSee('Aksi Cepat')
-            ->assertSee('Tambah Kartu Keluarga')
+            ->assertSee('Akses Cepat')
+            ->assertSee('Data Penduduk')
             ->assertSee('Tambah Penduduk')
             ->assertSee('Data Kartu Keluarga')
-            ->assertSee('Data Penduduk');
+            ->assertSee('Tambah Kartu Keluarga');
     }
 
     public function test_every_action_points_to_an_existing_filament_route(): void
@@ -68,9 +68,9 @@ class QuickActionsWidgetTest extends TestCase
         $actions = invade(new QuickActionsWidget)->getViewData()['actions'];
 
         $expected = [
-            'Tambah Kartu Keluarga' => [
-                'route' => 'filament.admin.resources.kartu-keluargas.create',
-                'path' => '/admin/kartu-keluargas/create',
+            'Data Penduduk' => [
+                'route' => 'filament.admin.resources.penduduks.index',
+                'path' => '/admin/penduduks',
             ],
             'Tambah Penduduk' => [
                 'route' => 'filament.admin.resources.penduduks.create',
@@ -80,9 +80,9 @@ class QuickActionsWidgetTest extends TestCase
                 'route' => 'filament.admin.resources.kartu-keluargas.index',
                 'path' => '/admin/kartu-keluargas',
             ],
-            'Data Penduduk' => [
-                'route' => 'filament.admin.resources.penduduks.index',
-                'path' => '/admin/penduduks',
+            'Tambah Kartu Keluarga' => [
+                'route' => 'filament.admin.resources.kartu-keluargas.create',
+                'path' => '/admin/kartu-keluargas/create',
             ],
         ];
 

@@ -1,0 +1,112 @@
+- generic [active] [ref=f2e1]:
+  - link "Lewati ke konten" [ref=f2e2] [cursor=pointer]:
+    - /url: "#fi-main-content"
+  - navigation "filament-panels::layout.topbar.label" [ref=f2e4]:
+    - generic [ref=f2e5]:
+      - button "Perluas menu" [ref=f2e7] [cursor=pointer]
+      - link "Logo SIPETA SIPETA KELURAHAN Sistem Informasi Pendataan Penduduk Tanete" [ref=f2e10] [cursor=pointer]:
+        - /url: http://127.0.0.1:8100/admin
+        - generic [ref=f2e12]:
+          - img "Logo SIPETA" [ref=f2e13]
+          - generic [ref=f2e14]:
+            - generic [ref=f2e15]:
+              - generic [ref=f2e16]: SIPETA
+              - generic [ref=f2e17]: KELURAHAN
+            - generic [ref=f2e18]: Sistem Informasi Pendataan Penduduk Tanete
+    - generic [ref=f2e19]:
+      - generic [ref=f2e22]:
+        - generic [ref=f2e23]: Pencarian global
+        - searchbox "Pencarian global" [ref=f2e29]
+      - button "Menu pengguna" [ref=f2e32] [cursor=pointer]:
+        - img "Avatar Administrator" [ref=f2e33]
+  - generic [ref=f2e34]:
+    - navigation "filament-panels::layout.navigation.label" [ref=f2e37]:
+      - list [ref=f2e38]:
+        - listitem [ref=f2e39]:
+          - list [ref=f2e40]:
+            - listitem [ref=f2e41]:
+              - link "Dasbor" [ref=f2e42] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin
+            - listitem [ref=f2e45]:
+              - link "Manajemen Pengguna" [ref=f2e46] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/users
+            - listitem [ref=f2e49]:
+              - link "Backup" [ref=f2e50] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/backup
+            - listitem [ref=f2e53]:
+              - link "Pengaturan" [ref=f2e54] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/settings
+        - listitem [ref=f2e58]:
+          - list [ref=f2e59]:
+            - listitem [ref=f2e60]:
+              - link "Kartu Keluarga" [ref=f2e61] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/kartu-keluargas
+            - listitem [ref=f2e64]:
+              - link "Penduduk" [ref=f2e65] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks
+    - main [ref=f2e69]:
+      - generic [ref=f2e71]:
+        - generic [ref=f2e72]:
+          - generic [ref=f2e73]:
+            - navigation "filament::components/breadcrumbs.label" [ref=f2e74]:
+              - list [ref=f2e75]:
+                - listitem [ref=f2e76]:
+                  - link "Kartu Keluarga" [ref=f2e77] [cursor=pointer]:
+                    - /url: http://127.0.0.1:8100/admin/kartu-keluargas
+                - listitem [ref=f2e78]:
+                  - generic [ref=f2e81]: Daftar
+            - heading "Kartu Keluarga" [level=1] [ref=f2e82]
+          - generic [ref=f2e84]:
+            - link "Riwayat KK" [ref=f2e85] [cursor=pointer]:
+              - /url: http://127.0.0.1:8100/admin/kartu-keluarga-history
+            - link "Tambah Kartu Keluarga" [ref=f2e88] [cursor=pointer]:
+              - /url: http://127.0.0.1:8100/admin/kartu-keluargas/create
+        - generic [ref=f2e96]:
+          - generic [ref=f2e99]:
+            - generic [ref=f2e100]:
+              - generic [ref=f2e101]: Cari
+              - searchbox "Cari" [ref=f2e107]
+            - button "Filter" [ref=f2e110] [cursor=pointer]:
+              - generic [ref=f2e113]: "0"
+            - button "Pilih kolom" [ref=f2e117] [cursor=pointer]
+          - generic [ref=f2e120]:
+            - status [ref=f2e121]: filament-tables::table.result_count
+            - table "Kartu Keluarga" [ref=f2e122]:
+              - rowgroup [ref=f2e123]:
+                - row [ref=f2e124]:
+                  - columnheader [ref=f2e125]:
+                    - checkbox "Buat/batalkan pilihan semua item untuk tindakan massal." [ref=f2e126]
+                  - columnheader "Foto" [ref=f2e127]
+                  - columnheader [ref=f2e128]:
+                    - button "Nomor KK" [ref=f2e129] [cursor=pointer]
+                  - columnheader "Kepala Keluarga" [ref=f2e132]
+                  - columnheader "RW / RT" [ref=f2e133]
+                  - columnheader [ref=f2e134]:
+                    - button "Anggota" [ref=f2e135] [cursor=pointer]
+                  - columnheader "Aksi" [ref=f2e138]
+              - rowgroup [ref=f2e139]:
+                - row "Buat/batalkan pilihan item 1 untuk tindakan massal. 7372010101230001 ANDI SURYAMAN Lingkungan I / RT 01 6 jiwa Lihat Ubah Hapus" [ref=f2e140]:
+                  - cell [ref=f2e141]:
+                    - checkbox "Buat/batalkan pilihan item 1 untuk tindakan massal." [ref=f2e142]
+                  - cell [ref=f2e143]
+                  - cell "7372010101230001" [ref=f2e146]
+                  - cell "ANDI SURYAMAN" [ref=f2e149]
+                  - cell "Lingkungan I / RT 01" [ref=f2e152]
+                  - cell "6 jiwa" [ref=f2e155]
+                  - cell [ref=f2e159]:
+                    - generic [ref=f2e160]:
+                      - button "Lihat" [ref=f2e161] [cursor=pointer]
+                      - link "Ubah" [ref=f2e166] [cursor=pointer]:
+                        - /url: http://127.0.0.1:8100/admin/kartu-keluargas/1/edit
+                      - button "Hapus" [ref=f2e170] [cursor=pointer]
+          - navigation "Navigasi halaman" [ref=f2e174]:
+            - generic [ref=f2e175]: Menampilkan 1 hasil
+            - generic [ref=f2e178]:
+              - generic [ref=f2e179]: per halaman
+              - combobox "per halaman" [ref=f2e182]:
+                - option "10"
+                - option "25" [selected]
+                - option "50"
+                - option "100"
+  - generic:
+    - status

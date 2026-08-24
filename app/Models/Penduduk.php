@@ -45,6 +45,7 @@ class Penduduk extends Model
         'family_relation',
         'blood_type',
         'resident_status',
+        'active_at',
         'rt_id',
         'moved_at',
         'moved_destination',
@@ -62,6 +63,7 @@ class Penduduk extends Model
         'blood_type' => BloodType::class,
         'resident_status' => ResidentStatus::class,
         'birth_date' => 'date',
+        'active_at' => 'date',
         'moved_at' => 'date',
         'deceased_at' => 'date',
     ];
@@ -244,7 +246,89 @@ class Penduduk extends Model
     }
 
     /**
-     * Sinkronisasi RT penduduk dengan KK.
+     * Riwayat status kependudukan (Aktif / Pindah / Meninggal).
+     */
+    public function statusHistories(): HasMany
+    {
+        return $this->hasMany(
+            PendudukStatusHistory::class,
+            'penduduk_id'
+        );
+    }
+
+    /**
+     * Label tanggal status berdasarkan status kependudukan saat ini.
+     *
+     * Aktif     → Tanggal Aktif
+     * Pindah    → Tanggal Pindah
+     * Meninggal → Tanggal Meninggal
+     */
+    public function getStatusDateLabelAttribute(): string
+    {
+        $status = $this->resident_status instanceof ResidentStatus
+            ? $this->resident_status
+            : ResidentStatus::tryFrom((string) $this->resident_status);
+
+        return match ($status) {
+            ResidentStatus::ACTIVE => 'Tanggal Aktif',
+            ResidentStatus::PINDAH => 'Tanggal Pindah',
+            ResidentStatus::MENINGGAL => 'Tanggal Meninggal',
+            default => 'Tanggal Status',
+        };
+    }
+
+    /**
+     * Tanggal status yang berlaku saat ini.
+     */
+    public function getStatusDateAttribute(): ?Carbon
+    {
+        $status = $this->resident_status instanceof ResidentStatus
+            ? $this->resident_status
+            : ResidentStatus::tryFrom((string) $this->resident_status);
+
+        if ($status === null) {
+            return null;
+        }
+
+        if ($status === ResidentStatus::ACTIVE && $this->active_at) {
+            return Carbon::parse($this->active_at);
+        }
+
+        if ($status === ResidentStatus::PINDAH && $this->moved_at) {
+            return Carbon::parse($this->moved_at);
+        }
+
+        if ($status === ResidentStatus::MENINGGAL && $this->deceased_at) {
+            return Carbon::parse($this->deceased_at);
+        }
+
+        $latestHistory = $this->relationLoaded('statusHistories')
+            ? $this->statusHistories->where('status', $status)->sortByDesc('id')->first()
+            : $this->statusHistories()->where('status', $status->value)->latest('recorded_at')->latest('id')->first();
+
+        if ($latestHistory?->recorded_at) {
+            return Carbon::parse($latestHistory->recorded_at);
+        }
+
+        return $this->created_at ? Carbon::parse($this->created_at) : now();
+    }
+
+    /**
+     * Format tanggal status dalam bahasa Indonesia (e.g. 21 Agustus 2026).
+     */
+    public function getFormattedStatusDateAttribute(): ?string
+    {
+        $date = $this->status_date;
+
+        if ($date === null) {
+            return null;
+        }
+
+        return Carbon::parse($date)->locale('id')->translatedFormat('d F Y');
+    }
+
+    /**
+     * Sinkronisasi RT penduduk dengan KK dan riwayat status kependudukan.
      *
      * Aturan:
      *
@@ -255,53 +339,112 @@ class Penduduk extends Model
      *    rt_id otomatis ikut KK baru.
      * 4. Operator tidak perlu menentukan RT
      *    secara manual pada form Penduduk.
+     * 5. Tanggal status disimpan berdasarkan input manual operator (event date),
+     *    bukan otomatis now(), dan riwayat tersimpan lengkap.
      */
     protected static function booted(): void
     {
         static::saving(function (Penduduk $penduduk): void {
-            if ($penduduk->kk_id === null) {
-                return;
+            if ($penduduk->kk_id !== null) {
+                $kk = KartuKeluarga::query()
+                    ->with('rt')
+                    ->find($penduduk->kk_id);
+
+                if ($kk !== null) {
+                    if ($kk->rt_id !== null) {
+                        $penduduk->rt_id = $kk->rt_id;
+                    } else {
+                        $penduduk->rt_id = null;
+                    }
+                }
             }
 
-            $kk = KartuKeluarga::query()
-                ->with('rt')
-                ->find($penduduk->kk_id);
+            $status = $penduduk->resident_status instanceof ResidentStatus
+                ? $penduduk->resident_status
+                : ResidentStatus::tryFrom((string) $penduduk->resident_status);
 
-            if ($kk === null) {
-                return;
+            if ($status === ResidentStatus::ACTIVE && blank($penduduk->active_at) && ! $penduduk->exists) {
+                $penduduk->active_at = now()->toDateString();
             }
+        });
 
-            /**
-             * KK adalah sumber wilayah.
-             *
-             * Jangan gunakan rt_id yang dikirim dari
-             * form sebagai sumber kebenaran.
-             */
-            if ($kk->rt_id !== null) {
-                $penduduk->rt_id = $kk->rt_id;
-            } else {
-                /**
-                 * Jika KK belum mempunyai RT,
-                 * jangan memaksakan RT lama penduduk.
-                 */
-                $penduduk->rt_id = null;
+        static::created(function (Penduduk $penduduk): void {
+            $status = $penduduk->resident_status instanceof ResidentStatus
+                ? $penduduk->resident_status
+                : ResidentStatus::tryFrom((string) $penduduk->resident_status);
+
+            $status = $status ?? ResidentStatus::ACTIVE;
+
+            $recordedAt = match ($status) {
+                ResidentStatus::PINDAH => $penduduk->moved_at ? Carbon::parse($penduduk->moved_at)->toDateString() : now()->toDateString(),
+                ResidentStatus::MENINGGAL => $penduduk->deceased_at ? Carbon::parse($penduduk->deceased_at)->toDateString() : now()->toDateString(),
+                default => $penduduk->active_at ? Carbon::parse($penduduk->active_at)->toDateString() : now()->toDateString(),
+            };
+
+            $penduduk->statusHistories()->create([
+                'status' => $status,
+                'recorded_at' => $recordedAt,
+                'user_id' => auth()->id(),
+                'notes' => $status === ResidentStatus::PINDAH
+                    ? $penduduk->moved_note
+                    : ($status === ResidentStatus::MENINGGAL ? $penduduk->deceased_note : null),
+            ]);
+        });
+
+        static::updated(function (Penduduk $penduduk): void {
+            if ($penduduk->wasChanged('resident_status')) {
+                $status = $penduduk->resident_status instanceof ResidentStatus
+                    ? $penduduk->resident_status
+                    : ResidentStatus::tryFrom((string) $penduduk->resident_status);
+
+                if ($status !== null) {
+                    $recordedAt = match ($status) {
+                        ResidentStatus::PINDAH => $penduduk->moved_at ? Carbon::parse($penduduk->moved_at)->toDateString() : now()->toDateString(),
+                        ResidentStatus::MENINGGAL => $penduduk->deceased_at ? Carbon::parse($penduduk->deceased_at)->toDateString() : now()->toDateString(),
+                        default => $penduduk->active_at ? Carbon::parse($penduduk->active_at)->toDateString() : now()->toDateString(),
+                    };
+
+                    $penduduk->statusHistories()->create([
+                        'status' => $status,
+                        'recorded_at' => $recordedAt,
+                        'user_id' => auth()->id(),
+                        'notes' => $status === ResidentStatus::PINDAH
+                            ? $penduduk->moved_note
+                            : ($status === ResidentStatus::MENINGGAL ? $penduduk->deceased_note : null),
+                    ]);
+                }
+            } elseif ($penduduk->wasChanged(['active_at', 'moved_at', 'deceased_at'])) {
+                $status = $penduduk->resident_status instanceof ResidentStatus
+                    ? $penduduk->resident_status
+                    : ResidentStatus::tryFrom((string) $penduduk->resident_status);
+
+                $latestHistory = $penduduk->statusHistories()->where('status', $status?->value)->latest('id')->first();
+                if ($latestHistory !== null) {
+                    $recordedAt = match ($status) {
+                        ResidentStatus::PINDAH => $penduduk->moved_at ? Carbon::parse($penduduk->moved_at)->toDateString() : null,
+                        ResidentStatus::MENINGGAL => $penduduk->deceased_at ? Carbon::parse($penduduk->deceased_at)->toDateString() : null,
+                        default => $penduduk->active_at ? Carbon::parse($penduduk->active_at)->toDateString() : null,
+                    };
+
+                    if ($recordedAt !== null) {
+                        $latestHistory->update(['recorded_at' => $recordedAt]);
+                    }
+                }
             }
         });
 
         /*
-         * Bersihkan dokumen pendukung (file + record)
-         * sebelum Penduduk dihapus.
-         *
-         * penduduk_documents.penduduk_id memakai
-         * onDelete('RESTRICT'), sehingga baris anak
-         * harus dihapus lebih dulu agar FK tidak melanggar.
-         *
-         * Catatan: kk_anggota.penduduk_id juga RESTRICT
-         * (di luar cakupan fitur ini).
+         * Bersihkan relasi anak sebelum Penduduk dihapus:
+         * 1. Dokumen pendukung (file + record)
+         * 2. Riwayat keanggotaan KK (kk_anggota)
+         * 3. Riwayat status kependudukan (penduduk_status_histories)
          */
         static::deleting(function (Penduduk $penduduk): void {
             app(PendudukDocumentService::class)
                 ->deleteForPenduduk($penduduk);
+
+            $penduduk->kkAnggotas()->delete();
+            $penduduk->statusHistories()->delete();
         });
     }
 

@@ -10,7 +10,7 @@ use App\Exceptions\DatabaseDumperException;
  * Implementations produce a SQL dump of the application database that the
  * backup service embeds in the archive as `database.sql`.
  *
- * @see MysqldumpDatabaseDumper the production implementation
+ * @see SqliteDatabaseDumper the production implementation
  */
 interface DatabaseDumper
 {

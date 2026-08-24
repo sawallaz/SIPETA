@@ -1,0 +1,159 @@
+- generic [active] [ref=f3e1]:
+  - link "Lewati ke konten" [ref=f3e2] [cursor=pointer]:
+    - /url: "#fi-main-content"
+  - navigation "filament-panels::layout.topbar.label" [ref=f3e4]:
+    - generic [ref=f3e5]:
+      - button "Perluas menu" [ref=f3e7] [cursor=pointer]
+      - link "Logo SIPETA SIPETA KELURAHAN Sistem Informasi Pendataan Penduduk Tanete" [ref=f3e10] [cursor=pointer]:
+        - /url: http://127.0.0.1:8100/admin
+        - generic [ref=f3e12]:
+          - img "Logo SIPETA" [ref=f3e13]
+          - generic [ref=f3e14]:
+            - generic [ref=f3e15]:
+              - generic [ref=f3e16]: SIPETA
+              - generic [ref=f3e17]: KELURAHAN
+            - generic [ref=f3e18]: Sistem Informasi Pendataan Penduduk Tanete
+    - generic [ref=f3e19]:
+      - generic [ref=f3e22]:
+        - generic [ref=f3e23]: Pencarian global
+        - searchbox "Pencarian global" [ref=f3e29]
+      - button "Menu pengguna" [ref=f3e32] [cursor=pointer]:
+        - img "Avatar Administrator" [ref=f3e33]
+  - generic [ref=f3e34]:
+    - navigation "filament-panels::layout.navigation.label" [ref=f3e37]:
+      - list [ref=f3e38]:
+        - listitem [ref=f3e39]:
+          - list [ref=f3e40]:
+            - listitem [ref=f3e41]:
+              - link "Dasbor" [ref=f3e42] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin
+            - listitem [ref=f3e45]:
+              - link "Manajemen Pengguna" [ref=f3e46] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/users
+            - listitem [ref=f3e49]:
+              - link "Backup" [ref=f3e50] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/backup
+            - listitem [ref=f3e53]:
+              - link "Pengaturan" [ref=f3e54] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/settings
+        - listitem [ref=f3e58]:
+          - list [ref=f3e59]:
+            - listitem [ref=f3e60]:
+              - link "Kartu Keluarga" [ref=f3e61] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/kartu-keluargas
+            - listitem [ref=f3e64]:
+              - link "Penduduk" [ref=f3e65] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks
+    - main [ref=f3e69]:
+      - generic [ref=f3e71]:
+        - generic [ref=f3e72]:
+          - generic [ref=f3e73]:
+            - navigation "filament::components/breadcrumbs.label" [ref=f3e74]:
+              - list [ref=f3e75]:
+                - listitem [ref=f3e76]:
+                  - link "Kartu Keluarga" [ref=f3e77] [cursor=pointer]:
+                    - /url: http://127.0.0.1:8100/admin/kartu-keluargas
+                - listitem [ref=f3e78]:
+                  - link "7372010101230001" [ref=f3e81] [cursor=pointer]:
+                    - /url: http://127.0.0.1:8100/admin/kartu-keluargas/1
+                - listitem [ref=f3e82]:
+                  - generic [ref=f3e85]: Ubah
+            - heading "Ubah Kartu Keluarga" [level=1] [ref=f3e86]
+          - generic [ref=f3e88]:
+            - button "Scan OCR" [ref=f3e89] [cursor=pointer]
+            - button "Hapus" [ref=f3e92] [cursor=pointer]
+        - generic [ref=f3e95]:
+          - generic [ref=f3e98]:
+            - generic [ref=f3e102]:
+              - region [ref=f3e106]:
+                - generic [ref=f3e107] [cursor=pointer]:
+                  - generic [ref=f3e110]:
+                    - heading "Dokumen Kartu Keluarga" [level=2] [ref=f3e111]
+                    - paragraph [ref=f3e112]: Upload foto atau scan KK untuk arsip.
+                  - button "filament-schemas::components.section.actions.collapse.label" [disabled] [expanded]
+                - generic [ref=f3e114]:
+                  - generic [ref=f3e117]:
+                    - generic [ref=f3e118]: Foto / Scan Kartu Keluarga
+                    - generic [ref=f3e122]:
+                      - group [ref=f3e123]:
+                        - button "Foto / Scan Kartu Keluarga" [ref=f3e125]
+                      - generic [ref=f3e126]: Upload hanya jika ingin mengganti foto KK lama (Maks. 10 MB, JPG/PNG).
+                  - generic [ref=f3e132]:
+                    - term [ref=f3e135]: Foto KK Saat Ini
+                    - definition [ref=f3e137]:
+                      - generic [ref=f3e138]: Belum ada foto KK.
+              - region [ref=f3e144]:
+                - generic [ref=f3e145] [cursor=pointer]:
+                  - generic [ref=f3e148]:
+                    - heading "Data Kartu Keluarga" [level=2] [ref=f3e149]
+                    - paragraph [ref=f3e150]: Informasi utama KK dan wilayah domisili keluarga.
+                  - button "filament-schemas::components.section.actions.collapse.label" [disabled] [expanded]
+                - generic [ref=f3e152]:
+                  - generic [ref=f3e155]:
+                    - generic [ref=f3e159]:
+                      - text: Nomor KK
+                      - superscript [ref=f3e160]: "*"
+                    - generic [ref=f3e161]:
+                      - textbox "Nomor KK*" [ref=f3e164]:
+                        - /placeholder: Masukkan 16 digit Nomor KK
+                        - text: "7372010101230001"
+                      - generic [ref=f3e165]: Nomor KK harus terdiri dari 16 digit.
+                  - generic [ref=f3e171]:
+                    - generic [ref=f3e172]: Kode Pos
+                    - textbox "Kode Pos" [ref=f3e179]:
+                      - /placeholder: "Contoh: 90711"
+                      - text: "91111"
+                  - generic [ref=f3e182]:
+                    - generic [ref=f3e186]:
+                      - text: Alamat Lengkap
+                      - superscript [ref=f3e187]: "*"
+                    - textbox "Alamat Lengkap*" [ref=f3e191]:
+                      - /placeholder: Masukkan alamat sesuai Kartu Keluarga
+                      - text: Jl. Poros Tanete No. 12
+                  - generic [ref=f3e194]:
+                    - generic [ref=f3e195]: RW
+                    - generic [ref=f3e199]:
+                      - generic [ref=f3e200]:
+                        - generic [ref=f3e204]:
+                          - combobox "RW" [ref=f3e205] [cursor=pointer]:
+                            - generic [ref=f3e206]: Lingkungan I
+                          - status [ref=f3e208]
+                          - button "Clear selection" [ref=f3e209] [cursor=pointer]
+                        - button "Tambah RW" [ref=f3e214] [cursor=pointer]
+                      - generic [ref=f3e217]: Pilih wilayah sebelum memilih RT.
+                  - generic [ref=f3e223]:
+                    - generic [ref=f3e227]:
+                      - text: RT
+                      - superscript [ref=f3e228]: "*"
+                    - generic [ref=f3e229]:
+                      - generic [ref=f3e230]:
+                        - generic [ref=f3e234]:
+                          - combobox "RT*" [ref=f3e235] [cursor=pointer]:
+                            - generic [ref=f3e236]: RT 01
+                          - status [ref=f3e238]
+                          - button "Clear selection" [ref=f3e239] [cursor=pointer]
+                        - button "Tambah RT" [ref=f3e244] [cursor=pointer]
+                      - generic [ref=f3e247]: RT berdasarkan RW yang dipilih.
+                  - generic [ref=f3e253]:
+                    - generic [ref=f3e254]: Catatan
+                    - textbox "Catatan" [ref=f3e262]:
+                      - /placeholder: Catatan tambahan...
+              - generic:
+                - generic:
+                  - generic:
+                    - term [ref=f3e263]: Duplicate kk modal
+                    - generic:
+                      - definition
+              - generic:
+                - generic:
+                  - generic:
+                    - term [ref=f3e264]: Ocr modal overlay
+                    - generic:
+                      - definition
+            - generic [ref=f3e269]:
+              - button "Simpan Perubahan" [ref=f3e270] [cursor=pointer]
+              - button "Batal" [disabled]
+          - status [ref=f3e276]:
+            - generic [ref=f3e277]: filament::components/loading-section.label
+  - generic:
+    - status

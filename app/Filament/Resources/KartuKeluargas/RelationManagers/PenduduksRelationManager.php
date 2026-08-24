@@ -5,7 +5,11 @@ namespace App\Filament\Resources\KartuKeluargas\RelationManagers;
 use App\Enums\FamilyRelation;
 use App\Enums\Gender;
 use App\Enums\ResidentStatus;
+use App\Filament\Resources\Penduduks\Pages\Concerns\ChecksDuplicateNik;
 use App\Filament\Resources\Penduduks\Schemas\PendudukForm;
+use App\Models\Penduduk;
+use App\Services\PendudukKkService;
+use Carbon\Carbon;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
@@ -25,6 +29,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class PenduduksRelationManager extends RelationManager
 {
+    use ChecksDuplicateNik;
+
     protected static string $relationship = 'penduduks';
 
     protected static ?string $title = 'Anggota Keluarga';
@@ -162,7 +168,20 @@ class PenduduksRelationManager extends RelationManager
                                             ResidentStatus::MENINGGAL => 'Meninggal',
                                             default => '-',
                                         }
+                                    )
+                                    ->color(
+                                        fn ($state): string => match ($state instanceof ResidentStatus ? $state : ResidentStatus::tryFrom((string) $state)) {
+                                            ResidentStatus::ACTIVE => 'success',
+                                            ResidentStatus::PINDAH => 'warning',
+                                            ResidentStatus::MENINGGAL => 'danger',
+                                            default => 'gray',
+                                        }
                                     ),
+
+                                TextEntry::make('status_date')
+                                    ->label(fn ($record): string => $record?->status_date_label ?? 'Tanggal Status')
+                                    ->state(fn ($record): ?string => $record?->formatted_status_date ?? ($record?->status_date ? Carbon::parse($record->status_date)->locale('id')->translatedFormat('d F Y') : '-'))
+                                    ->default('-'),
                             ]),
                     ])
                     ->columnSpanFull(),
@@ -255,6 +274,14 @@ class PenduduksRelationManager extends RelationManager
                         }
                     )
                     ->sortable(),
+
+                TextColumn::make('status_date')
+                    ->label('Tanggal Status')
+                    ->state(fn (Penduduk $record): ?string => $record->formatted_status_date ?? ($record->status_date ? Carbon::parse($record->status_date)->locale('id')->translatedFormat('d F Y') : '-'))
+                    ->sortable(false)
+                    ->extraAttributes([
+                        'class' => 'whitespace-nowrap',
+                    ]),
             ])
             ->filters([
                 SelectFilter::make('resident_status')
@@ -268,7 +295,17 @@ class PenduduksRelationManager extends RelationManager
             ->headerActions([
                 CreateAction::make()
                     ->label('Tambah Anggota')
-                    ->modalHeading('Tambah Anggota Keluarga'),
+                    ->modalHeading('Tambah Anggota Keluarga')
+                    ->modalSubmitActionLabel('Setuju')
+                    ->modalCancelActionLabel('Batal')
+                    ->createAnother(false)
+                    ->successNotificationTitle('Data anggota berhasil ditambahkan')
+                    ->using(function (array $data, RelationManager $livewire): Model {
+                        $data['kk_id'] = $livewire->ownerRecord->getKey();
+                        $data['resident_status'] ??= ResidentStatus::ACTIVE->value;
+
+                        return app(PendudukKkService::class)->save($data);
+                    }),
             ])
             ->recordActions([
                 ViewAction::make()
@@ -277,7 +314,15 @@ class PenduduksRelationManager extends RelationManager
 
                 EditAction::make()
                     ->modalHeading('Ubah Anggota')
-                    ->modalWidth('5xl'),
+                    ->modalSubmitActionLabel('Setuju')
+                    ->modalCancelActionLabel('Batal')
+                    ->modalWidth('5xl')
+                    ->successNotificationTitle('Data anggota berhasil diperbarui')
+                    ->using(function (Model $record, array $data, RelationManager $livewire): Model {
+                        $data['kk_id'] = $livewire->ownerRecord->getKey();
+
+                        return app(PendudukKkService::class)->save($data, $record);
+                    }),
 
                 DeleteAction::make()
                     ->modalHeading('Hapus Anggota')

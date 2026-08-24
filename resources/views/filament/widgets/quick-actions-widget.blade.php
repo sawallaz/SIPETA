@@ -1,23 +1,30 @@
 <x-filament-widgets::widget class="fi-wi-quick-actions">
     <x-filament::section
-        heading="Aksi Cepat"
-        description="Akses cepat ke data kependudukan"
+        heading="Akses Cepat"
+        description="Kelola dan lihat data kependudukan SIPETA"
     >
         <div class="fi-wi-quick-actions-grid">
             @foreach ($actions as $action)
                 <a
                     href="{{ $action['url'] }}"
-                    class="fi-wi-quick-actions-item"
+                    class="fi-wi-quick-actions-item group"
                 >
-                    <x-filament::icon
-                        :icon="$action['icon']"
-                        class="fi-wi-quick-actions-icon"
-                    />
+                    <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 group-hover:bg-emerald-100 transition-colors flex-shrink-0">
+                        <x-filament::icon
+                            :icon="$action['icon']"
+                            class="w-5 h-5"
+                        />
+                    </div>
 
-                    <span class="fi-wi-quick-actions-body">
-                        <span class="fi-wi-quick-actions-label">{{ $action['label'] }}</span>
+                    <div class="fi-wi-quick-actions-body flex-1 min-w-0">
+                        <div class="flex items-center justify-between gap-1">
+                            <span class="fi-wi-quick-actions-label">{{ $action['label'] }}</span>
+                            <svg class="w-4 h-4 text-gray-400 group-hover:text-emerald-600 transition-transform group-hover:translate-x-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                        </div>
                         <span class="fi-wi-quick-actions-description">{{ $action['description'] }}</span>
-                    </span>
+                    </div>
                 </a>
             @endforeach
         </div>

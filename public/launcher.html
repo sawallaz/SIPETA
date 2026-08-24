@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIPETA Launcher & Server Manager</title>
+    <style>
+        :root {
+            --primary: #059669;
+            --primary-dark: #047857;
+            --primary-light: #ecfdf5;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-700: #374151;
+            --gray-900: #111827;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            user-select: none;
+        }
+        body {
+            background-color: var(--gray-50);
+            color: var(--gray-900);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            justify-content: space-between;
+            padding: 24px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--gray-200);
+        }
+        .logo {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
+        .title-group h1 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--gray-900);
+            letter-spacing: -0.02em;
+        }
+        .title-group p {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 2px;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background-color: var(--primary-light);
+            color: var(--primary-dark);
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            border: 1px solid #a7f3d0;
+            margin-left: auto;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--primary);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.85); }
+        }
+        .card {
+            background: #ffffff;
+            border: 1px solid var(--gray-200);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+        .card-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+        .url-box {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--gray-100);
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--primary-dark);
+            word-break: break-all;
+        }
+        .info-list {
+            margin-top: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--gray-700);
+        }
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .info-item span:first-child {
+            color: #6b7280;
+        }
+        .info-item span:last-child {
+            font-weight: 600;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 11px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease-in-out;
+            border: none;
+        }
+        .btn-primary {
+            background-color: var(--primary);
+            color: #ffffff;
+        }
+        .btn-primary:hover {
+            background-color: var(--primary-dark);
+        }
+        .btn-secondary {
+            background-color: #ffffff;
+            color: var(--gray-700);
+            border: 1px solid var(--gray-200);
+        }
+        .btn-secondary:hover {
+            background-color: var(--gray-100);
+        }
+        .btn-danger {
+            background-color: #fee2e2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+        }
+        .btn-danger:hover {
+            background-color: #fca5a5;
+        }
+        .footer-note {
+            text-align: center;
+            font-size: 11px;
+            color: #9ca3af;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="header">
+            <img src="images/sipeta-icon-128.png" alt="SIPETA" class="logo" onerror="this.style.display='none'">
+            <div class="title-group">
+                <h1>SIPETA Launcher</h1>
+                <p>Sistem Informasi Pendataan Penduduk Tanete</p>
+            </div>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                <span id="status-text">Server Aktif</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">URL Akses Super Admin (Lokal)</div>
+            <div class="url-box" id="best-url">http://localhost:8100/admin</div>
+
+            <div class="info-list">
+                <div class="info-item">
+                    <span>Akses Operator LAN (Wi-Fi/Kabel):</span>
+                    <span id="lan-url">Memuat...</span>
+                </div>
+                <div class="info-item">
+                    <span>mDNS Hostname:</span>
+                    <span id="mdns-url">http://sipeta.local:8100</span>
+                </div>
+                <div class="info-item">
+                    <span>Port Server:</span>
+                    <span id="port-text">8100</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <div class="actions">
+            <button class="btn btn-primary" id="btn-open-browser" onclick="openBrowser()">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                Buka SIPETA di Browser
+            </button>
+            <button class="btn btn-secondary" id="btn-copy-lan" onclick="copyLanUrl()">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                Salin URL untuk Operator LAN
+            </button>
+            <button class="btn btn-danger" id="btn-stop" onclick="stopServer()">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                Hentikan Server & Keluar
+            </button>
+        </div>
+
+        <p class="footer-note" style="margin-top: 14px;">
+            SIPETA berjalan di background & browser default Anda.<br>
+            Jendela ini dapat dibiarkan terbuka atau diminimalkan.
+        </p>
+    </div>
+
+    <script>
+        let serverInfo = null;
+
+        async function init() {
+            try {
+                if (window.__TAURI__ && window.__TAURI__.core) {
+                    serverInfo = await window.__TAURI__.core.invoke('get_server_info');
+                    if (serverInfo) {
+                        document.getElementById('best-url').textContent = (serverInfo.best_url || 'http://localhost:8100') + '/admin';
+                        document.getElementById('lan-url').textContent = serverInfo.lan_url ? (serverInfo.lan_url + '/admin') : (serverInfo.mdns_url + '/admin');
+                        document.getElementById('mdns-url').textContent = serverInfo.mdns_url || 'http://sipeta.local:8100';
+                        document.getElementById('port-text').textContent = serverInfo.port || '8100';
+                    }
+                } else {
+                    document.getElementById('lan-url').textContent = 'http://sipeta.local:8100/admin';
+                }
+            } catch (err) {
+                console.error('Error memuat info server:', err);
+            }
+        }
+
+        async function openBrowser() {
+            try {
+                if (window.__TAURI__ && window.__TAURI__.core) {
+                    await window.__TAURI__.core.invoke('open_browser_url', { url: null });
+                } else {
+                    window.open('http://localhost:8100/admin', '_blank');
+                }
+            } catch (err) {
+                console.error('Error membuka browser:', err);
+            }
+        }
+
+        function copyLanUrl() {
+            const url = document.getElementById('lan-url').textContent;
+            navigator.clipboard.writeText(url).then(() => {
+                const btn = document.getElementById('btn-copy-lan');
+                const orig = btn.innerHTML;
+                btn.innerHTML = '✓ URL Tersalin!';
+                setTimeout(() => { btn.innerHTML = orig; }, 2000);
+            });
+        }
+
+        async function stopServer() {
+            try {
+                if (window.__TAURI__ && window.__TAURI__.core) {
+                    await window.__TAURI__.core.invoke('stop_server_and_exit');
+                } else {
+                    window.close();
+                }
+            } catch (err) {
+                window.close();
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

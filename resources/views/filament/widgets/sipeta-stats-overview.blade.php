@@ -1,5 +1,5 @@
 <x-filament-widgets::widget class="fi-wi-stats-overview">
-    <div class="grid grid-cols-4 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
 
         @foreach ($stats as $index => $stat)
             @php

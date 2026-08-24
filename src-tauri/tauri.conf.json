@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SIPETA",
+  "version": "1.0.0",
+  "identifier": "id.sipeta.desktop",
+  "build": {
+    "frontendDist": "../public",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "deb"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "../resources/php/*",
+      "../resources/php/ext/*",
+      "../resources/tesseract/**/*",
+      "../app/**/*",
+      "../bootstrap/**/*",
+      "../config/*",
+      "../database/migrations/*",
+      "../database/seeders/*",
+      "../lang/**/*",
+      "../public/**/*",
+      "../resources/views/**/*",
+      "../resources/css/*",
+      "../resources/js/*",
+      "../routes/*",
+      "../vendor/**/*",
+      "../artisan",
+      "../server.php",
+      "../composer.json"
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser",
+        "languages": ["Indonesian", "English"],
+        "installerHooks": "installer_hooks.nsi"
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
+  }
+}

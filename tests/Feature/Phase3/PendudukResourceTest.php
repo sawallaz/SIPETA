@@ -5,6 +5,7 @@ namespace Tests\Feature\Phase3;
 use App\Enums\BloodType;
 use App\Enums\FamilyRelation;
 use App\Enums\Gender;
+use App\Enums\KkAnggotaStatus;
 use App\Enums\MaritalStatus;
 use App\Enums\ResidentStatus;
 use App\Filament\Resources\Penduduks\Pages\CreatePenduduk;
@@ -13,8 +14,10 @@ use App\Filament\Resources\Penduduks\Pages\ListPenduduks;
 use App\Filament\Resources\Penduduks\PendudukResource;
 use App\Models\Education;
 use App\Models\KartuKeluarga;
+use App\Models\KkAnggota;
 use App\Models\Occupation;
 use App\Models\Penduduk;
+use App\Models\PendudukDocument;
 use App\Models\Religion;
 use App\Models\Rt;
 use Filament\Actions\Testing\TestAction;
@@ -163,7 +166,7 @@ class PendudukResourceTest extends Phase3ResourceTestCase
      * NIK yang sudah terdaftar TIDAK ditolak dan TIDAK menghasilkan
      * Penduduk kedua — orang yang sama dipindahkan ke KK yang dipilih.
      */
-    public function test_existing_nik_is_reused_instead_of_duplicated(): void
+    public function test_existing_nik_is_rejected_on_create(): void
     {
         $existing = Penduduk::factory()->create(['nik' => '7371010101010102']);
         $kkBaru = KartuKeluarga::factory()->create();
@@ -174,10 +177,9 @@ class PendudukResourceTest extends Phase3ResourceTestCase
                 'kk_id' => $kkBaru->getKey(),
             ]))
             ->call('create')
-            ->assertHasNoFormErrors();
+            ->assertHasFormErrors(['nik']);
 
         $this->assertSame(1, Penduduk::where('nik', '7371010101010102')->count());
-        $this->assertSame($kkBaru->getKey(), $existing->refresh()->kk_id);
     }
 
     /**
@@ -208,26 +210,44 @@ class PendudukResourceTest extends Phase3ResourceTestCase
             ->assertHasNoFormErrors();
     }
 
-    public function test_moved_date_is_required_when_status_is_pindah(): void
+    public function test_moved_date_is_recorded_when_status_is_pindah(): void
     {
         Livewire::test(CreatePenduduk::class)
             ->fillForm($this->validPayload([
+                'nik' => '7371010101019988',
                 'resident_status' => ResidentStatus::PINDAH->value,
-                'moved_at' => null,
+                'moved_at' => '2026-08-15',
             ]))
             ->call('create')
-            ->assertHasFormErrors(['moved_at' => 'required']);
+            ->assertHasNoFormErrors();
+
+        $penduduk = Penduduk::where('nik', '7371010101019988')->first();
+        $this->assertNotNull($penduduk);
+        $this->assertSame('2026-08-15', $penduduk->moved_at?->toDateString());
+        $history = $penduduk->statusHistories()->first();
+        $this->assertNotNull($history);
+        $this->assertSame(ResidentStatus::PINDAH, $history->status);
+        $this->assertSame('2026-08-15', $history->recorded_at->toDateString());
     }
 
-    public function test_deceased_date_is_required_when_status_is_meninggal(): void
+    public function test_deceased_date_is_recorded_when_status_is_meninggal(): void
     {
         Livewire::test(CreatePenduduk::class)
             ->fillForm($this->validPayload([
+                'nik' => '7371010101019977',
                 'resident_status' => ResidentStatus::MENINGGAL->value,
-                'deceased_at' => null,
+                'deceased_at' => '2026-08-10',
             ]))
             ->call('create')
-            ->assertHasFormErrors(['deceased_at' => 'required']);
+            ->assertHasNoFormErrors();
+
+        $penduduk = Penduduk::where('nik', '7371010101019977')->first();
+        $this->assertNotNull($penduduk);
+        $this->assertSame('2026-08-10', $penduduk->deceased_at?->toDateString());
+        $history = $penduduk->statusHistories()->first();
+        $this->assertNotNull($history);
+        $this->assertSame(ResidentStatus::MENINGGAL, $history->status);
+        $this->assertSame('2026-08-10', $history->recorded_at->toDateString());
     }
 
     public function test_table_can_search_by_name(): void
@@ -293,6 +313,40 @@ class PendudukResourceTest extends Phase3ResourceTestCase
             ->assertHasNoErrors();
 
         $this->assertDatabaseMissing('penduduk', ['id' => $penduduk->id]);
+    }
+
+    public function test_can_delete_penduduk_with_kk_anggota_and_documents(): void
+    {
+        $kk = KartuKeluarga::factory()->create();
+        $penduduk = Penduduk::factory()->create(['kk_id' => $kk->id]);
+        KkAnggota::create([
+            'kk_id' => $kk->id,
+            'penduduk_id' => $penduduk->id,
+            'family_relation' => FamilyRelation::ANAK,
+            'status' => KkAnggotaStatus::AKTIF,
+            'effective_date' => now()->toDateString(),
+        ]);
+        PendudukDocument::create([
+            'penduduk_id' => $penduduk->id,
+            'document_type' => 'KTP',
+            'original_filename' => 'test.jpg',
+            'stored_filename' => 'test.jpg',
+            'mime_type' => 'image/jpeg',
+            'file_size' => 1024,
+            'sha256_hash' => hash('sha256', 'test'),
+            'storage_disk' => 'local',
+            'storage_path' => 'penduduk-documents/test.jpg',
+            'is_active' => true,
+            'uploaded_at' => now(),
+        ]);
+
+        Livewire::test(ListPenduduks::class)
+            ->callAction(TestAction::make('delete')->table($penduduk))
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseMissing('penduduk', ['id' => $penduduk->id]);
+        $this->assertDatabaseMissing('kk_anggota', ['penduduk_id' => $penduduk->id]);
+        $this->assertDatabaseMissing('penduduk_documents', ['penduduk_id' => $penduduk->id]);
     }
 
     public function test_can_delete_via_bulk_action(): void

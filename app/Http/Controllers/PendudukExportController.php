@@ -10,9 +10,31 @@ use Symfony\Component\HttpFoundation\Response;
 
 class PendudukExportController
 {
+    public function csv(
+        Request $request,
+        PendudukExportService $exportService,
+    ): Response {
+        return $this->handleExport($request, $exportService, ExportFormat::CSV);
+    }
+
+    public function xlsx(
+        Request $request,
+        PendudukExportService $exportService,
+    ): Response {
+        return $this->handleExport($request, $exportService, ExportFormat::XLSX);
+    }
+
     public function pdf(
         Request $request,
         PendudukExportService $exportService,
+    ): Response {
+        return $this->handleExport($request, $exportService, ExportFormat::PDF);
+    }
+
+    private function handleExport(
+        Request $request,
+        PendudukExportService $exportService,
+        ExportFormat $format,
     ): Response {
         $rawFilters = $request->query('filters', []);
         $search = trim((string) $request->query('search', ''));
@@ -109,7 +131,7 @@ class PendudukExportController
 
         return $exportService->exportQuery(
             $query,
-            ExportFormat::PDF,
+            $format,
             $summaryFilters,
         );
     }

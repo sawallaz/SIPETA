@@ -46,13 +46,29 @@ class Backup extends Page
 
     public function getViewData(): array
     {
+        $settings = app(SettingsService::class)->get();
+        $isConnected = (bool) ($settings?->isGoogleDriveConnected() ?? false);
+
+        if (! $isConnected) {
+            return [
+                'driveBackups' => collect(),
+                'googleDrive' => $settings,
+            ];
+        }
+
+        try {
+            app(BackupService::class)->syncFromDrive(app(GoogleDriveClient::class));
+        } catch (Throwable) {
+            // Silently fall back to cached logs if temporary network hiccup
+        }
+
         return [
             'driveBackups' => BackupLog::query()
                 ->whereNotNull('drive_file_id')
                 ->where('backup_status', BackupStatus::SUCCESS)
                 ->latest('started_at')
                 ->get(),
-            'googleDrive' => app(SettingsService::class)->get(),
+            'googleDrive' => $settings,
         ];
     }
 
@@ -110,6 +126,33 @@ class Backup extends Page
         }
     }
 
+    public function syncDriveBackups(): void
+    {
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
+
+        try {
+            app(BackupService::class)->syncFromDrive(app(GoogleDriveClient::class));
+
+            Notification::make()
+                ->title('Sinkronisasi selesai')
+                ->body('Daftar backup berhasil diselaraskan dengan Google Drive.')
+                ->success()
+                ->send();
+        } catch (GoogleDriveException $e) {
+            Notification::make()
+                ->title('Sinkronisasi gagal')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        } catch (Throwable $e) {
+            Notification::make()
+                ->title('Sinkronisasi gagal')
+                ->body('Tidak dapat menyinkronkan daftar backup dari Google Drive.')
+                ->danger()
+                ->send();
+        }
+    }
+
     public function testGoogleDriveConnection(): void
     {
         abort_unless(auth()->user()?->isSuperAdmin(), 403);
@@ -135,6 +178,8 @@ class Backup extends Page
         abort_unless(auth()->user()?->isSuperAdmin(), 403);
 
         app(SettingsService::class)->disconnectGoogleDrive();
+        BackupLog::query()->whereNotNull('drive_file_id')->delete();
+
         logger()->info('Google Drive disconnected.', ['operator_id' => auth()->id()]);
 
         Notification::make()
@@ -204,10 +249,11 @@ class Backup extends Page
             if ($result->isRestored()) {
                 Notification::make()
                     ->title('Pemulihan selesai')
-                    ->body('Data berhasil dipulihkan dari Google Drive. Silakan restart aplikasi.')
-                    ->warning()
+                    ->body('Data berhasil dipulihkan dari Google Drive. Halaman akan dimuat ulang...')
+                    ->success()
                     ->send();
                 $this->cancelDriveRestore();
+                $this->dispatch('backup-restored');
             }
         } catch (RestoreException $e) {
             Notification::make()

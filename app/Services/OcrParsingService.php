@@ -46,9 +46,14 @@ final class OcrParsingService
         'NOMOR_KARTU_KELUARGA' => 'NOMOR KARTU KELUARGA',
         'NOMOR_KK' => 'NOMOR KK',
         'NO_KK' => 'NO KK',
+        'NO_KK_DOT' => 'NO. KK',
+        'NO_DOT' => 'NO.',
+        'NO' => 'NO',
         'RT_RW' => 'RT/RW',
         'LINGKUNGAN' => 'LINGKUNGAN',
         'ALAMAT' => 'ALAMAT',
+        'KODE_POS' => 'KODE POS',
+        'KODEPOS' => 'KODEPOS',
         'RT' => 'RT',
         'RW' => 'RW',
     ];
@@ -67,128 +72,314 @@ final class OcrParsingService
         'KONGHUCU' => ['KONGHUCU'],
     ];
 
+    public const CANONICAL_EDUCATIONS = [
+        'TIDAK/BELUM SEKOLAH',
+        'BELUM TAMAT SD/SEDERAJAT',
+        'TAMAT SD/SEDERAJAT',
+        'SLTP/SEDERAJAT',
+        'SLTA/SEDERAJAT',
+        'DIPLOMA I/II',
+        'AKADEMI/DIPLOMA III/SARJANA MUDA',
+        'DIPLOMA IV/STRATA I',
+        'STRATA II',
+        'STRATA III',
+    ];
+
     /**
-     * Pendidikan.
+     * Pendidikan vocabulary mapping to canonical output.
      */
     private const EDUCATIONS = [
-        'TIDAK/BELUM SEKOLAH' => ['TIDAK/BELUM', 'SEKOLAH'],
-        'BELUM TAMAT SD/SEDERAJAT' => [
-            'BELUM',
-            'TAMAT',
-            'SD/SEDERAJAT',
-        ],
-        'TAMAT SD/SEDERAJAT' => [
-            'TAMAT',
-            'SD/SEDERAJAT',
-        ],
-        'AKADEMI/DIPLOMA III/SARJANA MUDA' => [
-            'AKADEMI/DIPLOMA',
-            'III/SARJANA',
-            'MUDA',
-        ],
-        'DIPLOMA IV/STRATA I' => [
-            'DIPLOMA',
-            'IV/STRATA',
-            'I',
-        ],
-        'DIPLOMA I/II' => [
-            'DIPLOMA',
-            'I/II',
-        ],
-        'SLTP/SEDERAJAT' => ['SLTP/SEDERAJAT'],
-        'SLTA/SEDERAJAT' => ['SLTA/SEDERAJAT'],
-        'SD' => ['SD'],
-        'SMP' => ['SMP'],
-        'SMA' => ['SMA'],
-        'D1' => ['D1'],
-        'D2' => ['D2'],
-        'D3' => ['D3'],
-        'S1' => ['S1'],
-        'S2' => ['S2'],
-        'S3' => ['S3'],
+        // 1. TIDAK/BELUM SEKOLAH
+        ['TIDAK/BELUM SEKOLAH', ['TIDAK/BELUM', 'SEKOLAH']],
+        ['TIDAK/BELUM SEKOLAH', ['TIDAK', 'BELUM', 'SEKOLAH']],
+        ['TIDAK/BELUM SEKOLAH', ['BELUM', 'SEKOLAH']],
+        ['TIDAK/BELUM SEKOLAH', ['TIDAK', 'SEKOLAH']],
+        ['TIDAK/BELUM SEKOLAH', ['TIDAK/BELUM']],
+
+        // 2. BELUM TAMAT SD/SEDERAJAT
+        ['BELUM TAMAT SD/SEDERAJAT', ['BELUM', 'TAMAT', 'SD/SEDERAJAT']],
+        ['BELUM TAMAT SD/SEDERAJAT', ['BELUM', 'TAMAT', 'SD']],
+        ['BELUM TAMAT SD/SEDERAJAT', ['BELUM', 'TAMAT']],
+
+        // 3. TAMAT SD/SEDERAJAT
+        ['TAMAT SD/SEDERAJAT', ['TAMAT', 'SD/SEDERAJAT']],
+        ['TAMAT SD/SEDERAJAT', ['TAMAT', 'SD']],
+        ['TAMAT SD/SEDERAJAT', ['SD/SEDERAJAT']],
+        ['TAMAT SD/SEDERAJAT', ['SD']],
+
+        // 4. SLTP/SEDERAJAT
+        ['SLTP/SEDERAJAT', ['SLTP/SEDERAJAT']],
+        ['SLTP/SEDERAJAT', ['SLTP']],
+        ['SLTP/SEDERAJAT', ['SMP/SEDERAJAT']],
+        ['SLTP/SEDERAJAT', ['SMP']],
+        ['SLTP/SEDERAJAT', ['MTS/SEDERAJAT']],
+        ['SLTP/SEDERAJAT', ['MTS']],
+
+        // 5. SLTA/SEDERAJAT
+        ['SLTA/SEDERAJAT', ['SLTA/SEDERAJAT']],
+        ['SLTA/SEDERAJAT', ['SLTA']],
+        ['SLTA/SEDERAJAT', ['SMA/SEDERAJAT']],
+        ['SLTA/SEDERAJAT', ['SMA']],
+        ['SLTA/SEDERAJAT', ['SMK/SEDERAJAT']],
+        ['SLTA/SEDERAJAT', ['SMK']],
+        ['SLTA/SEDERAJAT', ['MA/SEDERAJAT']],
+        ['SLTA/SEDERAJAT', ['MA']],
+
+        // 6. DIPLOMA I/II
+        ['DIPLOMA I/II', ['DIPLOMA', 'I/II']],
+        ['DIPLOMA I/II', ['DIPLOMA', 'I']],
+        ['DIPLOMA I/II', ['DIPLOMA', 'II']],
+        ['DIPLOMA I/II', ['DIPLOMA', '1/2']],
+        ['DIPLOMA I/II', ['DIPLOMA', '1']],
+        ['DIPLOMA I/II', ['DIPLOMA', '2']],
+        ['DIPLOMA I/II', ['D-I']],
+        ['DIPLOMA I/II', ['D-II']],
+        ['DIPLOMA I/II', ['D1']],
+        ['DIPLOMA I/II', ['D2']],
+        ['DIPLOMA I/II', ['D', 'I']],
+        ['DIPLOMA I/II', ['D', 'II']],
+        ['DIPLOMA I/II', ['D', '1']],
+        ['DIPLOMA I/II', ['D', '2']],
+
+        // 7. AKADEMI/DIPLOMA III/SARJANA MUDA
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['AKADEMI/DIPLOMA', 'III/SARJANA', 'MUDA']],
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['AKADEMI/DIPLOMA', 'III']],
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['DIPLOMA', 'III']],
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['DIPLOMA', '3']],
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['AKADEMI']],
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['SARJANA', 'MUDA']],
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['D-III']],
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['D3']],
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['D', 'III']],
+        ['AKADEMI/DIPLOMA III/SARJANA MUDA', ['D', '3']],
+
+        // 8. DIPLOMA IV/STRATA I
+        ['DIPLOMA IV/STRATA I', ['DIPLOMA', 'IV/STRATA', 'I']],
+        ['DIPLOMA IV/STRATA I', ['DIPLOMA', 'IV']],
+        ['DIPLOMA IV/STRATA I', ['DIPLOMA', '4']],
+        ['DIPLOMA IV/STRATA I', ['STRATA', 'I']],
+        ['DIPLOMA IV/STRATA I', ['STRATA', '1']],
+        ['DIPLOMA IV/STRATA I', ['SARJANA']],
+        ['DIPLOMA IV/STRATA I', ['D-IV']],
+        ['DIPLOMA IV/STRATA I', ['D4']],
+        ['DIPLOMA IV/STRATA I', ['D', 'IV']],
+        ['DIPLOMA IV/STRATA I', ['D', '4']],
+        ['DIPLOMA IV/STRATA I', ['S-I']],
+        ['DIPLOMA IV/STRATA I', ['S1']],
+        ['DIPLOMA IV/STRATA I', ['S', 'I']],
+        ['DIPLOMA IV/STRATA I', ['S', '1']],
+
+        // 9. STRATA II
+        ['STRATA II', ['STRATA', 'II']],
+        ['STRATA II', ['STRATA', '2']],
+        ['STRATA II', ['MAGISTER']],
+        ['STRATA II', ['S-II']],
+        ['STRATA II', ['S2']],
+        ['STRATA II', ['S', 'II']],
+        ['STRATA II', ['S', '2']],
+
+        // 10. STRATA III
+        ['STRATA III', ['STRATA', 'III']],
+        ['STRATA III', ['STRATA', '3']],
+        ['STRATA III', ['DOKTOR']],
+        ['STRATA III', ['S-III']],
+        ['STRATA III', ['S3']],
+        ['STRATA III', ['S', 'III']],
+        ['STRATA III', ['S', '3']],
+    ];
+
+    public const CANONICAL_OCCUPATIONS = [
+        'PEGAWAI NEGERI SIPIL',
+        'IBU RUMAH TANGGA',
+        'BURUH',
+        'KARYAWAN SWASTA',
+        'PELAJAR/MAHASISWA',
+        'PETANI',
+        'PEDAGANG',
+        'NELAYAN',
+        'WIRASWASTA',
+        'PENSIUNAN',
+        'TUKANG',
+        'LAINNYA',
     ];
 
     /**
      * Pekerjaan.
      */
     private const OCCUPATIONS = [
-        'PEGAWAI NEGERI SIPIL' => [
-            'PEGAWAI',
-            'NEGERI',
-            'SIPIL',
-        ],
-        'IBU RUMAH TANGGA' => [
-            'IBU',
-            'RUMAH',
-            'TANGGA',
-        ],
-        'BURUH HARIAN LEPAS' => [
-            'BURUH',
-            'HARIAN',
-            'LEPAS',
-        ],
-        'KARYAWAN SWASTA' => [
-            'KARYAWAN',
-            'SWASTA',
-        ],
-        'PELAJAR/MAHASISWA' => [
-            'PELAJAR/MAHASISWA',
-        ],
-        'PETANI' => ['PETANI'],
-        'PEDAGANG' => ['PEDAGANG'],
-        'NELAYAN' => ['NELAYAN'],
-        'WIRASWASTA' => ['WIRASWASTA'],
-        'PENSIUNAN' => ['PENSIUNAN'],
-        'PELAJAR' => ['PELAJAR'],
-        'MAHASISWA' => ['MAHASISWA'],
-        'BURUH' => ['BURUH'],
-        'TUKANG' => ['TUKANG'],
-        'LAINNYA' => ['LAINNYA'],
+        // PEGAWAI NEGERI SIPIL
+        ['PEGAWAI NEGERI SIPIL', ['PEGAWAI', 'NEGERI', 'SIPIL']],
+        ['PEGAWAI NEGERI SIPIL', ['PEGAWAI', 'NEGERI']],
+        ['PEGAWAI NEGERI SIPIL', ['PNS']],
+        ['PEGAWAI NEGERI SIPIL', ['ASN']],
+
+        // IBU RUMAH TANGGA
+        ['IBU RUMAH TANGGA', ['MENGURUS', 'RUMAH', 'TANGGA']],
+        ['IBU RUMAH TANGGA', ['IBU', 'RUMAH', 'TANGGA']],
+        ['IBU RUMAH TANGGA', ['RUMAH', 'TANGGA']],
+
+        // BURUH
+        ['BURUH', ['BURUH', 'HARIAN', 'LEPAS']],
+        ['BURUH', ['BURUH', 'HARIAN']],
+        ['BURUH', ['BURUH', 'TANI']],
+        ['BURUH', ['BURUH', 'PABRIK']],
+        ['BURUH', ['BURUH']],
+
+        // KARYAWAN SWASTA
+        ['KARYAWAN SWASTA', ['KARYAWAN', 'SWASTA']],
+        ['KARYAWAN SWASTA', ['KARYAWAN', 'BUMN']],
+        ['KARYAWAN SWASTA', ['KARYAWAN', 'BUMD']],
+        ['KARYAWAN SWASTA', ['PEGAWAI', 'SWASTA']],
+        ['KARYAWAN SWASTA', ['KARYAWAN']],
+
+        // PELAJAR/MAHASISWA
+        ['PELAJAR/MAHASISWA', ['PELAJAR/MAHASISWA']],
+        ['PELAJAR/MAHASISWA', ['PELAJARIMAHASISWA']],
+        ['PELAJAR/MAHASISWA', ['PELAJAR', 'MAHASISWA']],
+        ['PELAJAR/MAHASISWA', ['PELAJAR']],
+        ['PELAJAR/MAHASISWA', ['MAHASISWA']],
+
+        // PETANI
+        ['PETANI', ['PETANI/PEKEBUN']],
+        ['PETANI', ['PETANI', 'PEKEBUN']],
+        ['PETANI', ['PETANI']],
+        ['PETANI', ['PEKEBUN']],
+
+        // PEDAGANG
+        ['PEDAGANG', ['PEDAGANG']],
+        ['PEDAGANG', ['PERDAGANGAN']],
+
+        // NELAYAN
+        ['NELAYAN', ['NELAYAN/PERIKANAN']],
+        ['NELAYAN', ['NELAYAN']],
+        ['NELAYAN', ['PERIKANAN']],
+
+        // WIRASWASTA
+        ['WIRASWASTA', ['WIRASWASTA']],
+        ['WIRASWASTA', ['WIRAUSAHA']],
+
+        // PENSIUNAN
+        ['PENSIUNAN', ['PENSIUNAN']],
+        ['PENSIUNAN', ['PENSIUN']],
+
+        // TUKANG
+        ['TUKANG', ['TUKANG', 'KAYU']],
+        ['TUKANG', ['TUKANG', 'BATU']],
+        ['TUKANG', ['TUKANG', 'JAHIT']],
+        ['TUKANG', ['TUKANG', 'CUKUR']],
+        ['TUKANG', ['TUKANG', 'LAS']],
+        ['TUKANG', ['TUKANG']],
+
+        // BELUM/TIDAK BEKERJA / LAINNYA
+        ['LAINNYA', ['BELUM/TIDAK', 'BEKERJA']],
+        ['LAINNYA', ['BELUM', 'TIDAK', 'BEKERJA']],
+        ['LAINNYA', ['TIDAK', 'BEKERJA']],
+        ['LAINNYA', ['BELUM', 'BEKERJA']],
+        ['LAINNYA', ['LAINNYA']],
+    ];
+
+    public const CANONICAL_MARITAL_STATUSES = [
+        'BELUM_KAWIN',
+        'KAWIN',
+        'CERAI_HIDUP',
+        'CERAI_MATI',
     ];
 
     /**
      * Status perkawinan.
      */
     private const MARITAL_STATUSES = [
-        'BELUM_KAWIN' => [
-            'BELUM',
-            'KAWIN',
-        ],
-        'CERAI_HIDUP' => [
-            'CERAI',
-            'HIDUP',
-        ],
-        'CERAI_MATI' => [
-            'CERAI',
-            'MATI',
-        ],
-        'KAWIN' => [
-            'KAWIN',
-        ],
+        // BELUM_KAWIN
+        ['BELUM_KAWIN', ['BELUM', 'KAWIN']],
+        ['BELUM_KAWIN', ['BELUMKAWIN']],
+        ['BELUM_KAWIN', ['BELUM', 'KAWN']],
+        ['BELUM_KAWIN', ['BELUMKAWN']],
+        ['BELUM_KAWIN', ['BLM', 'KAWIN']],
+        ['BELUM_KAWIN', ['BELUM', 'MENIKAH']],
+        ['BELUM_KAWIN', ['BELUM', 'NIKAH']],
+
+        // KAWIN
+        ['KAWIN', ['KAWIN', 'TERCATAT']],
+        ['KAWIN', ['KAWIN', 'BELUM', 'TERCATAT']],
+        ['KAWIN', ['KAWIN']],
+        ['KAWIN', ['MENIKAH']],
+        ['KAWIN', ['NIKAH']],
+
+        // CERAI_HIDUP
+        ['CERAI_HIDUP', ['CERAI', 'HIDUP']],
+        ['CERAI_HIDUP', ['CERAIHIDUP']],
+        ['CERAI_HIDUP', ['CERAI']],
+        ['CERAI_HIDUP', ['DUDA']],
+        ['CERAI_HIDUP', ['JANDA']],
+
+        // CERAI_MATI
+        ['CERAI_MATI', ['CERAI', 'MATI']],
+        ['CERAI_MATI', ['CERAIMATI']],
+    ];
+
+    public const CANONICAL_FAMILY_RELATIONS = [
+        'KEPALA_KELUARGA',
+        'ISTRI',
+        'ANAK',
+        'MENANTU',
+        'CUCU',
+        'ORANG_TUA',
+        'MERTUA',
+        'FAMILI_LAIN',
+        'LAINNYA',
     ];
 
     /**
      * Hubungan keluarga.
      */
     private const FAMILY_RELATIONS = [
-        'KEPALA_KELUARGA' => [
-            'KEPALA',
-            'KELUARGA',
-        ],
-        'ORANG_TUA' => [
-            'ORANG',
-            'TUA',
-        ],
-        'FAMILI_LAIN' => [
-            'FAMILI',
-            'LAIN',
-        ],
-        'MENANTU' => ['MENANTU'],
-        'CUCU' => ['CUCU'],
-        'MERTUA' => ['MERTUA'],
-        'ISTRI' => ['ISTRI'],
-        'ANAK' => ['ANAK'],
-        'LAINNYA' => ['LAINNYA'],
+        // KEPALA_KELUARGA
+        ['KEPALA_KELUARGA', ['KEPALA', 'KELUARGA']],
+        ['KEPALA_KELUARGA', ['KEPALA', 'KEL.']],
+        ['KEPALA_KELUARGA', ['KEPALA', 'KEL']],
+        ['KEPALA_KELUARGA', ['KEPALAKELUARGA']],
+        ['KEPALA_KELUARGA', ['KEPALAKEUARGA']],
+        ['KEPALA_KELUARGA', ['KEPALAKEL']],
+        ['KEPALA_KELUARGA', ['KEPALA']],
+
+        // ISTRI
+        ['ISTRI', ['ISTRI']],
+        ['ISTRI', ['ISTERI']],
+        ['ISTRI', ['1STRI']],
+        ['ISTRI', ['ISTRI', 'KEPALA', 'KELUARGA']],
+
+        // ANAK
+        ['ANAK', ['ANAK', 'KANDUNG']],
+        ['ANAK', ['ANAK', 'ANGKAT']],
+        ['ANAK', ['ANAK', 'TIRI']],
+        ['ANAK', ['ANAK']],
+        ['ANAK', ['ANAK2']],
+        ['ANAK', ['ANAK-']],
+        ['ANAK', ['AN4K']],
+
+        // MENANTU
+        ['MENANTU', ['MENANTU']],
+
+        // CUCU
+        ['CUCU', ['CUCU']],
+
+        // ORANG_TUA
+        ['ORANG_TUA', ['ORANG', 'TUA']],
+        ['ORANG_TUA', ['ORANGTUA']],
+
+        // MERTUA
+        ['MERTUA', ['MERTUA']],
+
+        // FAMILI_LAIN
+        ['FAMILI_LAIN', ['FAMILI', 'LAIN']],
+        ['FAMILI_LAIN', ['FAMILI', 'LAINNYA']],
+        ['FAMILI_LAIN', ['FAMILI']],
+        ['FAMILI_LAIN', ['FAMILILAIN']],
+
+        // LAINNYA
+        ['LAINNYA', ['PEMBANTU']],
+        ['LAINNYA', ['LAINNYA']],
+        ['LAINNYA', ['LAIN']],
     ];
 
     /**
@@ -212,8 +403,8 @@ final class OcrParsingService
     public static function educationOptions(): array
     {
         return array_combine(
-            array_keys(self::EDUCATIONS),
-            array_keys(self::EDUCATIONS),
+            self::CANONICAL_EDUCATIONS,
+            self::CANONICAL_EDUCATIONS,
         );
     }
 
@@ -225,8 +416,8 @@ final class OcrParsingService
     public static function occupationOptions(): array
     {
         return array_combine(
-            array_keys(self::OCCUPATIONS),
-            array_keys(self::OCCUPATIONS),
+            self::CANONICAL_OCCUPATIONS,
+            self::CANONICAL_OCCUPATIONS,
         );
     }
 
@@ -286,12 +477,24 @@ final class OcrParsingService
             );
         }
 
+        if ($this->isKtpDocument($lines)) {
+            return $this->parseKtp(
+                $lines,
+                $confidence,
+                $lowConfidence,
+                $warnings,
+                $validationErrors,
+                $startedAt,
+            );
+        }
+
         [
             $kkNumber,
             $address,
             $rt,
             $rw,
             $lingkungan,
+            $postalCode,
         ] = $this->parseHeader(
             $lines,
             $warnings,
@@ -353,6 +556,7 @@ final class OcrParsingService
             warnings: $warnings,
             validationErrors: $validationErrors,
             durationMs: $this->elapsedMs($startedAt),
+            postalCode: $postalCode,
         );
     }
 
@@ -443,6 +647,7 @@ final class OcrParsingService
         $rt = null;
         $rw = null;
         $lingkungan = null;
+        $postalCode = null;
 
         $tableHeaderIndex = $this->findTableHeader($lines);
 
@@ -450,6 +655,10 @@ final class OcrParsingService
 
         for ($i = 0; $i < $headerEnd; $i++) {
             $line = $lines[$i];
+
+            if ($postalCode === null && preg_match('/(?:kode\s*pos|kodepos|pos)\s*[:.\s]?\s*(\d{5})/i', $line, $m)) {
+                $postalCode = $m[1];
+            }
 
             [
                 $key,
@@ -465,6 +674,22 @@ final class OcrParsingService
              * - tidak terlihat seperti data anggota
              */
             if ($key === null) {
+                if ($rt === null && $rw === null) {
+                    [
+                        $parsedRt,
+                        $parsedRw,
+                    ] = $this->parseRtRwPair(
+                        $line,
+                    );
+
+                    if ($parsedRt !== null || $parsedRw !== null) {
+                        $rt = $parsedRt;
+                        $rw = $parsedRw;
+
+                        continue;
+                    }
+                }
+
                 if (
                     $address !== null
                     && $this->isAddressContinuation($line)
@@ -480,6 +705,9 @@ final class OcrParsingService
             switch ($key) {
                 case 'NOMOR_KK':
                 case 'NO_KK':
+                case 'NO_KK_DOT':
+                case 'NO_DOT':
+                case 'NO':
                 case 'NOMOR_KARTU_KELUARGA':
                     $nextLine = (
                         $kkNumber === null
@@ -528,6 +756,15 @@ final class OcrParsingService
 
                     break;
 
+                case 'KODE_POS':
+                case 'KODEPOS':
+                    $candidate = preg_replace('/\D/', '', (string) ($value ?? ''));
+                    if (preg_match('/^\d{5}$/', $candidate)) {
+                        $postalCode ??= $candidate;
+                    }
+
+                    break;
+
                 case 'RT_RW':
                     [
                         $parsedRt,
@@ -571,6 +808,31 @@ final class OcrParsingService
                     break;
 
                 case 'RT':
+                    // Periksa jika line RT juga memuat RW (contoh: RT.001 RW.004 atau RT 01 / RW 04)
+                    [
+                        $parsedRt,
+                        $parsedRw,
+                    ] = $this->parseRtRwPair('RT '.$value);
+
+                    if ($parsedRt !== null || $parsedRw !== null) {
+                        if ($rt !== null && $parsedRt !== null && $rt !== $parsedRt) {
+                            $warnings[] =
+                                'Nilai RT berbeda ditemukan pada dokumen. '
+                                .'Nilai pertama dipertahankan.';
+                        }
+
+                        if ($rw !== null && $parsedRw !== null && $rw !== $parsedRw) {
+                            $warnings[] =
+                                'Nilai RW berbeda ditemukan pada dokumen. '
+                                .'Nilai pertama dipertahankan.';
+                        }
+
+                        $rt ??= $parsedRt;
+                        $rw ??= $parsedRw;
+
+                        break;
+                    }
+
                     $candidate = $this->extractAreaNumber(
                         $value,
                     );
@@ -641,6 +903,7 @@ final class OcrParsingService
             $rt,
             $rw,
             $lingkungan,
+            $postalCode,
         ];
     }
 
@@ -737,13 +1000,14 @@ final class OcrParsingService
             );
 
             /*
-             * Label + colon.
+             * Label + colon atau dot.
              *
              * Toleran terhadap OCR run-on di mana satu karakter
              * menyatu ke label sebelum titik dua, contoh:
              *   Lingkunganl:
              *   LINGKUNGANl:
              *   lingkunganx:
+             *   RT.001
              *
              * Satu karakter alfanumerik opsional diperbolehkan
              * antara token dan colon. Ini aman karena hanya
@@ -753,7 +1017,7 @@ final class OcrParsingService
             if (
                 preg_match(
                     '/^'.$pattern.
-                    '\\s*[A-Z0-9]?\\s*:\\s*(.*)$/u',
+                    '\\s*[A-Z0-9]?\\s*[:.]\\s*(.*)$/u',
                     $upper,
                     $matches,
                 ) === 1
@@ -850,11 +1114,38 @@ final class OcrParsingService
     }
 
     /**
+     * Normalisasi karakter OCR menjadi digit angka hanya pada konteks numerik.
+     *
+     * Mapping minimal:
+     * O / o -> 0
+     * I / l / | / ! -> 1
+     * S / s -> 5
+     * B -> 8
+     */
+    private function normalizeNumericDigits(string $value): string
+    {
+        return strtr(
+            $value,
+            [
+                'O' => '0',
+                'o' => '0',
+                'I' => '1',
+                'l' => '1',
+                '|' => '1',
+                '!' => '1',
+                'S' => '5',
+                's' => '5',
+                'B' => '8',
+            ]
+        );
+    }
+
+    /**
      * Cari angka 16 digit dalam teks.
      */
     private function extractSixteenDigitNumber(
         string $value,
-        bool $allowOcrDigitCorrection = false,
+        bool $allowOcrDigitCorrection = true,
     ): ?string {
         $source = strtoupper($value);
 
@@ -862,7 +1153,7 @@ final class OcrParsingService
          * Hilangkan separator yang lazim muncul di nomor.
          */
         $compact = preg_replace(
-            '/[\s.\-\/]+/u',
+            '/[\s.\-\/|!]+/u',
             '',
             $source,
         ) ?? $source;
@@ -890,20 +1181,11 @@ final class OcrParsingService
          *
          * Contoh:
          * O -> 0
-         * I/L -> 1
+         * I/L/|/! -> 1
          * S -> 5
          * B -> 8
          */
-        $corrected = strtr(
-            $compact,
-            [
-                'O' => '0',
-                'I' => '1',
-                'L' => '1',
-                'S' => '5',
-                'B' => '8',
-            ],
-        );
+        $corrected = $this->normalizeNumericDigits($compact);
 
         if (
             preg_match(
@@ -954,13 +1236,16 @@ final class OcrParsingService
         $source = trim($value);
 
         /*
-         * Format eksplisit:
-         *
+         * Format eksplisit gabungan:
          * RT 001 RW 004
+         * RT.001 RW.004
+         * RT: 001 RW: 004
+         * RT 01 / RW 04
+         * RT.001 / RW.004
          */
         if (
             preg_match(
-                '/RT\s*[:.]?\s*(\d{1,3}).*?RW\s*[:.]?\s*(\d{1,3})/i',
+                '/RT\s*[:.]?\s*(\d{1,3})\s*(?:[-\/]|dan|,|\s)?\s*RW\s*[:.]?\s*(\d{1,3})/i',
                 $source,
                 $matches,
             ) === 1
@@ -972,15 +1257,31 @@ final class OcrParsingService
         }
 
         /*
-         * Format umum:
-         *
-         * 001/004
-         * 001-004
-         * 001 / 004
+         * Format RT/RW: 001/004 atau RT/RW 001 / 004
          */
         if (
             preg_match(
-                '/(\d{1,3})\s*[-\/]\s*(\d{1,3})/',
+                '/RT\s*\/\s*RW\s*[:.]?\s*(\d{1,3})\s*[-\/]\s*(\d{1,3})/i',
+                $source,
+                $matches,
+            ) === 1
+        ) {
+            return [
+                $this->normalizeAreaNumber($matches[1]),
+                $this->normalizeAreaNumber($matches[2]),
+            ];
+        }
+
+        /*
+         * Format umum tanpa prefix:
+         * 001/004
+         * 001-004
+         * 001 / 004
+         * 001/004 Kabupaten/Kota: GARUT
+         */
+        if (
+            preg_match(
+                '/^(\d{1,3})\s*[-\/]\s*(\d{1,3})(?!\d)/',
                 $source,
                 $matches,
             ) === 1
@@ -993,12 +1294,11 @@ final class OcrParsingService
 
         /*
          * Format OCR yang kehilangan slash:
-         *
          * 001 004
          */
         if (
             preg_match(
-                '/^\D*(\d{1,3})\D+(\d{1,3})\D*$/',
+                '/^(\d{1,3})\s+(\d{1,3})$/',
                 $source,
                 $matches,
             ) === 1
@@ -1006,6 +1306,33 @@ final class OcrParsingService
             return [
                 $this->normalizeAreaNumber($matches[1]),
                 $this->normalizeAreaNumber($matches[2]),
+            ];
+        }
+
+        /*
+         * Format jika hanya RT atau RW yang ditemukan secara eksplisit:
+         */
+        $hasRt = preg_match('/RT\s*[:.]?\s*(\d{1,3})/i', $source, $rtMatch) === 1;
+        $hasRw = preg_match('/RW\s*[:.]?\s*(\d{1,3})/i', $source, $rwMatch) === 1;
+
+        if ($hasRt && $hasRw) {
+            return [
+                $this->normalizeAreaNumber($rtMatch[1]),
+                $this->normalizeAreaNumber($rwMatch[1]),
+            ];
+        }
+
+        if ($hasRt) {
+            return [
+                $this->normalizeAreaNumber($rtMatch[1]),
+                null,
+            ];
+        }
+
+        if ($hasRw) {
+            return [
+                null,
+                $this->normalizeAreaNumber($rwMatch[1]),
             ];
         }
 
@@ -1030,40 +1357,36 @@ final class OcrParsingService
 
         /*
          * Coba koreksi sederhana jika OCR membaca
-         * angka dengan O/I/L.
+         * angka dengan karakter mirip digit.
          */
-        $source = strtoupper(
-            trim($value),
-        );
-
-        $source = strtr(
-            $source,
-            [
-                'O' => '0',
-                'I' => '1',
-                'L' => '1',
-            ],
+        $source = $this->normalizeNumericDigits(
+            strtoupper(trim($value))
         );
 
         if (
             preg_match(
+                '/\b\d{1,3}\b/',
+                $source,
+                $matches,
+            ) === 1 ||
+            preg_match(
                 '/\d{1,3}/',
                 $source,
                 $matches,
-            ) !== 1
+            ) === 1
         ) {
-            return null;
+            return $this->normalizeAreaNumber(
+                $matches[0],
+            );
         }
 
-        return $this->normalizeAreaNumber(
-            $matches[0],
-        );
+        return null;
     }
 
     /**
-     * RT/RW di database menggunakan format 01, 02, dst.
+     * RT/RW di database/domain menggunakan format 3 digit canonical: 001, 002, 004, dst.
      *
-     * Parser mengembalikan format canonical yang sama.
+     * Parser mengembalikan format canonical yang sama tanpa memangkas leading zero.
      */
     private function normalizeAreaNumber(
         string $value,
@@ -1090,7 +1413,7 @@ final class OcrParsingService
 
         return str_pad(
             (string) $number,
-            2,
+            3,
             '0',
             STR_PAD_LEFT,
         );
@@ -1218,15 +1541,39 @@ final class OcrParsingService
 
             $seenNiks[$nik] = true;
 
-            $members[] = $this->parseMemberRow(
+            $rowWarnings = [];
+            $rowValidationErrors = [];
+
+            $parsedRow = $this->parseMemberRow(
                 $currentTokens,
                 $nikIndex,
                 $confidence,
                 $lowConfidence,
-                $warnings,
-                $validationErrors,
-                $currentOrdinal ?? count($members) + 1,
+                $rowWarnings,
+                $rowValidationErrors,
+                $currentOrdinal ?? (count($members) + 1),
             );
+
+            // Abaikan baris semu/garbage yang tidak memiliki nama, gender, maupun tanggal lahir
+            if (
+                ($parsedRow->nama === null || trim($parsedRow->nama, ' -_') === '')
+                && $parsedRow->gender === null
+                && $parsedRow->birthDate === null
+            ) {
+                $currentTokens = null;
+                $currentOrdinal = null;
+
+                return;
+            }
+
+            foreach ($rowWarnings as $w) {
+                $warnings[] = $w;
+            }
+            foreach ($rowValidationErrors as $v) {
+                $validationErrors[] = $v;
+            }
+
+            $members[] = $parsedRow;
 
             $currentTokens = null;
             $currentOrdinal = null;
@@ -1268,8 +1615,7 @@ final class OcrParsingService
                 $flushCurrent();
 
                 $currentTokens = $tokens;
-                $currentOrdinal =
-                    $i - $headerIndex;
+                $currentOrdinal = $i - $headerIndex;
 
                 continue;
             }
@@ -1302,9 +1648,11 @@ final class OcrParsingService
             ) {
                 $flushCurrent();
 
-                $warnings[] =
-                    'Baris anggota tidak dapat diuraikan (NIK tidak terbaca): '
-                    .$line;
+                if ($this->looksLikeMemberRow($line)) {
+                    $warnings[] =
+                        'Baris anggota tidak dapat diuraikan (NIK tidak terbaca): '
+                        .$line;
+                }
 
                 continue;
             }
@@ -1329,7 +1677,431 @@ final class OcrParsingService
          */
         $flushCurrent();
 
+        /*
+         * Two-Table KK: Row stitching dengan Tabel 2 (Status Perkawinan & Hubungan Keluarga).
+         */
+        $table2Data = $this->parseTableTwo($lines, $warnings, $headerIndex);
+        if ($table2Data !== []) {
+            $stitched = [];
+            foreach ($members as $idx => $member) {
+                $ordinal = $idx + 1;
+                $t2 = $table2Data[$ordinal] ?? null;
+
+                $marital = $member->maritalStatus ?? ($t2['marital'] ?? null);
+                $relation = $member->familyRelation ?? ($t2['relation'] ?? null);
+
+                $stitched[] = new ParsedResident(
+                    nama: $member->nama,
+                    nik: $member->nik,
+                    gender: $member->gender,
+                    birthPlace: $member->birthPlace,
+                    birthDate: $member->birthDate,
+                    religion: $member->religion,
+                    education: $member->education,
+                    occupation: $member->occupation,
+                    maritalStatus: $marital,
+                    familyRelation: $relation,
+                    confidence: $member->confidence,
+                    lowConfidence: $member->lowConfidence,
+                );
+            }
+            $members = $stitched;
+        }
+
         return $members;
+    }
+
+    /**
+     * Parse Tabel 2 Kartu Keluarga (Status Perkawinan, Hubungan Keluarga, dll.)
+     *
+     * @param  array<int, string>  $lines
+     * @param  array<int, string>  $warnings
+     * @return array<int, array{marital: ?string, relation: ?string}>
+     */
+    private function parseTableTwo(
+        array $lines,
+        array &$warnings,
+        ?int $headerIndex = null,
+    ): array {
+        $table2Index = null;
+        $count = count($lines);
+        $startIndex = $headerIndex !== null ? $headerIndex + 1 : 0;
+
+        for ($i = $startIndex; $i < $count; $i++) {
+            if ($this->looksLikeMemberRow($lines[$i])) {
+                continue;
+            }
+
+            $curr = strtoupper($lines[$i]);
+            $next = isset($lines[$i + 1]) ? strtoupper($lines[$i + 1]) : '';
+            $combined = $curr.' '.$next;
+
+            $hasStatus = str_contains($curr, 'STATUS PERKAWINAN') || (str_contains($curr, 'PERKAWINAN') && str_contains($curr, 'STATUS'));
+            $hasHubungan = str_contains($curr, 'STATUS HUBUNGAN')
+                || str_contains($curr, 'HUBUNGAN DALAM KELUARGA')
+                || str_contains($curr, 'HUBUNGAN KELUARGA')
+                || str_contains($curr, 'STATUS HUBUNGAN DALAM')
+                || str_contains($curr, 'HUBUNGAN')
+                || str_contains($curr, 'SHDK');
+            $hasAyahIbu = str_contains($curr, 'NAMA AYAH')
+                || str_contains($curr, 'NAMA IBU')
+                || str_contains($curr, 'KEWARGANEGARAAN')
+                || str_contains($curr, 'DOKUMEN IMIGRASI')
+                || str_contains($curr, 'PASPOR')
+                || str_contains($curr, 'KITAS')
+                || str_contains($curr, 'KITAP');
+
+            if ($hasHubungan || ($hasStatus && $hasAyahIbu) || ($hasStatus && $hasHubungan) || ($hasStatus && str_contains($combined, 'HUBUNGAN'))) {
+                $lastHeaderLine = $i;
+                if (isset($lines[$i + 1]) && $this->looksLikeTableNoise($lines[$i + 1])) {
+                    $lastHeaderLine = $i + 1;
+                }
+                if (isset($lines[$i + 2]) && $this->looksLikeTableNoise($lines[$i + 2])) {
+                    $lastHeaderLine = $i + 2;
+                }
+                $table2Index = $lastHeaderLine;
+                break;
+            }
+        }
+
+        /*
+         * Fallback jika header Tabel 2 sama sekali tidak terbaca / hilang:
+         * Deteksi baris pertama yang berisi vocabulary status perkawinan / hubungan keluarga.
+         */
+        if ($table2Index === null) {
+            for ($i = $startIndex; $i < $count; $i++) {
+                if ($this->looksLikeMemberRow($lines[$i])) {
+                    continue;
+                }
+
+                $tokens = $this->tokenize($lines[$i]);
+                if ($tokens === []) {
+                    continue;
+                }
+                $usedRanges = [];
+                $relMatch = $this->findVocabularyMatch($tokens, 0, $this->phrasesFor('relation'), $usedRanges);
+                $marMatch = $this->findVocabularyMatch($tokens, 0, $this->phrasesFor('marital'), $usedRanges);
+                if ($relMatch !== null || $marMatch !== null) {
+                    $table2Index = max(0, $i - 1);
+                    break;
+                }
+            }
+        }
+
+        if ($table2Index === null) {
+            return [];
+        }
+
+        $table2Rows = [];
+        $currentOrdinal = 1;
+
+        for ($i = $table2Index + 1; $i < $count; $i++) {
+            $line = $lines[$i];
+
+            if ($this->isEndOfMemberTable($line)) {
+                break;
+            }
+
+            if ($this->looksLikeTableNoise($line)) {
+                continue;
+            }
+
+            $tokens = $this->tokenize($line);
+            if ($tokens === []) {
+                continue;
+            }
+
+            $ordinal = null;
+            if (preg_match('/^\d{1,2}$/', $tokens[0][1]) === 1) {
+                $ordinal = (int) $tokens[0][1];
+            } else {
+                $ordinal = $currentOrdinal;
+            }
+
+            $usedRanges = [];
+            $maritalMatch = $this->findVocabularyMatch($tokens, 0, $this->phrasesFor('marital'), $usedRanges);
+            if ($maritalMatch) {
+                $usedRanges[] = [$maritalMatch[1], $maritalMatch[1] + $maritalMatch[2] - 1];
+            }
+
+            $relationMatch = $this->findVocabularyMatch($tokens, 0, $this->phrasesFor('relation'), $usedRanges);
+
+            $marital = $maritalMatch ? $maritalMatch[0] : null;
+            $relation = $relationMatch ? $relationMatch[0] : null;
+
+            if ($marital !== null || $relation !== null) {
+                $table2Rows[$ordinal] = [
+                    'marital' => $marital,
+                    'relation' => $relation,
+                ];
+                $currentOrdinal = $ordinal + 1;
+            }
+        }
+
+        return $table2Rows;
+    }
+
+    /**
+     * Deteksi apakah dokumen yang di-scan merupakan KTP (Kartu Tanda Penduduk).
+     *
+     * @param  array<int, string>  $lines
+     */
+    private function isKtpDocument(array $lines): bool
+    {
+        $hasKtpHeader = false;
+        $hasKkHeader = false;
+
+        foreach ($lines as $line) {
+            $upper = strtoupper($line);
+
+            if (
+                str_contains($upper, 'PROVINSI')
+                || str_contains($upper, 'KARTU TANDA PENDUDUK')
+                || str_contains($upper, 'REPUBLIK INDONESIA')
+                || str_contains($upper, 'GOL. DARAH')
+                || str_contains($upper, 'BERLAKU HINGGA')
+                || (str_contains($upper, 'KEWARGANEGARAAN') && str_contains($upper, 'WNI'))
+            ) {
+                $hasKtpHeader = true;
+            }
+
+            if (
+                str_contains($upper, 'KARTU KELUARGA')
+                || str_contains($upper, 'NOMOR KK')
+                || str_contains($upper, 'NO KK')
+                || str_contains($upper, 'NOMOR KARTU KELUARGA')
+                || str_contains($upper, 'KEPALA KELUARGA')
+            ) {
+                $hasKkHeader = true;
+            }
+        }
+
+        return $hasKtpHeader && ! $hasKkHeader;
+    }
+
+    /**
+     * Parse dokumen KTP menjadi ParsedOcrResult.
+     *
+     * @param  array<int, string>  $lines
+     * @param  array<int, string>  $warnings
+     * @param  array<int, string>  $validationErrors
+     */
+    private function parseKtp(
+        array $lines,
+        float $confidence,
+        bool $lowConfidence,
+        array &$warnings,
+        array &$validationErrors,
+        float $startedAt,
+    ): ParsedOcrResult {
+        $nik = null;
+        $nama = null;
+        $birthPlace = null;
+        $birthDate = null;
+        $gender = null;
+        $address = null;
+        $rt = null;
+        $rw = null;
+        $kelDesa = null;
+        $kecamatan = null;
+        $religion = null;
+        $marital = null;
+        $occupation = null;
+
+        $count = count($lines);
+
+        for ($i = 0; $i < $count; $i++) {
+            $line = $lines[$i];
+            $upper = strtoupper(trim($line));
+
+            // 1. NIK
+            if ($nik === null && (str_starts_with($upper, 'NIK') || preg_match('/\b\d{16}\b/', $upper))) {
+                $candidate = $this->extractSixteenDigitNumber($line, true);
+                if ($candidate !== null) {
+                    $nik = $candidate;
+
+                    continue;
+                }
+            }
+
+            // 2. NAMA
+            if ($nama === null && preg_match('/^NAMA\s*[:.]?\s*(.*)$/i', $line, $m)) {
+                $val = trim($m[1]);
+                if ($val !== '') {
+                    $nama = $val;
+
+                    continue;
+                } elseif (isset($lines[$i + 1])) {
+                    $nama = trim($lines[$i + 1]);
+
+                    continue;
+                }
+            }
+
+            // 3. TEMPAT / TGL LAHIR
+            if (($birthPlace === null || $birthDate === null) && (str_contains($upper, 'TEMPAT') || str_contains($upper, 'LAHIR') || str_contains($upper, 'TGL LAHIR'))) {
+                $val = preg_replace('/^(?:TEMPAT|TGL|TANGGAL|TEMPAT\/TGL|TEMPAT\/TANGGAL)\s*LAHIR\s*[:.]?\s*/i', '', $line) ?? $line;
+
+                $dob = $this->extractBirthDate($val);
+                if ($dob !== null) {
+                    $birthDate = $dob;
+                }
+
+                $parts = explode(',', $val);
+                if (count($parts) > 1) {
+                    $birthPlace = trim($parts[0]);
+                    if ($birthDate === null) {
+                        $birthDate = $this->extractBirthDate(trim($parts[1]));
+                    }
+                } else {
+                    $placeOnly = preg_replace('/\b\d{1,2}[-\/.]\d{1,2}[-\/.]\d{2,4}\b/', '', $val) ?? $val;
+                    $placeOnly = $this->removeKnownGenderWords(trim($placeOnly, ' :,-.'));
+                    if ($placeOnly !== '') {
+                        $birthPlace = $placeOnly;
+                    }
+                }
+
+                continue;
+            }
+
+            // 4. JENIS KELAMIN
+            if ($gender === null && str_contains($upper, 'JENIS KELAMIN')) {
+                $cleanGender = preg_replace('/[_\s\-]+/u', '', $upper) ?? $upper;
+                if (str_contains($cleanGender, 'PEREMPUAN') || str_contains($cleanGender, 'PEREMP4N') || str_contains($cleanGender, 'PEREMPU4N')) {
+                    $gender = 'PEREMPUAN';
+                } elseif (str_contains($cleanGender, 'LAKILAKI') || str_contains($cleanGender, 'LAKI')) {
+                    $gender = 'LAKI_LAKI';
+                }
+
+                continue;
+            }
+
+            // 5. ALAMAT
+            if ($address === null && preg_match('/^ALAMAT\s*[:.]?\s*(.*)$/i', $line, $m)) {
+                $val = trim($m[1]);
+                if ($val !== '') {
+                    $address = $val;
+
+                    continue;
+                }
+            }
+
+            // 6. RT/RW
+            if (($rt === null || $rw === null) && (str_contains($upper, 'RT/RW') || str_contains($upper, 'RT.') || str_starts_with($upper, 'RT '))) {
+                [$parsedRt, $parsedRw] = $this->parseRtRwPair($line);
+                $rt ??= $parsedRt;
+                $rw ??= $parsedRw;
+
+                continue;
+            }
+
+            // 7. KEL / DESA
+            if ($kelDesa === null && preg_match('#^(?:KEL\s*/\s*DESA|KELURAHAN|KEL|DESA)\s*[:.]?\s*(.*)$#i', $line, $m)) {
+                $val = trim($m[1]);
+                if ($val !== '') {
+                    $kelDesa = $val;
+
+                    continue;
+                }
+            }
+
+            // 8. KECAMATAN
+            if ($kecamatan === null && preg_match('/^KECAMATAN\s*[:.]?\s*(.*)$/i', $line, $m)) {
+                $val = trim($m[1]);
+                if ($val !== '') {
+                    $kecamatan = $val;
+
+                    continue;
+                }
+            }
+
+            // 9. AGAMA
+            if ($religion === null && str_contains($upper, 'AGAMA')) {
+                $val = preg_replace('/^AGAMA\s*[:.]?\s*/i', '', $line) ?? $line;
+                $tokens = $this->tokenize($val);
+                $match = $this->findVocabularyMatch($tokens, 0, $this->phrasesFor('religion'), []);
+                if ($match !== null) {
+                    $religion = $match[0];
+
+                    continue;
+                }
+            }
+
+            // 10. STATUS PERKAWINAN
+            if ($marital === null && (str_contains($upper, 'STATUS PERKAWINAN') || str_contains($upper, 'PERKAWINAN'))) {
+                $val = preg_replace('/^(?:STATUS\s+)?PERKAWINAN\s*[:.]?\s*/i', '', $line) ?? $line;
+                $tokens = $this->tokenize($val);
+                $match = $this->findVocabularyMatch($tokens, 0, $this->phrasesFor('marital'), []);
+                if ($match !== null) {
+                    $marital = $match[0];
+
+                    continue;
+                }
+            }
+
+            // 11. PEKERJAAN
+            if ($occupation === null && str_contains($upper, 'PEKERJAAN')) {
+                $val = preg_replace('/^(?:JENIS\s+)?PEKERJAAN\s*[:.]?\s*/i', '', $line) ?? $line;
+                $tokens = $this->tokenize($val);
+                $match = $this->findVocabularyMatch($tokens, 0, $this->phrasesFor('occupation'), []);
+                if ($match !== null) {
+                    $occupation = $match[0];
+
+                    continue;
+                } elseif (trim($val) !== '') {
+                    $occupation = trim($val);
+
+                    continue;
+                }
+            }
+        }
+
+        if ($nik === null) {
+            $validationErrors[] = 'NIK tidak ditemukan pada dokumen KTP.';
+        }
+        if ($nama === null) {
+            $validationErrors[] = 'Nama tidak ditemukan pada dokumen KTP.';
+        }
+
+        $members = [];
+        if ($nik !== null || $nama !== null) {
+            $members[] = new ParsedResident(
+                nama: $this->sanitizeName($nama),
+                nik: $nik ?? '',
+                gender: $gender,
+                birthPlace: $this->sanitizeBirthPlace($birthPlace),
+                birthDate: $birthDate,
+                religion: $religion,
+                education: null,
+                occupation: $occupation,
+                maritalStatus: $marital,
+                familyRelation: 'KEPALA_KELUARGA',
+                confidence: $confidence,
+                lowConfidence: $lowConfidence,
+            );
+        }
+
+        $this->log(
+            $confidence,
+            $lowConfidence,
+            count($members),
+            count($warnings),
+            $startedAt,
+        );
+
+        return new ParsedOcrResult(
+            confidence: $confidence,
+            lowConfidence: $lowConfidence,
+            kkNumber: null,
+            address: $address,
+            rt: $rt,
+            rw: $rw,
+            lingkungan: $kelDesa ?? $kecamatan,
+            members: $members,
+            warnings: $warnings,
+            validationErrors: $validationErrors,
+            durationMs: $this->elapsedMs($startedAt),
+        );
     }
 
     /**
@@ -1450,17 +2222,19 @@ final class OcrParsingService
 
         $nama = $nameTokens === []
             ? null
-            : trim(
-                implode(
-                    ' ',
-                    array_column(
-                        $nameTokens,
-                        0,
+            : $this->sanitizeName(
+                trim(
+                    implode(
+                        ' ',
+                        array_column(
+                            $nameTokens,
+                            0,
+                        ),
                     ),
                 ),
             );
 
-        if ($nama === '') {
+        if ($nama === null || $nama === '') {
             $nama = null;
 
             $validationErrors[] =
@@ -1497,8 +2271,13 @@ final class OcrParsingService
             $i++
         ) {
             $norm = $afterNik[$i][1];
+            $cleanGender = preg_replace('/[_\s\-]+/u', '', $norm) ?? $norm;
 
-            if ($norm === 'PEREMPUAN') {
+            if (
+                $cleanGender === 'PEREMPUAN'
+                || $cleanGender === 'PEREMP4N'
+                || $cleanGender === 'PEREMPU4N'
+            ) {
                 $gender = 'PEREMPUAN';
                 $genderIndex = $i;
 
@@ -1506,8 +2285,9 @@ final class OcrParsingService
             }
 
             if (
-                $norm === 'LAKI-LAKI'
-                || $norm === 'LAKILAKI'
+                $cleanGender === 'LAKILAKI'
+                || $cleanGender === 'LAKI-LAKI'
+                || $cleanGender === 'LAKI_LAKI'
             ) {
                 $gender = 'LAKI_LAKI';
                 $genderIndex = $i;
@@ -1516,9 +2296,9 @@ final class OcrParsingService
             }
 
             if (
-                $norm === 'LAKI'
+                $cleanGender === 'LAKI'
                 && isset($afterNik[$i + 1])
-                && $afterNik[$i + 1][1] === 'LAKI'
+                && (preg_replace('/[_\s\-]+/u', '', $afterNik[$i + 1][1]) === 'LAKI')
             ) {
                 $gender = 'LAKI_LAKI';
                 $genderIndex = $i;
@@ -1569,10 +2349,11 @@ final class OcrParsingService
             foreach (
                 $afterNik as [$raw, $norm]
             ) {
+                $normDigits = $this->normalizeNumericDigits($norm);
                 if (
                     preg_match(
                         '/^\d{1,2}[-\/.]\d{1,2}[-\/.]\d{2,4}$/',
-                        $norm,
+                        $normDigits,
                     ) === 1
                 ) {
                     $validationErrors[] =
@@ -1626,12 +2407,16 @@ final class OcrParsingService
             );
 
             $birthPlace =
-                $this->removeKnownGenderWords(
-                    $this->joinRawTokens(
-                        $between,
+                $this->sanitizeBirthPlace(
+                    $this->removeKnownGenderWords(
+                        $this->joinRawTokens(
+                            $between,
+                        ),
                     ),
                 );
         }
+
+        $birthPlace = $this->sanitizeBirthPlace($birthPlace);
 
         if ($birthPlace === '') {
             $birthPlace = null;
@@ -1757,10 +2542,12 @@ final class OcrParsingService
     private function extractBirthDate(
         string $value,
     ): ?string {
+        $normalized = $this->normalizeNumericDigits($value);
+
         if (
             preg_match(
                 '/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})$/',
-                $value,
+                $normalized,
                 $matches,
             ) !== 1
         ) {
@@ -1781,13 +2568,19 @@ final class OcrParsingService
         string $value,
     ): string {
         $value = preg_replace(
-            '/\bLAKI(?:-?LAKI)?\b/i',
+            '/\bLAKI[\s_\-]*LAKI\b/i',
             '',
             $value,
         ) ?? $value;
 
         $value = preg_replace(
-            '/\bPEREMPUAN\b/i',
+            '/\bLAKILAKI\b/i',
+            '',
+            $value,
+        ) ?? $value;
+
+        $value = preg_replace(
+            '/\bPEREMP(?:UAN|4N|U4N)\b/i',
             '',
             $value,
         ) ?? $value;
@@ -1858,8 +2651,11 @@ final class OcrParsingService
             }
 
             foreach (
-                $phrases as $label => $sequence
+                $phrases as $key => $val
             ) {
+                $label = is_int($key) ? $val[0] : $key;
+                $sequence = is_int($key) ? $val[1] : $val;
+
                 $length = count($sequence);
 
                 if (
@@ -1942,8 +2738,29 @@ final class OcrParsingService
             'H1NDU' => 'HINDU',
             'BUDHHA' => 'BUDDHA',
             'KAW1N' => 'KAWIN',
+            'KAWN' => 'KAWIN',
+            'BELUMKAWN' => 'BELUMKAWIN',
             '1STRI' => 'ISTRI',
+            'ISTERI' => 'ISTRI',
             'AN4K' => 'ANAK',
+            'ANAK2' => 'ANAK',
+            'ANAK-' => 'ANAK',
+            'KEPALAKEUARGA' => 'KEPALAKELUARGA',
+            'KEPALAKEL' => 'KEPALAKELUARGA',
+            'ORANGTUA' => 'ORANG TUA',
+            'SI' => 'S1',
+            'S-I' => 'S1',
+            'S-II' => 'S2',
+            'S-III' => 'S3',
+            'D-I' => 'D1',
+            'D-II' => 'D2',
+            'D-III' => 'D3',
+            'D-IV' => 'D4',
+            'D-1' => 'D1',
+            'D-2' => 'D2',
+            'D-3' => 'D3',
+            'D-4' => 'D4',
+            'PELAJARIMAHASISWA' => 'PELAJAR/MAHASISWA',
         ];
 
         return ($aliases[$actual] ?? $actual)
@@ -2073,8 +2890,18 @@ final class OcrParsingService
             /*
              * LAKI - LAKI dengan separator OCR.
              */
-            if ($norm === 'LAKI_ LAKI') {
-                $norm = 'LAKI';
+            if ($norm === 'LAKI_ LAKI' || $norm === 'LAKI_LAKI') {
+                $norm = 'LAKI-LAKI';
+            }
+
+            /*
+             * Jika token berupa 16-digit angka atau variasi OCR digit NIK,
+             * lakukan normalisasi angka pada token tersebut.
+             */
+            $compact = preg_replace('/[\s.\-\/|!]+/u', '', $norm) ?? $norm;
+            $digitCandidate = $this->normalizeNumericDigits($compact);
+            if (preg_match('/^\d{16}$/', $digitCandidate) === 1) {
+                $norm = $digitCandidate;
             }
 
             $tokens[] = [
@@ -2114,17 +2941,24 @@ final class OcrParsingService
             $i++
         ) {
             $rawRun = '';
+            $normRun = '';
             $j = $i;
 
             while (
                 $j < $count
                 && preg_match(
-                    '/^\d{1,6}$/',
+                    '/^[0-9OolI|!SsBb.\-\/]{1,8}$/',
                     $tokens[$j][1],
                 ) === 1
             ) {
                 $rawRun .= $tokens[$j][0];
+                $compactToken = preg_replace('/[\s.\-\/|!]+/u', '', $tokens[$j][1]) ?? $tokens[$j][1];
+                $normRun .= $this->normalizeNumericDigits($compactToken);
                 $j++;
+
+                if (strlen($normRun) >= 16) {
+                    break;
+                }
             }
 
             /*
@@ -2133,11 +2967,11 @@ final class OcrParsingService
              */
             if (
                 $j - $i >= 2
-                && strlen($rawRun) === 16
+                && preg_match('/^\d{16}$/', $normRun) === 1
             ) {
                 $merged[] = [
                     $rawRun,
-                    $rawRun,
+                    $normRun,
                 ];
 
                 $i = $j - 1;
@@ -2202,25 +3036,73 @@ final class OcrParsingService
             'PENJELASAN',
             'CATATAN',
             'DITETAPKAN DI',
+            'DITETAPKAN',
+            'DIKELUARKAN DI',
+            'DIKELUARKAN',
+            'PADA TANGGAL',
             'MENGETAHUI',
             'KEPALA DINAS',
             'KEPALA DESA',
             'LURAH',
             'CAMAT',
+            'TANDA TANGAN',
+            'TANDATANGAN',
+            'LEMBAR I',
+            'LEMBAR II',
+            'LEMBAR III',
+            'LEMBAR IV',
+            'TGL PENERBITAN',
+            'TANGGAL PENERBITAN',
+            'TANGGAL CETAK',
+            'I. KEPALA KELUARGA',
+            'II. RT/RW',
+            'III. DESA/KELURAHAN',
+            'IV. KECAMATAN',
         ];
 
         foreach ($endMarkers as $marker) {
-            if (
-                str_starts_with(
-                    $upper,
-                    $marker,
-                )
-            ) {
+            if (str_starts_with($upper, $marker)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Sanitasi nama hasil OCR berbasis field:
+     * - Hilangkan noise dekoratif / batas kolom tabel di awal/akhir: ), (, |, :, ;, -, /, \, _, ., `, ~, !
+     * - Pertahankan karakter sah di tengah nama (spasi, titik inisial, tanda petik/apostrof, tanda hubung).
+     */
+    private function sanitizeName(?string $name): ?string
+    {
+        if ($name === null) {
+            return null;
+        }
+
+        $cleaned = preg_replace('/^[)\(|:;\-\/\\\\_\.\`\~\!0-9\s]+/u', '', $name) ?? $name;
+        $cleaned = preg_replace('/[)\(|:;\-\/\\\\_\.\`\~\!\s]+$/u', '', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/\s+/u', ' ', trim($cleaned)) ?? trim($cleaned);
+
+        return $cleaned !== '' ? $cleaned : null;
+    }
+
+    /**
+     * Sanitasi tempat lahir:
+     * - Hilangkan noise batas tabel/garis di awal dan akhir string.
+     */
+    private function sanitizeBirthPlace(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $cleaned = $this->removeKnownGenderWords($value);
+        $cleaned = preg_replace('/^[)\(|:;\-\/\\\\_\.\`\~\!0-9\s]+/u', '', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/[)\(|:;\-\/\\\\_\.\`\~\!\s]+$/u', '', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/\s+/u', ' ', trim($cleaned)) ?? trim($cleaned);
+
+        return $cleaned !== '' ? $cleaned : null;
     }
 
     /**
@@ -2237,6 +3119,11 @@ final class OcrParsingService
             return true;
         }
 
+        // Abaikan baris penomoran kolom tabel: (1) (2) (3) ... atau 1 2 3 4 5 6 7 8 9 10
+        if (preg_match('/^(?:\(?\d{1,2}\)?[\s|\-_.:]*){3,}$/', $upper) === 1) {
+            return true;
+        }
+
         $noise = [
             'NO',
             'NAMA',
@@ -2249,6 +3136,21 @@ final class OcrParsingService
             'PEKERJAAN',
             'STATUS PERKAWINAN',
             'STATUS HUBUNGAN DALAM KELUARGA',
+            'HUBUNGAN DALAM KELUARGA',
+            'HUBUNGAN KELUARGA',
+            'STATUS HUBUNGAN',
+            'HUBUNGAN',
+            'SHDK',
+            'NAMA AYAH',
+            'NAMA IBU',
+            'KEWARGANEGARAAN',
+            'DOKUMEN IMIGRASI',
+            'PASPOR',
+            'KITAS',
+            'KITAP',
+            'NO. PASPOR',
+            'NO. KITAS',
+            'NO. KITAP',
         ];
 
         foreach ($noise as $marker) {

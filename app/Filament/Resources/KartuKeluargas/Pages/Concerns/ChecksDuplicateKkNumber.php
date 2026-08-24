@@ -83,7 +83,15 @@ trait ChecksDuplicateKkNumber
             'number' => (string) $kk->kk_number,
             'kepala' => $kk->kepalaKeluarga()?->full_name
                 ?? 'Belum ditentukan',
+            'address' => (string) ($kk->address ?? '-'),
+            'rt' => $kk->nomor_rt ? 'RT '.$kk->nomor_rt : '-',
+            'rw' => (string) ($kk->nama_wilayah ?? '-'),
             'wilayah' => $kk->rt_rw_label ?? '-',
+            'member_count' => $kk->jumlah_anggota.' orang',
+            'view_url' => KartuKeluargaResource::getUrl(
+                'view',
+                ['record' => $kk]
+            ),
             'edit_url' => KartuKeluargaResource::getUrl(
                 'edit',
                 ['record' => $kk]

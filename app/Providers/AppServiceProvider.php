@@ -4,12 +4,13 @@ namespace App\Providers;
 
 use App\Services\DatabaseDumper;
 use App\Services\DatabaseImporter;
-use App\Services\MysqlClientDatabaseImporter;
-use App\Services\MysqldumpDatabaseDumper;
 use App\Services\OcrEngine;
+use App\Services\SqliteDatabaseDumper;
+use App\Services\SqliteDatabaseImporter;
 use App\Services\TesseractOcrEngine;
 use Filament\Support\Facades\FilamentView;
 use Filament\View\PanelsRenderHook;
+use Illuminate\Foundation\Vite;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -23,13 +24,11 @@ class AppServiceProvider extends ServiceProvider
         // fake so the real Tesseract binary is never invoked by the suite.
         $this->app->bind(OcrEngine::class, TesseractOcrEngine::class);
 
-        // Database dump for ZIP backups (Phase 6.2). Tests override this binding
-        // with a fake so the real mysqldump client is never invoked by the suite.
-        $this->app->bind(DatabaseDumper::class, MysqldumpDatabaseDumper::class);
+        // Database dump for ZIP backups (Phase 6.2 / Tauri SQLite).
+        $this->app->bind(DatabaseDumper::class, SqliteDatabaseDumper::class);
 
-        // Database import for restores (Phase 6.3). Tests override this binding
-        // with a fake so the real mysql client is never invoked by the suite.
-        $this->app->bind(DatabaseImporter::class, MysqlClientDatabaseImporter::class);
+        // Database import for restores (Phase 6.3 / Tauri SQLite).
+        $this->app->bind(DatabaseImporter::class, SqliteDatabaseImporter::class);
     }
 
     /**
@@ -43,7 +42,7 @@ class AppServiceProvider extends ServiceProvider
         // the stylesheet is injected for every panel page (dashboard included).
         FilamentView::registerRenderHook(
             PanelsRenderHook::STYLES_AFTER,
-            fn (): string => app(\Illuminate\Foundation\Vite::class)('resources/css/sipeta-admin.css')->toHtml(),
+            fn (): string => app(Vite::class)('resources/css/sipeta-admin.css')->toHtml(),
         );
     }
 }

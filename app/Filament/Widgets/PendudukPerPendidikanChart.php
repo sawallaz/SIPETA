@@ -29,17 +29,14 @@ class PendudukPerPendidikanChart extends ChartWidget
     {
         $educations = Education::query()
             ->withCount([
-                'penduduks as active_count' =>
-                    fn (Builder $query) =>
-                        $query->where(
-                            'resident_status',
-                            ResidentStatus::ACTIVE->value
-                        ),
+                'penduduks as active_count' => fn (Builder $query) => $query->where(
+                    'resident_status',
+                    ResidentStatus::ACTIVE->value
+                ),
             ])
             ->get()
             ->filter(
-                fn (Education $education) =>
-                    $education->active_count > 0
+                fn (Education $education) => $education->active_count > 0
             )
             ->sortByDesc('active_count')
             ->values();

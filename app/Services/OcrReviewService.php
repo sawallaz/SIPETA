@@ -132,7 +132,7 @@ final class OcrReviewService
                     'education' => $member->education ?? '',
                     'occupation' => $member->occupation ?? '',
                     'marital_status' => $member->maritalStatus ?? '',
-                    'family_relation' => $member->familyRelation ?? '',
+                    'family_relation' => self::normalizeRelationValue($member->familyRelation ?? '') ?? ($member->familyRelation ?? ''),
                 ],
                 $parsed->members,
             ),
@@ -223,14 +223,37 @@ final class OcrReviewService
                 $errors["{$path}marital_status"] = "Status perkawinan anggota ke-{$ordinal} tidak dikenal";
             }
 
+            $rel = self::normalizeRelationValue($member['family_relation'] ?? null);
             if ($this->blank($member['family_relation'] ?? null)) {
                 $errors["{$path}family_relation"] = "Status hubungan keluarga anggota ke-{$ordinal} wajib diisi";
-            } elseif (! in_array($member['family_relation'], self::familyRelations(), true)) {
+            } elseif ($rel === null) {
                 $errors["{$path}family_relation"] = "Status hubungan keluarga anggota ke-{$ordinal} tidak dikenal";
             }
         }
 
         return $errors;
+    }
+
+    public static function normalizeRelationValue(mixed $value): ?string
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+
+        $upper = strtoupper(trim((string) $value));
+
+        return match ($upper) {
+            'KEPALA_KELUARGA', 'KEPALA KELUARGA', 'KEPALA KEL.', 'KEPALA KEL', 'KEPALAKELUARGA', 'KEPALAKEUARGA', 'KEPALAKEL', 'KEPALA' => FamilyRelation::KEPALA_KELUARGA->value,
+            'ISTRI', 'ISTERI', '1STRI', 'ISTRI KEPALA KELUARGA' => FamilyRelation::ISTRI->value,
+            'ANAK', 'ANAK2', 'ANAK-', 'AN4K', 'ANAK KANDUNG', 'ANAK ANGKAT', 'ANAK TIRI' => FamilyRelation::ANAK->value,
+            'MENANTU' => FamilyRelation::MENANTU->value,
+            'CUCU' => FamilyRelation::CUCU->value,
+            'ORANG_TUA', 'ORANG TUA', 'ORANGTUA', 'BAPAK', 'IBU', 'AYAH' => FamilyRelation::ORANG_TUA->value,
+            'MERTUA' => FamilyRelation::MERTUA->value,
+            'FAMILI_LAIN', 'FAMILI LAIN', 'FAMILI LAINNYA', 'FAMILI', 'FAMILILAIN' => FamilyRelation::FAMILI_LAIN->value,
+            'PEMBANTU', 'LAINNYA', 'LAIN' => FamilyRelation::LAINNYA->value,
+            default => FamilyRelation::tryFrom($upper)?->value ?? null,
+        };
     }
 
     /**

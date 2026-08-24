@@ -206,7 +206,7 @@ TXT;
         // Lookup masters are resolved (created when absent) to the query.
         $this->assertSame('Islam', $head->religion->name);
         $this->assertSame('Slta/Sederajat', $head->education->name);
-        $this->assertSame('Buruh Harian Lepas', $head->occupation->name);
+        $this->assertSame('Buruh', $head->occupation->name);
     }
 
     public function test_duplicate_nik_against_existing_penduduk_is_rejected_without_writes(): void

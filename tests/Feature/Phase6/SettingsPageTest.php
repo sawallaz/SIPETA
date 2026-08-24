@@ -114,4 +114,11 @@ class SettingsPageTest extends TestCase
                 'province_name',
             ]);
     }
+
+    public function test_settings_page_does_not_contain_riwayat_kk_shortcut(): void
+    {
+        $this->get(Settings::getUrl())
+            ->assertOk()
+            ->assertDontSee('Riwayat Kartu Keluarga');
+    }
 }

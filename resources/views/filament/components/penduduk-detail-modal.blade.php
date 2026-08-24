@@ -1,17 +1,18 @@
 @php
     use App\Models\Penduduk;
     /** @var Penduduk $record */
-    $ktpDoc = $record->documents()
+    $record = isset($getRecord) && is_callable($getRecord) ? $getRecord() : ($record ?? null);
+    $ktpDoc = $record?->documents()
         ->where('document_type', 'KTP')
         ->where('is_active', true)
         ->latest('id')
         ->first();
-    $aktaDoc = $record->documents()
+    $aktaDoc = $record?->documents()
         ->where('document_type', 'AKTA_KELAHIRAN')
         ->where('is_active', true)
         ->latest('id')
         ->first();
-    $kkPhoto = $record->kartuKeluarga?->active_photo_full_url;
+    $kkPhoto = $record?->kartuKeluarga?->active_photo_full_url;
 @endphp
 
 <div class="space-y-5">
@@ -52,7 +53,14 @@
                     </div>
                     <div class="space-y-1">
                         <div class="text-xs font-medium text-gray-500">Jenis Kelamin</div>
-                        <div class="text-sm font-semibold text-gray-900">{{ $record->gender?->value ?? '-' }}</div>
+                        @php
+                            $genderLabel = match($record->gender?->value ?? '') {
+                                'LAKI_LAKI' => 'Laki-laki',
+                                'PEREMPUAN' => 'Perempuan',
+                                default => '-',
+                            };
+                        @endphp
+                        <div class="text-sm font-semibold text-gray-900">{{ $genderLabel }}</div>
                     </div>
                     <div class="space-y-1">
                         <div class="text-xs font-medium text-gray-500">Tempat Lahir</div>
@@ -88,6 +96,14 @@
                 <div class="mt-1 text-xs text-gray-500">Kartu Keluarga dan wilayah tempat tinggal.</div>
             </div>
             <div class="p-5">
+                @php
+                    $currentRt = $record->currentRt ?? $record->rt ?? $record->kartuKeluarga?->rt;
+                    $areaUnit = $record->areaUnit ?? $currentRt?->areaUnit ?? $record->kartuKeluarga?->wilayah;
+                    $rtDisplay = filled($currentRt?->number) ? 'RT ' . $currentRt->number : '-';
+                    $rwDisplay = ($areaUnit && filled($areaUnit->display_label ?: $areaUnit->name))
+                        ? ($areaUnit->display_label ?: $areaUnit->name)
+                        : '-';
+                @endphp
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-5">
                     <div class="space-y-1">
                         <div class="text-xs font-medium text-gray-500">Nomor KK</div>
@@ -95,15 +111,15 @@
                     </div>
                     <div class="space-y-1">
                         <div class="text-xs font-medium text-gray-500">RT</div>
-                        <div class="text-sm font-semibold text-gray-900">{{ $record->currentRt?->number ? 'RT ' . $record->currentRt?->number : '-' }}</div>
+                        <div class="text-sm font-semibold text-gray-900">{{ $rtDisplay }}</div>
+                    </div>
+                    <div class="space-y-1">
+                        <div class="text-xs font-medium text-gray-500">RW</div>
+                        <div class="text-sm font-semibold text-gray-900">{{ $rwDisplay }}</div>
                     </div>
                     <div class="space-y-1 sm:col-span-2">
                         <div class="text-xs font-medium text-gray-500">Alamat</div>
                         <div class="text-sm font-semibold text-gray-900">{{ $record->kartuKeluarga?->address ?? '-' }}</div>
-                    </div>
-                    <div class="space-y-1 sm:col-span-1">
-                        <div class="text-xs font-medium text-gray-500">RW / Wilayah</div>
-                        <div class="text-sm font-semibold text-gray-900">{{ $record->rt_rw_label ?? '-' }}</div>
                     </div>
                 </div>
             </div>
@@ -137,11 +153,20 @@
                         <div class="text-xs font-medium text-gray-500">Pekerjaan</div>
                         <div class="text-sm font-semibold text-gray-900">{{ $record->occupation?->name ?? '-' }}</div>
                     </div>
-                    <div class="space-y-1 xl:col-span-2">
+                    <div class="space-y-1 xl:col-span-1">
                         <div class="text-xs font-medium text-gray-500">Status Perkawinan</div>
-                        <div class="text-sm font-semibold text-gray-900">{{ $record->marital_status?->value ?? '-' }}</div>
+                        @php
+                            $maritalLabel = match($record->marital_status?->value ?? '') {
+                                'BELUM_KAWIN' => 'Belum Kawin',
+                                'KAWIN' => 'Kawin',
+                                'CERAI_HIDUP' => 'Cerai Hidup',
+                                'CERAI_MATI' => 'Cerai Mati',
+                                default => '-',
+                            };
+                        @endphp
+                        <div class="text-sm font-semibold text-gray-900">{{ $maritalLabel }}</div>
                     </div>
-                    <div class="space-y-1 sm:col-span-2 xl:col-span-1">
+                    <div class="space-y-1 sm:col-span-1 xl:col-span-1">
                         <div class="text-xs font-medium text-gray-500">Status Penduduk</div>
                         <div class="mt-1">
                             @php $statusLabel = match($record->resident_status?->value ?? '') {
@@ -155,41 +180,115 @@
                             </span>
                         </div>
                     </div>
+                    <div class="space-y-1 sm:col-span-1 xl:col-span-1">
+                        <div class="text-xs font-medium text-gray-500">{{ $record->status_date_label }}</div>
+                        <div class="text-sm font-semibold text-gray-900">{{ $record->formatted_status_date ?? '-' }}</div>
+                    </div>
                 </div>
             </div>
         </div>
 
-        {{-- Catatan --}}
-        @if($record->notes)
+        {{-- Riwayat Status & KK --}}
+        @php
+            $statusHistories = $record->statusHistories()->latest('recorded_at')->latest('id')->get();
+            $kkHistories = $record->kkAnggotas()->with('kartuKeluarga')->orderByDesc('effective_date')->get();
+        @endphp
         <div class="rounded-xl border border-gray-200 bg-white overflow-hidden">
             <div class="px-5 py-4 border-b border-gray-200">
                 <div class="flex items-center gap-2">
                     <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
-                    <h3 class="text-sm font-semibold text-gray-900">Catatan</h3>
+                    <h3 class="text-sm font-semibold text-gray-900">Riwayat Status &amp; KK</h3>
                 </div>
+                <div class="mt-1 text-xs text-gray-500">Kronologi perubahan status kependudukan dan Kartu Keluarga.</div>
             </div>
-            <div class="p-5">
-                <div class="text-sm text-gray-700 whitespace-pre-wrap">{{ $record->notes }}</div>
+            <div class="p-5 space-y-4">
+                <div>
+                    <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Riwayat Status</div>
+                    @if($statusHistories->isNotEmpty())
+                        <ul class="divide-y divide-gray-100">
+                            @foreach($statusHistories as $history)
+                                @php
+                                    $hDate = $history->recorded_at ? \Carbon\Carbon::parse($history->recorded_at)->locale('id')->translatedFormat('d F Y') : '-';
+                                    $hStatus = match($history->status?->value ?? (string)$history->status) {
+                                        'PINDAH' => 'Pindah',
+                                        'MENINGGAL' => 'Meninggal',
+                                        default => 'Aktif',
+                                    };
+                                @endphp
+                                <li class="py-1.5 flex items-center justify-between text-sm">
+                                    <div class="flex items-center gap-2">
+                                        <span class="font-medium text-gray-900">{{ $hDate }}</span>
+                                        <span class="text-gray-400">—</span>
+                                        <span class="text-gray-700">{{ $hStatus }}</span>
+                                        @if($history->notes)
+                                            <span class="text-xs text-gray-500">({{ $history->notes }})</span>
+                                        @endif
+                                    </div>
+                                </li>
+                            @endforeach
+                        </ul>
+                    @else
+                        <div class="text-sm text-gray-600">
+                            {{ $record->formatted_status_date ?? '-' }} — {{ $statusLabel }}
+                        </div>
+                    @endif
+                </div>
+
+                @if($kkHistories->count() > 1)
+                <div class="pt-3 border-t border-gray-100">
+                    <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Riwayat Kartu Keluarga</div>
+                    <ul class="divide-y divide-gray-100">
+                        @foreach($kkHistories as $kkH)
+                            @php
+                                $effDate = $kkH->effective_date ? \Carbon\Carbon::parse($kkH->effective_date)->locale('id')->translatedFormat('d M Y') : '-';
+                                $endDate = $kkH->end_date ? \Carbon\Carbon::parse($kkH->end_date)->locale('id')->translatedFormat('d M Y') : 'Sekarang';
+                                $rel = match($kkH->family_relation?->value ?? (string)$kkH->family_relation) {
+                                    'KEPALA_KELUARGA' => 'Kepala Keluarga',
+                                    'ISTRI' => 'Istri',
+                                    'ANAK' => 'Anak',
+                                    default => 'Anggota',
+                                };
+                                $st = match($kkH->status?->value ?? (string)$kkH->status) {
+                                    'AKTIF' => 'KK Saat Ini (Aktif)',
+                                    'KELUAR' => 'Pindah / KK Sebelumnya',
+                                    default => '-',
+                                };
+                            @endphp
+                            <li class="py-1.5 flex items-center justify-between text-xs">
+                                <div class="flex items-center gap-2">
+                                    <span class="font-medium text-gray-900">KK {{ $kkH->kartuKeluarga?->kk_number ?? '-' }}</span>
+                                    <span class="text-gray-500">({{ $rel }})</span>
+                                    <span class="text-gray-400">—</span>
+                                    <span class="{{ $kkH->status?->value === 'AKTIF' ? 'text-green-600 font-medium' : 'text-gray-500' }}">{{ $st }}</span>
+                                </div>
+                                <div class="text-gray-400 text-right">{{ $effDate }} s/d {{ $endDate }}</div>
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+                @endif
             </div>
         </div>
-        @else
-        <div class="rounded-xl border border-gray-200 bg-white overflow-hidden hidden xl:block">
-            <div class="px-5 py-4 border-b border-gray-200">
-                <div class="flex items-center gap-2">
-                    <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/>
-                    </svg>
-                    <h3 class="text-sm font-semibold text-gray-900">Catatan</h3>
-                </div>
-            </div>
-            <div class="p-5 flex items-center justify-center min-h-[80px]">
-                <div class="text-sm text-gray-400">Tidak ada catatan.</div>
-            </div>
-        </div>
-        @endif
     </div>
+
+    {{-- Catatan --}}
+    @if(filled($record->notes))
+    <div class="rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-200">
+            <div class="flex items-center gap-2">
+                <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/>
+                </svg>
+                <h3 class="text-sm font-semibold text-gray-900">Catatan</h3>
+            </div>
+        </div>
+        <div class="p-5">
+            <div class="text-sm text-gray-700 whitespace-pre-wrap">{{ $record->notes }}</div>
+        </div>
+    </div>
+    @endif
 
     {{-- Row 3: Dokumen --}}
     <div class="rounded-xl border border-gray-200 bg-white overflow-hidden">

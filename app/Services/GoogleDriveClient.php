@@ -245,6 +245,22 @@ class GoogleDriveClient
         return sprintf('%s (%s)', $email, $folder['name']);
     }
 
+    /** @return array<int, array<string, mixed>> */
+    public function listBackups(string $folderId): array
+    {
+        $escapedFolder = str_replace(['\\', "'"], ['\\\\', "\\'"], $folderId);
+        $payload = $this->request('GET', '/files', [
+            'query' => [
+                'q' => "'{$escapedFolder}' in parents and mimeType = 'application/zip' and trashed = false",
+                'spaces' => 'drive',
+                'pageSize' => 100,
+                'fields' => 'files(id,name,size,parents,mimeType,appProperties,createdTime)',
+            ],
+        ]);
+
+        return $payload['files'] ?? [];
+    }
+
     /** @return array<string, mixed> */
     private function findBackup(string $folderId, string $filename): ?array
     {

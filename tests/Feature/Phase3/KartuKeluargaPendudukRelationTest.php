@@ -2,13 +2,19 @@
 
 namespace Tests\Feature\Phase3;
 
+use App\Enums\FamilyRelation;
+use App\Enums\Gender;
+use App\Enums\MaritalStatus;
 use App\Filament\Resources\KartuKeluargas\KartuKeluargaResource;
 use App\Filament\Resources\KartuKeluargas\Pages\EditKartuKeluarga;
 use App\Filament\Resources\KartuKeluargas\RelationManagers\PenduduksRelationManager;
 use App\Filament\Resources\Penduduks\Pages\CreatePenduduk;
 use App\Filament\Resources\Penduduks\PendudukResource;
+use App\Models\Education;
 use App\Models\KartuKeluarga;
+use App\Models\Occupation;
 use App\Models\Penduduk;
+use App\Models\Religion;
 use Livewire\Livewire;
 
 /**
@@ -137,5 +143,65 @@ class KartuKeluargaPendudukRelationTest extends Phase3ResourceTestCase
         $this->get(PendudukResource::getUrl('index'))
             ->assertOk()
             ->assertSee($expected, escape: false);
+    }
+
+    public function test_create_member_via_modal_setuju_directly_creates_member(): void
+    {
+        $kk = KartuKeluarga::factory()->create();
+        $religion = Religion::factory()->create();
+        $education = Education::factory()->create();
+        $occupation = Occupation::factory()->create();
+
+        Livewire::test(PenduduksRelationManager::class, [
+            'ownerRecord' => $kk,
+            'pageClass' => EditKartuKeluarga::class,
+        ])
+            ->mountTableAction('create')
+            ->setTableActionData([
+                'nik' => '7371010101019999',
+                'full_name' => 'Anggota Baru',
+                'gender' => Gender::LAKI_LAKI->value,
+                'birth_place' => 'Makassar',
+                'birth_date' => '2000-01-01',
+                'religion_id' => $religion->id,
+                'education_id' => $education->id,
+                'occupation_id' => $occupation->id,
+                'marital_status' => MaritalStatus::BELUM_KAWIN->value,
+                'family_relation' => FamilyRelation::ANAK->value,
+            ])
+            ->callMountedTableAction()
+            ->assertHasNoTableActionErrors();
+
+        $this->assertDatabaseHas('penduduk', [
+            'nik' => '7371010101019999',
+            'full_name' => 'Anggota Baru',
+            'kk_id' => $kk->id,
+        ]);
+    }
+
+    public function test_edit_member_via_modal_setuju_directly_updates_member(): void
+    {
+        $kk = KartuKeluarga::factory()->create();
+        $member = Penduduk::factory()->create([
+            'kk_id' => $kk->id,
+            'full_name' => 'Nama Lama',
+            'family_relation' => FamilyRelation::ANAK,
+        ]);
+
+        Livewire::test(PenduduksRelationManager::class, [
+            'ownerRecord' => $kk,
+            'pageClass' => EditKartuKeluarga::class,
+        ])
+            ->mountTableAction('edit', $member)
+            ->setTableActionData([
+                'full_name' => 'Nama Baru',
+                'family_relation' => FamilyRelation::KEPALA_KELUARGA->value,
+            ])
+            ->callMountedTableAction()
+            ->assertHasNoTableActionErrors();
+
+        $reloaded = $member->fresh();
+        $this->assertSame('Nama Baru', $reloaded->full_name);
+        $this->assertSame(FamilyRelation::KEPALA_KELUARGA, $reloaded->family_relation);
     }
 }

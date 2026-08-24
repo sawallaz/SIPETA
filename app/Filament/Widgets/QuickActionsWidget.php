@@ -35,28 +35,28 @@ class QuickActionsWidget extends Widget
         return [
             'actions' => [
                 [
-                    'label' => 'Tambah Kartu Keluarga',
-                    'description' => 'Buat kartu keluarga baru',
-                    'icon' => 'heroicon-o-plus-circle',
-                    'url' => KartuKeluargaResource::getUrl('create'),
+                    'label' => 'Data Penduduk',
+                    'description' => 'Lihat dan kelola seluruh data penduduk',
+                    'icon' => 'heroicon-o-users',
+                    'url' => PendudukResource::getUrl('index'),
                 ],
                 [
                     'label' => 'Tambah Penduduk',
-                    'description' => 'Tambah penduduk baru',
+                    'description' => 'Tambahkan data penduduk baru',
                     'icon' => 'heroicon-o-user-plus',
                     'url' => PendudukResource::getUrl('create'),
                 ],
                 [
                     'label' => 'Data Kartu Keluarga',
-                    'description' => 'Lihat dan kelola kartu keluarga',
+                    'description' => 'Lihat dan kelola seluruh data kartu keluarga',
                     'icon' => 'heroicon-o-rectangle-stack',
                     'url' => KartuKeluargaResource::getUrl('index'),
                 ],
                 [
-                    'label' => 'Data Penduduk',
-                    'description' => 'Lihat dan kelola data penduduk',
-                    'icon' => 'heroicon-o-users',
-                    'url' => PendudukResource::getUrl('index'),
+                    'label' => 'Tambah Kartu Keluarga',
+                    'description' => 'Tambahkan kartu keluarga baru',
+                    'icon' => 'heroicon-o-plus-circle',
+                    'url' => KartuKeluargaResource::getUrl('create'),
                 ],
             ],
         ];

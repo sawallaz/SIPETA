@@ -39,12 +39,16 @@ class PendudukExportService
         'birth_place' => 'Tempat Lahir',
         'birth_date' => 'Tanggal Lahir',
         'age' => 'Usia (th)',
-        'rt' => 'RT',
-        'area_unit' => 'RW',
-        'resident_status' => 'Status',
         'religion' => 'Agama',
         'education' => 'Pendidikan',
         'occupation' => 'Pekerjaan',
+        'marital_status' => 'Status Perkawinan',
+        'family_relation' => 'Hubungan Keluarga',
+        'address' => 'Alamat',
+        'rt' => 'RT',
+        'area_unit' => 'RW',
+        'resident_status' => 'Status Penduduk',
+        'status_date' => 'Tanggal Status',
     ];
 
     /**
@@ -67,11 +71,12 @@ class PendudukExportService
     public function applyFilters(Builder $query, array $filters = []): Builder
     {
         $query->with([
-            'kartuKeluarga:id,kk_number',
+            'kartuKeluarga:id,kk_number,address',
             'rt.areaUnit',
             'religion:id,name',
             'education:id,name',
             'occupation:id,name',
+            'statusHistories',
         ]);
 
         if (($rt = $filters['rt'] ?? null) !== null) {
@@ -122,11 +127,12 @@ class PendudukExportService
     public function exportQuery(Builder $query, ExportFormat $format, array $filters = [], ?string $name = null): Response
     {
         $query->with([
-            'kartuKeluarga:id,kk_number',
+            'kartuKeluarga:id,kk_number,address',
             'rt.areaUnit',
             'religion:id,name',
             'education:id,name',
             'occupation:id,name',
+            'statusHistories',
         ]);
         $filename = $name ?? $this->filename($format, $filters);
 
@@ -327,21 +333,48 @@ class PendudukExportService
             ResidentStatus::MENINGGAL => 'Meninggal',
             default => $penduduk->resident_status?->value ?? '-',
         };
+        $maritalStatus = match ($penduduk->marital_status?->value ?? '') {
+            'BELUM_KAWIN' => 'Belum Kawin',
+            'KAWIN' => 'Kawin',
+            'CERAI_HIDUP' => 'Cerai Hidup',
+            'CERAI_MATI' => 'Cerai Mati',
+            default => '-',
+        };
+        $familyRelation = match ($penduduk->family_relation?->value ?? '') {
+            'KEPALA_KELUARGA' => 'Kepala Keluarga',
+            'SUAMI' => 'Suami',
+            'ISTRI' => 'Istri',
+            'ANAK' => 'Anak',
+            'MENANTU' => 'Menantu',
+            'CUCU' => 'Cucu',
+            'ORANG_TUA' => 'Orang Tua',
+            'MERTUA' => 'Mertua',
+            'FAMILI_LAIN' => 'Famili Lain',
+            'PEMBANTU' => 'Pembantu',
+            'LAINNYA' => 'Lainnya',
+            default => $penduduk->family_relation?->value ?? '-',
+        };
+
+        $statusDate = $penduduk->formatted_status_date ?? '-';
 
         return [
             self::COLUMNS['nik'] => $penduduk->nik,
             self::COLUMNS['full_name'] => $penduduk->full_name,
             self::COLUMNS['kk_number'] => $penduduk->kartuKeluarga?->kk_number ?? '-',
             self::COLUMNS['gender'] => $gender,
-            self::COLUMNS['birth_place'] => $penduduk->birth_place,
+            self::COLUMNS['birth_place'] => $penduduk->birth_place ?? '-',
             self::COLUMNS['birth_date'] => $penduduk->birth_date?->format('d-m-Y') ?? '-',
             self::COLUMNS['age'] => (string) $penduduk->age,
-            self::COLUMNS['rt'] => $penduduk->rt?->number ?? '-',
-            self::COLUMNS['area_unit'] => $penduduk->rt?->areaUnit?->display_label ?? '-',
-            self::COLUMNS['resident_status'] => $status,
             self::COLUMNS['religion'] => $penduduk->religion?->name ?? '-',
             self::COLUMNS['education'] => $penduduk->education?->name ?? '-',
             self::COLUMNS['occupation'] => $penduduk->occupation?->name ?? '-',
+            self::COLUMNS['marital_status'] => $maritalStatus,
+            self::COLUMNS['family_relation'] => $familyRelation,
+            self::COLUMNS['address'] => $penduduk->kartuKeluarga?->address ?? '-',
+            self::COLUMNS['rt'] => $penduduk->rt?->number ?? '-',
+            self::COLUMNS['area_unit'] => $penduduk->rt?->areaUnit?->display_label ?? '-',
+            self::COLUMNS['resident_status'] => $status,
+            self::COLUMNS['status_date'] => $statusDate,
         ];
     }
 

@@ -11,7 +11,7 @@ use App\Exceptions\DatabaseImporterException;
  * service feeds the `database.sql` entry of a backup archive into an importer
  * so the operator can roll the database back to a backed-up state.
  *
- * @see MysqlClientDatabaseImporter the production implementation
+ * @see SqliteDatabaseImporter the production implementation
  */
 interface DatabaseImporter
 {

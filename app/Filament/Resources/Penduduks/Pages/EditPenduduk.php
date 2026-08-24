@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Penduduks\Pages;
 
+use App\Filament\Resources\Penduduks\Pages\Concerns\ChecksDuplicateNik;
 use App\Filament\Resources\Penduduks\Pages\Concerns\SavesPendudukThroughKkService;
 use App\Filament\Resources\Penduduks\PendudukResource;
 use App\Models\Penduduk;
@@ -11,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class EditPenduduk extends EditRecord
 {
+    use ChecksDuplicateNik;
     use SavesPendudukThroughKkService;
 
     protected static string $resource = PendudukResource::class;

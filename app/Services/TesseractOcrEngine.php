@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\OcrEngineException;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Process\Exceptions\ProcessTimedOutException;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 
 /**
@@ -54,18 +55,82 @@ class TesseractOcrEngine implements OcrEngine
     public function run(string $imagePath): OcrResult
     {
         $started = hrtime(true);
+        $bin = $this->resolveTesseractBinary();
+        $tessdata = $this->resolveTessdataPrefix();
+        $cmd = $this->command($imagePath, $bin, $tessdata);
+        $env = filled($tessdata) ? ['TESSDATA_PREFIX' => (string) $tessdata] : [];
 
         try {
-            $process = Process::timeout((int) config('ocr.timeout_seconds'))->run($this->command($imagePath));
+            $process = Process::timeout((int) config('ocr.timeout_seconds'))
+                ->env($env)
+                ->run($cmd);
         } catch (ProcessTimedOutException) {
             throw new OcrEngineException($this->timeoutMessage());
         }
 
         if (! $process->successful()) {
+            Log::warning('Tesseract OCR execution failed', [
+                'command' => $cmd,
+                'tesseract_bin' => $bin,
+                'bin_exists' => file_exists($bin),
+                'tessdata_prefix' => $tessdata,
+                'tessdata_exists' => filled($tessdata) && is_dir((string) $tessdata),
+                'ind_traineddata_exists' => filled($tessdata) && file_exists(((string) $tessdata).DIRECTORY_SEPARATOR.'ind.traineddata'),
+                'exit_code' => $process->exitCode(),
+                'stderr' => trim((string) $process->errorOutput()),
+                'stdout_snippet' => substr(trim((string) $process->output()), 0, 300),
+                'image_path' => $imagePath,
+                'image_exists' => file_exists($imagePath),
+                'image_size' => file_exists($imagePath) ? filesize($imagePath) : 0,
+            ]);
+
             throw new OcrEngineException($this->failureMessage($process));
         }
 
         return $this->parseOutput((string) $process->output(), hrtime(true) - $started);
+    }
+
+    /**
+     * Resolve Tesseract binary with bundled fallback.
+     */
+    public function resolveTesseractBinary(): string
+    {
+        $configured = (string) config('ocr.tesseract_path', 'tesseract');
+
+        if ($configured !== '' && $configured !== 'tesseract') {
+            return $configured;
+        }
+
+        $bundledWin = base_path('resources/tesseract/tesseract.exe');
+        if (file_exists($bundledWin)) {
+            return $bundledWin;
+        }
+
+        $bundledLinux = base_path('resources/tesseract/tesseract');
+        if (file_exists($bundledLinux)) {
+            return $bundledLinux;
+        }
+
+        return $configured;
+    }
+
+    /**
+     * Resolve Tessdata directory with bundled fallback.
+     */
+    public function resolveTessdataPrefix(): ?string
+    {
+        $configured = config('ocr.tessdata_prefix') ?: env('TESSDATA_PREFIX');
+
+        if (filled($configured) && is_dir((string) $configured)) {
+            return (string) $configured;
+        }
+
+        $bundled = base_path('resources/tesseract/tessdata');
+        if (is_dir($bundled)) {
+            return $bundled;
+        }
+
+        return filled($configured) ? (string) $configured : null;
     }
 
     /**
@@ -74,18 +139,27 @@ class TesseractOcrEngine implements OcrEngine
      *
      * @return array<int, string>
      */
-    private function command(string $imagePath): array
+    private function command(string $imagePath, ?string $bin = null, ?string $tessdata = null): array
     {
-        return [
-            (string) config('ocr.tesseract_path'),
+        $cmd = [
+            $bin ?: (string) config('ocr.tesseract_path'),
             $imagePath,
             'stdout',
             '-l',
             (string) config('ocr.language'),
             '--psm',
             (string) config('ocr.psm'),
-            'tsv',
         ];
+
+        $tessdata = $tessdata ?: (config('ocr.tessdata_prefix') ?: env('TESSDATA_PREFIX'));
+        if (filled($tessdata)) {
+            $cmd[] = '--tessdata-dir';
+            $cmd[] = (string) $tessdata;
+        }
+
+        $cmd[] = 'tsv';
+
+        return $cmd;
     }
 
     /**

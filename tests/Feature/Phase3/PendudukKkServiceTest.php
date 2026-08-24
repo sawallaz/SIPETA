@@ -71,6 +71,7 @@ class PendudukKkServiceTest extends Phase3ResourceTestCase
             'effective_date' => now()->subYear()->toDateString(),
         ]);
 
+        // CreatePenduduk rejects duplicate NIK
         Livewire::test(CreatePenduduk::class)
             ->fillForm($this->validPayload([
                 'nik' => '7371000000000001',
@@ -78,6 +79,14 @@ class PendudukKkServiceTest extends Phase3ResourceTestCase
                 'full_name' => 'Budi',
             ]))
             ->call('create')
+            ->assertHasFormErrors(['nik']);
+
+        // Reassignment happens via EditPenduduk
+        Livewire::test(EditPenduduk::class, ['record' => $budi->getRouteKey()])
+            ->fillForm([
+                'kk_id' => $kkBaru->getKey(),
+            ])
+            ->call('save')
             ->assertHasNoFormErrors();
 
         // Tidak ada Penduduk duplikat.

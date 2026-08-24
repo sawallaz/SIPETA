@@ -27,6 +27,11 @@ class Settings extends Page
 
     protected static ?int $navigationSort = 90;
 
+    public static function canAccess(): bool
+    {
+        return auth()->user()?->isSuperAdmin() ?? false;
+    }
+
     /**
      * State form Settings.
      *
@@ -75,13 +80,11 @@ class Settings extends Page
     protected function getHeaderActions(): array
     {
         return [
-            Action::make('riwayatKartuKeluarga')
-                ->label('Riwayat Kartu Keluarga')
-                ->icon('heroicon-o-clock')
+            Action::make('importPenduduk')
+                ->label('Import Penduduk')
+                ->icon('heroicon-o-arrow-up-tray')
                 ->color('gray')
-                ->url(
-                    fn (): string => KartuKeluargaHistory::getUrl()
-                ),
+                ->url(fn (): string => ImportPenduduk::getUrl()),
             Action::make('save')
                 ->label('Simpan')
                 ->icon('heroicon-o-check')

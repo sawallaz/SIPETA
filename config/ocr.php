@@ -22,6 +22,9 @@ return [
     // (.ai/ocr.md §6).
     'tesseract_path' => env('TESSERACT_PATH', 'tesseract'),
 
+    // TESSDATA_PREFIX directory containing ind.traineddata.
+    'tessdata_prefix' => env('TESSDATA_PREFIX'),
+
     // Engine invocation (.ai/ocr.md §4.3): Indonesian language pack +
     // TSV output for word-level confidence. PSM 4 (column-like document)
     // was selected over the previous PSM 6 default after a bake-off on a

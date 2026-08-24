@@ -5,8 +5,8 @@ namespace Tests\Support;
 use App\Services\DatabaseImporter;
 
 /**
- * Deterministic DatabaseImporter for the restore suite — no real mysql client
- * runs. Records every applied dump so tests can assert what was restored.
+ * Deterministic DatabaseImporter for the restore suite.
+ * Records every applied dump so tests can assert what was restored.
  */
 final class FakeDatabaseImporter implements DatabaseImporter
 {
@@ -23,7 +23,7 @@ final class FakeDatabaseImporter implements DatabaseImporter
     public function apply(string $sql): void
     {
         if ($this->shouldFail) {
-            throw new \RuntimeException('simulated mysql import failure');
+            throw new \RuntimeException('simulated database import failure');
         }
 
         $this->applied[] = $sql;

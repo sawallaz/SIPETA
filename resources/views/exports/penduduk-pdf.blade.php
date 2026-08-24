@@ -116,41 +116,13 @@
         table.data th {
             background: #f3f4f6;
             font-weight: bold;
-            font-size: 6.5px;
+            font-size: 5.5px;
             text-align: center;
         }
 
         table.data td {
-            font-size: 6.5px;
+            font-size: 5.5px;
         }
-
-        /* Lebar per kolom (13 kolom, total 100%, A4 landscape) */
-        table.data th:nth-child(1),
-        table.data td:nth-child(1) { width: 9%; }   /* NIK */
-        table.data th:nth-child(2),
-        table.data td:nth-child(2) { width: 11%; }  /* Nama Lengkap */
-        table.data th:nth-child(3),
-        table.data td:nth-child(3) { width: 11%; }  /* Nomor KK */
-        table.data th:nth-child(4),
-        table.data td:nth-child(4) { width: 8%; }   /* Jenis Kelamin */
-        table.data th:nth-child(5),
-        table.data td:nth-child(5) { width: 7%; }   /* Tempat Lahir */
-        table.data th:nth-child(6),
-        table.data td:nth-child(6) { width: 6%; }   /* Tanggal Lahir */
-        table.data th:nth-child(7),
-        table.data td:nth-child(7) { width: 5%; }   /* Usia */
-        table.data th:nth-child(8),
-        table.data td:nth-child(8) { width: 7%; }   /* RT */
-        table.data th:nth-child(9),
-        table.data td:nth-child(9) { width: 8%; }   /* RW / Lingkungan */
-        table.data th:nth-child(10),
-        table.data td:nth-child(10) { width: 6%; }  /* Status */
-        table.data th:nth-child(11),
-        table.data td:nth-child(11) { width: 6%; }  /* Agama */
-        table.data th:nth-child(12),
-        table.data td:nth-child(12) { width: 8%; }  /* Pendidikan */
-        table.data th:nth-child(13),
-        table.data td:nth-child(13) { width: 8%; }  /* Pekerjaan */
 
         .footer {
             position: fixed;

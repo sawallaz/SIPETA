@@ -29,23 +29,7 @@ class KartuKeluargasTable
         return $table
             ->recordUrl(null)
             ->modifyQueryUsing(
-                fn (Builder $query): Builder => $query->where(function (Builder $query): void {
-                    /*
-                     * KK aktif:
-                     *
-                     * 1. masih mempunyai penduduk current
-                     *
-                     * ATAU
-                     *
-                     * 2. benar-benar baru/kosong dan belum mempunyai histori.
-                     *
-                     * KK yang sudah kosong tetapi mempunyai histori
-                     * otomatis keluar dari daftar KK aktif.
-                     */
-                    $query
-                        ->whereHas('penduduks')
-                        ->orWhereDoesntHave('kkAnggotas');
-                })
+                fn (Builder $query): Builder => $query->active()
             )
             ->columns([
 
@@ -248,7 +232,7 @@ class KartuKeluargasTable
                     ->label('Lihat')
                     ->icon('heroicon-o-eye')
                     ->modalHeading(fn (KartuKeluarga $record): string => 'Kartu Keluarga '.$record->kk_number)
-                    ->modalWidth('7xl')
+                    ->modalWidth('5xl')
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Tutup')
                     ->modalFooterActions([

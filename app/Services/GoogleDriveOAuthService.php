@@ -6,6 +6,7 @@ use App\Exceptions\GoogleDriveException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 
 class GoogleDriveOAuthService
@@ -14,13 +15,33 @@ class GoogleDriveOAuthService
 
     public function __construct(private SettingsService $settings) {}
 
-    public function authorizationUrl(string $state): string
+    public function redirectUri(?string $customUri = null): string
+    {
+        if (filled($customUri)) {
+            return $customUri;
+        }
+
+        $configured = config('services.google_drive.redirect_uri');
+        if (filled($configured)) {
+            return (string) $configured;
+        }
+
+        if (function_exists('route') && Route::has('google-drive.callback')) {
+            return route('google-drive.callback');
+        }
+
+        return url('/admin/backup/google/callback');
+    }
+
+    public function authorizationUrl(string $state, ?string $redirectUri = null): string
     {
         $this->assertConfigured();
 
+        $uri = $this->redirectUri($redirectUri);
+
         return (string) config('services.google_drive.auth_uri').'?'.http_build_query([
             'client_id' => config('services.google_drive.client_id'),
-            'redirect_uri' => config('services.google_drive.redirect_uri'),
+            'redirect_uri' => $uri,
             'response_type' => 'code',
             'scope' => self::SCOPE,
             'access_type' => 'offline',
@@ -36,9 +57,11 @@ class GoogleDriveOAuthService
      *
      * @return array<string, mixed>
      */
-    public function exchangeCode(string $code): array
+    public function exchangeCode(string $code, ?string $redirectUri = null): array
     {
         $this->assertConfigured();
+
+        $uri = $this->redirectUri($redirectUri);
 
         try {
             $response = Http::asForm()
@@ -47,7 +70,7 @@ class GoogleDriveOAuthService
                     'code' => $code,
                     'client_id' => config('services.google_drive.client_id'),
                     'client_secret' => config('services.google_drive.client_secret'),
-                    'redirect_uri' => config('services.google_drive.redirect_uri'),
+                    'redirect_uri' => $uri,
                     'grant_type' => 'authorization_code',
                 ]);
         } catch (ConnectionException $e) {

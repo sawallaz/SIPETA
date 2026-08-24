@@ -1,0 +1,190 @@
+- generic [active] [ref=f1e1]:
+  - link "Lewati ke konten" [ref=f1e2] [cursor=pointer]:
+    - /url: "#fi-main-content"
+  - navigation "filament-panels::layout.topbar.label" [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - button "Perluas menu" [ref=f1e7] [cursor=pointer]
+      - link "Logo SIPETA SIPETA KELURAHAN Sistem Informasi Pendataan Penduduk Tanete" [ref=f1e10] [cursor=pointer]:
+        - /url: http://127.0.0.1:8100/admin
+        - generic [ref=f1e12]:
+          - img "Logo SIPETA" [ref=f1e13]
+          - generic [ref=f1e14]:
+            - generic [ref=f1e15]:
+              - generic [ref=f1e16]: SIPETA
+              - generic [ref=f1e17]: KELURAHAN
+            - generic [ref=f1e18]: Sistem Informasi Pendataan Penduduk Tanete
+    - generic [ref=f1e19]:
+      - generic [ref=f1e22]:
+        - generic [ref=f1e23]: Pencarian global
+        - searchbox "Pencarian global" [ref=f1e29]
+      - button "Menu pengguna" [ref=f1e32] [cursor=pointer]:
+        - img "Avatar Administrator" [ref=f1e33]
+  - generic [ref=f1e34]:
+    - navigation "filament-panels::layout.navigation.label" [ref=f1e37]:
+      - list [ref=f1e38]:
+        - listitem [ref=f1e39]:
+          - list [ref=f1e40]:
+            - listitem [ref=f1e41]:
+              - link "Dasbor" [ref=f1e42] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin
+            - listitem [ref=f1e45]:
+              - link "Manajemen Pengguna" [ref=f1e46] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/users
+            - listitem [ref=f1e49]:
+              - link "Backup" [ref=f1e50] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/backup
+            - listitem [ref=f1e53]:
+              - link "Pengaturan" [ref=f1e54] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/settings
+        - listitem [ref=f1e58]:
+          - list [ref=f1e59]:
+            - listitem [ref=f1e60]:
+              - link "Kartu Keluarga" [ref=f1e61] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/kartu-keluargas
+            - listitem [ref=f1e64]:
+              - link "Penduduk" [ref=f1e65] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks
+    - main [ref=f1e69]:
+      - generic [ref=f1e71]:
+        - heading "Dasbor" [level=1] [ref=f1e74]
+        - generic [ref=f1e81]:
+          - generic [ref=f1e83]:
+            - generic [ref=f1e86]:
+              - generic [ref=f1e88]:
+                - paragraph [ref=f1e89]: Kartu Keluarga
+                - paragraph [ref=f1e90]: "1"
+              - generic [ref=f1e91]: Total KK terdaftar
+            - generic [ref=f1e97]:
+              - generic [ref=f1e99]:
+                - paragraph [ref=f1e100]: Penduduk Aktif
+                - paragraph [ref=f1e101]: "5"
+              - generic [ref=f1e102]: Penduduk berstatus aktif
+            - generic [ref=f1e108]:
+              - generic [ref=f1e110]:
+                - paragraph [ref=f1e111]: Belum Menikah
+                - paragraph [ref=f1e112]: "2"
+              - generic [ref=f1e113]: Penduduk belum kawin
+            - generic [ref=f1e119]:
+              - generic [ref=f1e121]:
+                - paragraph [ref=f1e122]: Jumlah RT
+                - paragraph [ref=f1e123]: "19"
+              - generic [ref=f1e124]: RT terdaftar
+          - generic [ref=f1e130]:
+            - generic [ref=f1e132]:
+              - heading "Akses Cepat" [level=2] [ref=f1e133]
+              - paragraph [ref=f1e134]: Kelola dan lihat data kependudukan SIPETA
+            - generic [ref=f1e137]:
+              - link "Data Penduduk Lihat dan kelola seluruh data penduduk" [ref=f1e138] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks
+                - generic [ref=f1e142]:
+                  - generic [ref=f1e143]: Data Penduduk
+                  - generic [ref=f1e147]: Lihat dan kelola seluruh data penduduk
+              - link "Tambah Penduduk Tambahkan data penduduk baru" [ref=f1e148] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks/create
+                - generic [ref=f1e152]:
+                  - generic [ref=f1e153]: Tambah Penduduk
+                  - generic [ref=f1e157]: Tambahkan data penduduk baru
+              - link "Data Kartu Keluarga Lihat dan kelola seluruh data kartu keluarga" [ref=f1e158] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/kartu-keluargas
+                - generic [ref=f1e162]:
+                  - generic [ref=f1e163]: Data Kartu Keluarga
+                  - generic [ref=f1e167]: Lihat dan kelola seluruh data kartu keluarga
+              - link "Tambah Kartu Keluarga Tambahkan kartu keluarga baru" [ref=f1e168] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/kartu-keluargas/create
+                - generic [ref=f1e172]:
+                  - generic [ref=f1e173]: Tambah Kartu Keluarga
+                  - generic [ref=f1e177]: Tambahkan kartu keluarga baru
+          - generic [ref=f1e179]:
+            - generic [ref=f1e181]:
+              - heading "Jenis Kelamin" [level=2] [ref=f1e182]
+              - paragraph [ref=f1e183]: Komposisi penduduk berdasarkan jenis kelamin
+            - img "Jenis Kelamin. Komposisi penduduk berdasarkan jenis kelamin" [ref=f1e188]
+          - generic [ref=f1e190]:
+            - generic [ref=f1e192]:
+              - heading "Kelompok Umur" [level=2] [ref=f1e193]
+              - paragraph [ref=f1e194]: Sebaran penduduk aktif berdasarkan rentang usia
+            - img "Kelompok Umur. Sebaran penduduk aktif berdasarkan rentang usia" [ref=f1e199]
+          - generic [ref=f1e201]:
+            - generic [ref=f1e203]:
+              - heading "Status Penduduk" [level=2] [ref=f1e204]
+              - paragraph [ref=f1e205]: Sebaran penduduk menurut status keanggotaan
+            - img "Status Penduduk. Sebaran penduduk menurut status keanggotaan" [ref=f1e210]
+          - generic [ref=f1e212]:
+            - generic [ref=f1e214]:
+              - heading "Status Perkawinan" [level=2] [ref=f1e215]
+              - paragraph [ref=f1e216]: Sebaran penduduk berdasarkan status perkawinan
+            - img "Status Perkawinan. Sebaran penduduk berdasarkan status perkawinan" [ref=f1e221]
+          - generic [ref=f1e223]:
+            - generic [ref=f1e225]:
+              - heading "Pendidikan Penduduk" [level=2] [ref=f1e226]
+              - paragraph [ref=f1e227]: Sebaran pendidikan penduduk aktif
+            - img "Pendidikan Penduduk. Sebaran pendidikan penduduk aktif" [ref=f1e232]
+          - generic [ref=f1e234]:
+            - generic [ref=f1e236]:
+              - heading "Penduduk per Pekerjaan" [level=2] [ref=f1e237]
+              - paragraph [ref=f1e238]: Sebaran penduduk aktif menurut pekerjaan
+            - img "Penduduk per Pekerjaan. Sebaran penduduk aktif menurut pekerjaan" [ref=f1e243]
+          - generic [ref=f1e245]:
+            - generic [ref=f1e247]:
+              - heading "Penduduk per Agama" [level=2] [ref=f1e248]
+              - paragraph [ref=f1e249]: Sebaran penduduk aktif menurut agama
+            - img "Penduduk per Agama. Sebaran penduduk aktif menurut agama" [ref=f1e254]
+          - generic [ref=f1e256]:
+            - generic [ref=f1e258]:
+              - heading "Penduduk per RT" [level=2] [ref=f1e259]
+              - paragraph [ref=f1e260]: Jumlah penduduk aktif berdasarkan lingkungan dan RT
+            - img "Penduduk per RT. Jumlah penduduk aktif berdasarkan lingkungan dan RT" [ref=f1e265]
+          - generic [ref=f1e267]:
+            - generic [ref=f1e269]:
+              - heading "Penduduk per Lingkungan" [level=2] [ref=f1e270]
+              - paragraph [ref=f1e271]: Jumlah penduduk berdasarkan RW
+            - img "Penduduk per Lingkungan. Jumlah penduduk berdasarkan RW" [ref=f1e276]
+          - generic [ref=f1e278]:
+            - generic [ref=f1e280]:
+              - heading "Aktivitas Terbaru" [level=2] [ref=f1e281]
+              - paragraph [ref=f1e282]: Kartu keluarga dan penduduk terbaru di sistem
+            - generic [ref=f1e285]:
+              - link "ANDI SURYAMAN NIK 3207121505800001 18 jam yang lalu" [ref=f1e286] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks/8/edit
+                - generic [ref=f1e289]:
+                  - generic [ref=f1e290]: ANDI SURYAMAN
+                  - generic [ref=f1e291]: NIK 3207121505800001
+                - time [ref=f1e292]: 18 jam yang lalu
+              - link "SITI NURHALIZA NIK 3207122506820002 18 jam yang lalu" [ref=f1e293] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks/9/edit
+                - generic [ref=f1e296]:
+                  - generic [ref=f1e297]: SITI NURHALIZA
+                  - generic [ref=f1e298]: NIK 3207122506820002
+                - time [ref=f1e299]: 18 jam yang lalu
+              - link "KK 3207120101234567 JL. MERDEKA NO. 10 KECAMATAN BANYURESMI 23 jam yang lalu" [ref=f1e300] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/kartu-keluargas/2/edit
+                - generic [ref=f1e303]:
+                  - generic [ref=f1e304]: KK 3207120101234567
+                  - generic [ref=f1e305]: JL. MERDEKA NO. 10 KECAMATAN BANYURESMI
+                - time [ref=f1e306]: 23 jam yang lalu
+              - link "MUHAMMAD FIKRI NIK 3207120803100003 23 jam yang lalu" [ref=f1e307] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks/6/edit
+                - generic [ref=f1e310]:
+                  - generic [ref=f1e311]: MUHAMMAD FIKRI
+                  - generic [ref=f1e312]: NIK 3207120803100003
+                - time [ref=f1e313]: 23 jam yang lalu
+              - link "NURAULIA NIK 3207121205120004 23 jam yang lalu" [ref=f1e314] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks/7/edit
+                - generic [ref=f1e317]:
+                  - generic [ref=f1e318]: NURAULIA
+                  - generic [ref=f1e319]: NIK 3207121205120004
+                - time [ref=f1e320]: 23 jam yang lalu
+              - link "KK 7372010101230001 Jl. Poros Tanete No. 12 1 hari yang lalu" [ref=f1e321] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/kartu-keluargas/1/edit
+                - generic [ref=f1e324]:
+                  - generic [ref=f1e325]: KK 7372010101230001
+                  - generic [ref=f1e326]: Jl. Poros Tanete No. 12
+                - time [ref=f1e327]: 1 hari yang lalu
+              - link "Budi Santoso NIK 7372010101900001 1 hari yang lalu" [ref=f1e328] [cursor=pointer]:
+                - /url: http://127.0.0.1:8100/admin/penduduks/1/edit
+                - generic [ref=f1e331]:
+                  - generic [ref=f1e332]: Budi Santoso
+                  - generic [ref=f1e333]: NIK 7372010101900001
+                - time [ref=f1e334]: 1 hari yang lalu
+  - generic:
+    - status

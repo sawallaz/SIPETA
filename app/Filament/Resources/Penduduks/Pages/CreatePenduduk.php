@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Penduduks\Pages;
 
+use App\Filament\Resources\Penduduks\Pages\Concerns\ChecksDuplicateNik;
 use App\Filament\Resources\Penduduks\Pages\Concerns\SavesPendudukThroughKkService;
 use App\Filament\Resources\Penduduks\PendudukResource;
 use Filament\Resources\Pages\CreateRecord;
@@ -9,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class CreatePenduduk extends CreateRecord
 {
+    use ChecksDuplicateNik;
     use SavesPendudukThroughKkService;
 
     protected static string $resource = PendudukResource::class;

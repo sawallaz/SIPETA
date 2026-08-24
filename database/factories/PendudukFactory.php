@@ -38,6 +38,7 @@ class PendudukFactory extends Factory
             'family_relation' => FamilyRelation::KEPALA_KELUARGA->value,
             'blood_type' => fake()->randomElement(BloodType::cases())->value,
             'resident_status' => ResidentStatus::ACTIVE->value,
+            'active_at' => fake()->date(),
             'rt_id' => Rt::inRandomOrder()->first()?->id ?? Rt::factory()->create()->id,
             'moved_at' => null,
             'moved_destination' => null,

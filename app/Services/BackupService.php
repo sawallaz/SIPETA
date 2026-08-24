@@ -21,7 +21,7 @@ use ZipArchive;
  *
  * Produces a temporary `backup_YYYY-MM-DD_HHMMSS.zip` containing:
  *   - `database.sql`  — a SQL dump of the database (FR-BR-01), via the injected
- *                       DatabaseDumper (tests use a fake so no real mysqldump runs);
+ *                       DatabaseDumper;
  *   - `settings.json` — the singleton settings row (FR-BR-01);
  *   - `kk/*`          — every archived KK photo copied from its storage disk (FR-BR-01).
  *
@@ -39,6 +39,56 @@ class BackupService
     public function filename(?Carbon $now = null): string
     {
         return 'backup_'.($now ?? now())->format('Y-m-d_His').'.zip';
+    }
+
+    /**
+     * Synchronize local BackupLog with actual files in Google Drive folder.
+     * Idempotent: upserts existing, inserts new, and removes deleted.
+     */
+    public function syncFromDrive(GoogleDriveClient $drive): void
+    {
+        $folder = $drive->ensureBackupFolder();
+        $remoteFiles = $drive->listBackups($folder['id']);
+
+        $remoteIds = [];
+        foreach ($remoteFiles as $file) {
+            $fileId = (string) ($file['id'] ?? '');
+            if (blank($fileId)) {
+                continue;
+            }
+            $remoteIds[] = $fileId;
+
+            $filename = (string) ($file['name'] ?? 'backup.zip');
+            $size = (int) ($file['size'] ?? 0);
+            $checksum = $file['appProperties']['sipeta_checksum'] ?? ('sha256:remote_'.md5($fileId));
+            $createdTime = isset($file['createdTime']) ? Carbon::parse($file['createdTime']) : now();
+
+            BackupLog::updateOrCreate(
+                ['drive_file_id' => $fileId],
+                [
+                    'filename' => $filename,
+                    'backup_type' => BackupType::MANUAL,
+                    'backup_status' => BackupStatus::SUCCESS,
+                    'backup_size' => $size,
+                    'checksum' => $checksum,
+                    'drive_folder_id' => $folder['id'],
+                    'started_at' => $createdTime,
+                    'finished_at' => $createdTime,
+                ]
+            );
+        }
+
+        // Clean up records where drive_file_id no longer exists on remote Drive
+        if ($remoteIds !== []) {
+            BackupLog::query()
+                ->whereNotNull('drive_file_id')
+                ->whereNotIn('drive_file_id', $remoteIds)
+                ->delete();
+        } else {
+            BackupLog::query()
+                ->whereNotNull('drive_file_id')
+                ->delete();
+        }
     }
 
     public function createToDrive(User $operator, GoogleDriveClient $drive): BackupResult

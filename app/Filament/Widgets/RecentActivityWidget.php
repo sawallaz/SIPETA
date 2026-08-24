@@ -62,7 +62,7 @@ class RecentActivityWidget extends Widget
                     ],
                 ),
             )
-            ->sortByDesc(fn (array $activity): int => $activity['created_at']->timestamp)
+            ->sortByDesc(fn (array $activity): int => $activity['created_at']?->timestamp ?? 0)
             ->values();
 
         return [

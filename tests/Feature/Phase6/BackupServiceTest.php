@@ -122,7 +122,7 @@ class BackupServiceTest extends TestCase
             $failing->createToDrive(User::factory()->create(), $drive);
             $this->fail('Expected BackupException was not thrown.');
         } catch (BackupException $e) {
-            $this->assertStringContainsString('simulated mysqldump failure', $e->getMessage());
+            $this->assertStringContainsString('simulated database dump failure', $e->getMessage());
         }
 
         $after = glob(sys_get_temp_dir().'/sipeta_backup_*') ?: [];
@@ -130,7 +130,7 @@ class BackupServiceTest extends TestCase
         $log = BackupLog::query()->first();
         $this->assertSame(BackupStatus::FAILED, $log->backup_status);
         $this->assertSame(0, $log->backup_size);
-        $this->assertStringContainsString('simulated mysqldump failure', $log->message);
+        $this->assertStringContainsString('simulated database dump failure', $log->message);
     }
 
     public function test_upload_failure_is_never_logged_as_success_and_cleans_archive(): void

@@ -41,7 +41,17 @@ class KartuKeluargaResource extends Resource
 
     public static function getGloballySearchableAttributes(): array
     {
-        return ['kk_number', 'penduduks.full_name', 'address'];
+        return ['kk_number'];
+    }
+
+    public static function getGlobalSearchResultTitle(Model $record): string
+    {
+        return $record->kk_number;
+    }
+
+    public static function getGlobalSearchResultDetails(Model $record): array
+    {
+        return [];
     }
 
     public static function getGlobalSearchResultUrl(Model $record): ?string

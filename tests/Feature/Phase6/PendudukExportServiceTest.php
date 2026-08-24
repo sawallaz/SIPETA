@@ -10,6 +10,7 @@ use App\Models\Penduduk;
 use App\Models\Religion;
 use App\Models\Rt;
 use App\Models\Setting;
+use App\Models\User;
 use App\Services\PendudukExportService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -251,5 +252,41 @@ class PendudukExportServiceTest extends TestCase
         $this->assertStringContainsString('Laporan Data Penduduk', $html);
         $this->assertStringContainsString('Kelurahan Tanete', $html);
         $this->assertStringContainsString('Nur Aisyah', $html);
+    }
+
+    public function test_authenticated_user_can_download_csv_from_route(): void
+    {
+        $user = User::factory()->create();
+        Penduduk::factory()->create(['full_name' => 'Warga CSV']);
+
+        $response = $this->actingAs($user)->get(route('penduduk.export.csv'));
+
+        $response->assertOk();
+        $this->assertStringContainsString(ExportFormat::CSV->mime(), (string) $response->headers->get('Content-Type'));
+        $this->assertStringContainsString('.csv', $response->headers->get('Content-Disposition') ?? '');
+    }
+
+    public function test_authenticated_user_can_download_xlsx_from_route(): void
+    {
+        $user = User::factory()->create();
+        Penduduk::factory()->create(['full_name' => 'Warga Excel']);
+
+        $response = $this->actingAs($user)->get(route('penduduk.export.xlsx'));
+
+        $response->assertOk();
+        $this->assertSame(ExportFormat::XLSX->mime(), $response->headers->get('Content-Type'));
+        $this->assertStringContainsString('.xlsx', $response->headers->get('Content-Disposition') ?? '');
+    }
+
+    public function test_authenticated_user_can_download_pdf_from_route(): void
+    {
+        $user = User::factory()->create();
+        Penduduk::factory()->create(['full_name' => 'Warga PDF']);
+
+        $response = $this->actingAs($user)->get(route('penduduk.export.pdf'));
+
+        $response->assertOk();
+        $this->assertSame(ExportFormat::PDF->mime(), $response->headers->get('Content-Type'));
+        $this->assertStringStartsWith('%PDF', $response->getContent());
     }
 }

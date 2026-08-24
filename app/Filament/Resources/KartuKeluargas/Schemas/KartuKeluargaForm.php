@@ -53,20 +53,19 @@ class KartuKeluargaForm
                          * diteruskan sebagai update reaktif.
                          */
                         ->live()
-                        ->image()
-                        ->imageEditor()
-                        ->maxSize(5120)
+                        ->maxSize(10240)
                         ->acceptedFileTypes([
                             'image/jpeg',
                             'image/png',
+                            'image/jpg',
                         ])
                         ->downloadable()
                         ->openable()
                         ->previewable()
                         ->helperText(
                             fn (string $operation): string => $operation === 'edit'
-                                ? 'Upload hanya jika ingin mengganti foto KK lama.'
-                                : 'Upload foto KK untuk arsip dan pembacaan OCR.'
+                                ? 'Upload hanya jika ingin mengganti foto KK lama (Maks. 10 MB, JPG/PNG).'
+                                : 'Upload foto KK untuk arsip dan pembacaan OCR (Maks. 10 MB, JPG/PNG).'
                         )
                         ->columnSpanFull(),
 
@@ -75,14 +74,51 @@ class KartuKeluargaForm
                         ->content(
                             fn ($record): Htmlable => new HtmlString(
                                 $record !== null
-                                && filled($record->active_photo_thumbnail_url)
+                                && filled($record->active_photo_full_url ?? $record->active_photo_thumbnail_url)
                                     ? '
-                                        <div class="flex justify-center">
-                                            <img
-                                                src="'.e($record->active_photo_thumbnail_url).'"
-                                                class="max-h-72 rounded-xl border object-contain shadow-sm"
-                                                alt="Foto KK saat ini"
+                                        <div x-data="{ open: false }" class="flex flex-col items-center">
+                                            <button
+                                                type="button"
+                                                @click="open = true"
+                                                class="group relative cursor-zoom-in rounded-xl border border-gray-200 p-2 shadow-sm transition hover:shadow-md dark:border-gray-700"
                                             >
+                                                <img
+                                                    src="'.e($record->active_photo_full_url ?? $record->active_photo_thumbnail_url).'"
+                                                    class="max-h-96 w-auto max-w-full rounded-lg object-contain"
+                                                    alt="Foto KK saat ini"
+                                                >
+                                                <div class="absolute inset-0 flex items-center justify-center rounded-lg bg-black/40 opacity-0 transition group-hover:opacity-100">
+                                                    <span class="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-gray-900 shadow-sm">
+                                                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"/></svg>
+                                                        Klik untuk memperbesar
+                                                    </span>
+                                                </div>
+                                            </button>
+
+                                            <!-- Modal Lightbox Resolusi Penuh -->
+                                            <template x-teleport="body">
+                                                <div
+                                                    x-show="open"
+                                                    x-cloak
+                                                    @keydown.escape.window="open = false"
+                                                    class="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+                                                >
+                                                    <div @click.away="open = false" class="relative flex max-h-[95vh] max-w-[95vw] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-gray-900">
+                                                        <div class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                                                            <span class="text-sm font-semibold text-gray-800 dark:text-gray-200">Foto / Scan Kartu Keluarga</span>
+                                                            <div class="flex items-center gap-2">
+                                                                <a href="'.e($record->active_photo_full_url ?? $record->active_photo_thumbnail_url).'" target="_blank" class="rounded-lg bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300">Buka Tab Baru</a>
+                                                                <button type="button" @click="open = false" class="rounded-lg p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800">
+                                                                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <div class="flex max-h-[85vh] items-center justify-center overflow-auto p-4">
+                                                            <img src="'.e($record->active_photo_full_url ?? $record->active_photo_thumbnail_url).'" class="max-h-[80vh] w-auto max-w-full rounded-lg object-contain shadow-sm" alt="Foto KK Full">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </template>
                                         </div>
                                     '
                                     : '
@@ -614,10 +650,26 @@ class KartuKeluargaForm
                 </div>
 
                 <div class="kk-dup-modal-row">
-                    <div class="kk-dup-modal-label">Wilayah</div>
+                    <div class="kk-dup-modal-label">Alamat</div>
                     <div
                         class="kk-dup-modal-value"
-                        x-text="$wire.duplicateKk.wilayah"
+                        x-text="$wire.duplicateKk.address"
+                    ></div>
+                </div>
+
+                <div class="kk-dup-modal-row">
+                    <div class="kk-dup-modal-label">RT / RW</div>
+                    <div
+                        class="kk-dup-modal-value"
+                        x-text="($wire.duplicateKk.rt || '-') + ' / ' + ($wire.duplicateKk.rw || '-')"
+                    ></div>
+                </div>
+
+                <div class="kk-dup-modal-row">
+                    <div class="kk-dup-modal-label">Jumlah Anggota</div>
+                    <div
+                        class="kk-dup-modal-value"
+                        x-text="$wire.duplicateKk.member_count"
                     ></div>
                 </div>
             </div>
@@ -634,12 +686,40 @@ class KartuKeluargaForm
                 class="kk-dup-modal-btn kk-dup-modal-btn-secondary"
                 @click="$wire.closeDuplicateKk()"
             >
-                Tutup
+                Batal
             </button>
 
             <a
+                class="kk-dup-modal-btn kk-dup-modal-btn-secondary"
+                x-show="$wire.duplicateKk && $wire.duplicateKk.view_url"
+                :href="$wire.duplicateKk ? $wire.duplicateKk.view_url : '#'"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="kk-dup-modal-btn-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"
+                    />
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+                    />
+                </svg>
+
+                Lihat
+            </a>
+
+            <a
                 class="kk-dup-modal-btn kk-dup-modal-btn-primary"
-                :href="$wire.duplicateKk.edit_url"
+                :href="$wire.duplicateKk ? $wire.duplicateKk.edit_url : '#'"
             >
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -656,7 +736,7 @@ class KartuKeluargaForm
                     />
                 </svg>
 
-                Buka &amp; Edit KK
+                Ubah
             </a>
         </div>
 

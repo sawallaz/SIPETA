@@ -5,7 +5,7 @@ namespace Tests\Support;
 use App\Services\DatabaseDumper;
 
 /**
- * Deterministic DatabaseDumper for the backup suite — no real mysqldump runs.
+ * Deterministic DatabaseDumper for the backup suite.
  */
 final class FakeDatabaseDumper implements DatabaseDumper
 {
@@ -22,7 +22,7 @@ final class FakeDatabaseDumper implements DatabaseDumper
     public function dump(): string
     {
         if ($this->shouldFail) {
-            throw new \RuntimeException('simulated mysqldump failure');
+            throw new \RuntimeException('simulated database dump failure');
         }
 
         return $this->sql;

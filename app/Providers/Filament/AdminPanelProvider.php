@@ -2,8 +2,10 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\Auth\Login;
 use App\Filament\Pages\Dashboard;
-use Filament\Http\Middleware\Authenticate;
+use App\Http\Middleware\EnsureSuperAdminExists;
+use App\Http\Middleware\FilamentAuthenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
@@ -27,8 +29,11 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->brandName('SIPETA')
+            ->brandLogo(fn () => view('filament.components.brand-logo'))
+            ->brandLogoHeight('2.5rem')
+            ->favicon(asset('favicon.svg'))
             ->maxContentWidth(Width::Full)
-            ->login()
+            ->login(Login::class)
             ->passwordReset()
             ->profile(isSimple: false)
             ->sidebarCollapsibleOnDesktop()
@@ -69,9 +74,10 @@ class AdminPanelProvider extends PanelProvider
                 SubstituteBindings::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
+                EnsureSuperAdminExists::class,
             ])
             ->authMiddleware([
-                Authenticate::class,
+                FilamentAuthenticate::class,
             ]);
     }
 }

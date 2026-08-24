@@ -2,23 +2,21 @@
 
 namespace App\Filament\Resources\Penduduks\Tables;
 
-use App\Enums\ExportFormat;
 use App\Enums\Gender;
 use App\Enums\ResidentStatus;
 use App\Filament\Resources\KartuKeluargas\KartuKeluargaResource;
 use App\Filament\Resources\Penduduks\PendudukResource;
 use App\Models\Penduduk;
-use App\Services\PendudukExportService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
-use Illuminate\Support\HtmlString;
 
 class PenduduksTable
 {
@@ -198,6 +196,12 @@ class PenduduksTable
                     })
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: false),
+                TextColumn::make('status_date')
+                    ->label('Tanggal Status')
+                    ->state(fn (Penduduk $record): ?string => $record->formatted_status_date ?? '-')
+                    ->sortable(false)
+                    ->placeholder('-')
+                    ->toggleable(isToggledHiddenByDefault: false),
                 TextColumn::make('religion.name')
                     ->label('Agama')
                     ->sortable()
@@ -216,11 +220,11 @@ class PenduduksTable
             ])
             ->filters(PendudukanFilters::build())
             ->recordActions([
-                Action::make('view')
+                ViewAction::make()
                     ->label('Lihat')
                     ->icon('heroicon-o-eye')
                     ->modalHeading('Detail Penduduk')
-                    ->modalWidth('7xl')
+                    ->modalWidth('5xl')
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Tutup')
                     ->modalFooterActions([
@@ -233,12 +237,7 @@ class PenduduksTable
                                     ['record' => $record]
                                 )
                             ),
-                    ])
-                    ->modalContent(function (Penduduk $record) {
-                        return new HtmlString(
-                            view('filament.components.penduduk-detail-modal', compact('record'))->render()
-                        );
-                    }),
+                    ]),
 
                 EditAction::make()
                     ->label('Ubah')
@@ -263,15 +262,29 @@ class PenduduksTable
                     ->icon(Heroicon::OutlinedArrowDownTray)
                     ->color('gray')
                     ->requiresConfirmation(false)
-                    ->action(fn (HasTable $livewire) => app(PendudukExportService::class)
-                        ->exportQuery($livewire->getFilteredTableQuery(), ExportFormat::CSV)),
+                    ->url(
+                        fn (HasTable $livewire): string => route(
+                            'penduduk.export.csv',
+                            [
+                                'filters' => $livewire->tableFilters,
+                                'search' => $livewire->tableSearch,
+                            ],
+                        )
+                    ),
                 Action::make('export_xlsx')
                     ->label('Excel')
                     ->icon(Heroicon::OutlinedArrowDownTray)
                     ->color('gray')
                     ->requiresConfirmation(false)
-                    ->action(fn (HasTable $livewire) => app(PendudukExportService::class)
-                        ->exportQuery($livewire->getFilteredTableQuery(), ExportFormat::XLSX)),
+                    ->url(
+                        fn (HasTable $livewire): string => route(
+                            'penduduk.export.xlsx',
+                            [
+                                'filters' => $livewire->tableFilters,
+                                'search' => $livewire->tableSearch,
+                            ],
+                        )
+                    ),
                 Action::make('export_pdf')
                     ->label('PDF')
                     ->icon(Heroicon::OutlinedArrowDownTray)

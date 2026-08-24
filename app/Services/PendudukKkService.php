@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\BloodType;
 use App\Enums\KkAnggotaStatus;
 use App\Enums\ResidentStatus;
 use App\Models\Education;
@@ -88,7 +89,14 @@ class PendudukKkService
                     ]);
                 }
 
+                $existing = Penduduk::query()
+                    ->where('nik', $nik)
+                    ->first();
+
                 $fullName = trim((string) ($member['full_name'] ?? ''));
+                if ($fullName === '' && $existing !== null) {
+                    $fullName = $existing->full_name;
+                }
 
                 if ($fullName === '') {
                     throw ValidationException::withMessages([
@@ -99,6 +107,9 @@ class PendudukKkService
                 $gender = $this->normalizeEnumValue(
                     $member['gender'] ?? null,
                 );
+                if ($gender === null && $existing !== null) {
+                    $gender = $existing->gender?->value ?? (string) $existing->gender;
+                }
 
                 if ($gender === null) {
                     throw ValidationException::withMessages([
@@ -109,6 +120,9 @@ class PendudukKkService
                 $birthPlace = trim(
                     (string) ($member['birth_place'] ?? ''),
                 );
+                if ($birthPlace === '' && $existing !== null) {
+                    $birthPlace = (string) $existing->birth_place;
+                }
 
                 if ($birthPlace === '') {
                     throw ValidationException::withMessages([
@@ -117,6 +131,9 @@ class PendudukKkService
                 }
 
                 $birthDate = $member['birth_date'] ?? null;
+                if (blank($birthDate) && $existing !== null) {
+                    $birthDate = $existing->birth_date?->format('Y-m-d');
+                }
 
                 if (blank($birthDate)) {
                     throw ValidationException::withMessages([
@@ -125,24 +142,33 @@ class PendudukKkService
                 }
 
                 $religionRaw = $member['religion'] ?? null;
+                $religionId = filled($religionRaw)
+                    ? $this->resolveReligionId($religionRaw)
+                    : $existing?->religion_id;
 
-                if (blank($religionRaw)) {
+                if ($religionId === null) {
                     throw ValidationException::withMessages([
                         "ocr_members.{$index}.religion" => "Anggota ke-{$row}: agama belum terbaca.",
                     ]);
                 }
 
                 $educationRaw = $member['education'] ?? null;
+                $educationId = filled($educationRaw)
+                    ? $this->resolveEducationId($educationRaw)
+                    : $existing?->education_id;
 
-                if (blank($educationRaw)) {
+                if ($educationId === null) {
                     throw ValidationException::withMessages([
                         "ocr_members.{$index}.education" => "Anggota ke-{$row}: pendidikan belum terbaca.",
                     ]);
                 }
 
                 $occupationRaw = $member['occupation'] ?? null;
+                $occupationId = filled($occupationRaw)
+                    ? $this->resolveOccupationId($occupationRaw)
+                    : $existing?->occupation_id;
 
-                if (blank($occupationRaw)) {
+                if ($occupationId === null) {
                     throw ValidationException::withMessages([
                         "ocr_members.{$index}.occupation" => "Anggota ke-{$row}: pekerjaan belum terbaca.",
                     ]);
@@ -151,6 +177,9 @@ class PendudukKkService
                 $marital = $this->normalizeEnumValue(
                     $member['marital_status'] ?? null,
                 );
+                if ($marital === null && $existing !== null) {
+                    $marital = $existing->marital_status?->value ?? (string) $existing->marital_status;
+                }
 
                 if ($marital === null) {
                     throw ValidationException::withMessages([
@@ -161,6 +190,9 @@ class PendudukKkService
                 $familyRelation = $this->normalizeEnumValue(
                     $member['family_relation'] ?? null,
                 );
+                if ($familyRelation === null && $existing !== null) {
+                    $familyRelation = $existing->family_relation?->value ?? (string) $existing->family_relation;
+                }
 
                 if ($familyRelation === null) {
                     throw ValidationException::withMessages([
@@ -168,15 +200,18 @@ class PendudukKkService
                     ]);
                 }
 
+                $bloodType = $member['blood_type'] ?? $existing?->blood_type?->value ?? BloodType::TIDAK_DIKETAHUI->value;
+
                 $prepared[] = [
                     'nik' => $nik,
                     'full_name' => $fullName,
                     'gender' => $gender,
                     'birth_place' => $birthPlace,
                     'birth_date' => $birthDate,
-                    'religion_id' => $this->resolveReligionId($religionRaw),
-                    'education_id' => $this->resolveEducationId($educationRaw),
-                    'occupation_id' => $this->resolveOccupationId($occupationRaw),
+                    'religion_id' => $religionId,
+                    'education_id' => $educationId,
+                    'occupation_id' => $occupationId,
+                    'blood_type' => $bloodType,
                     'marital_status' => $marital,
                     'family_relation' => $familyRelation,
                     'resident_status' => ResidentStatus::ACTIVE,
@@ -246,7 +281,7 @@ class PendudukKkService
     }
 
     /**
-     * Cari ID agama berdasarkan nilai canonical dari OCR.
+     * Cari ID agama berdasarkan nilai canonical/alias dari OCR.
      */
     protected function resolveReligionId(mixed $value): int
     {
@@ -256,17 +291,50 @@ class PendudukKkService
             ->whereRaw('LOWER(TRIM(name)) = ?', [$normalized])
             ->first();
 
-        if ($model === null) {
-            throw ValidationException::withMessages([
-                'ocr' => "Agama '{$value}' tidak ditemukan pada master agama.",
-            ]);
+        if ($model !== null) {
+            return (int) $model->id;
         }
 
-        return (int) $model->id;
+        $relGroups = [
+            'Islam' => ['Islam', 'ISLAM'],
+            'Kristen' => ['Kristen', 'KRISTEN', 'Kristen Protestan', 'PROTESTAN', 'Protestan'],
+            'Katolik' => ['Katolik', 'KATOLIK', 'Catholic', 'CATHOLIC'],
+            'Hindu' => ['Hindu', 'HINDU'],
+            'Buddha' => ['Buddha', 'BUDDHA', 'Budha', 'BUDHA'],
+            'Konghucu' => ['Konghucu', 'KONGHUCU', 'Khonghucu', 'KHONGHUCU'],
+            'Lainnya' => ['Lainnya', 'LAINNYA', 'Kepercayaan', 'KEPERCAYAAN', 'Penghayat Kepercayaan'],
+        ];
+
+        $upperInput = mb_strtoupper($normalized);
+        foreach ($relGroups as $targetCanonical => $groupAliases) {
+            foreach ($groupAliases as $alias) {
+                if ($upperInput === mb_strtoupper($alias)) {
+                    $targetId = Religion::query()
+                        ->whereRaw('UPPER(name) = ?', [mb_strtoupper($targetCanonical)])
+                        ->value('id');
+                    if ($targetId !== null) {
+                        return (int) $targetId;
+                    }
+                    foreach ($groupAliases as $candidate) {
+                        $candId = Religion::query()
+                            ->whereRaw('UPPER(name) = ?', [mb_strtoupper($candidate)])
+                            ->value('id');
+                        if ($candId !== null) {
+                            return (int) $candId;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        $created = Religion::firstOrCreate(['name' => ucwords(strtolower((string) $value))]);
+
+        return (int) $created->id;
     }
 
     /**
-     * Cari ID pendidikan berdasarkan label OCR.
+     * Cari ID pendidikan berdasarkan label OCR / alias.
      */
     protected function resolveEducationId(mixed $value): int
     {
@@ -276,17 +344,54 @@ class PendudukKkService
             ->whereRaw('LOWER(TRIM(name)) = ?', [$normalized])
             ->first();
 
-        if ($model === null) {
-            throw ValidationException::withMessages([
-                'ocr' => "Pendidikan '{$value}' tidak ditemukan pada master pendidikan.",
-            ]);
+        if ($model !== null) {
+            return (int) $model->id;
         }
 
-        return (int) $model->id;
+        $aliasGroups = [
+            'D1' => ['D1', 'D-I', 'D I', 'DIPLOMA I', 'DIPLOMA 1', 'DIPLOMA I/II'],
+            'D2' => ['D2', 'D-II', 'D II', 'DIPLOMA II', 'DIPLOMA 2'],
+            'D3' => ['D3', 'D-III', 'D III', 'DIPLOMA III', 'DIPLOMA 3', 'AKADEMI', 'SARJANA MUDA', 'AKADEMI/DIPLOMA III/SARJANA MUDA'],
+            'S1' => ['S1', 'S-I', 'S I', 'STRATA I', 'STRATA 1', 'SARJANA', 'D4', 'D-IV', 'D IV', 'DIPLOMA IV', 'DIPLOMA IV/STRATA I'],
+            'S2' => ['S2', 'S-II', 'S II', 'STRATA II', 'STRATA 2', 'MAGISTER'],
+            'S3' => ['S3', 'S-III', 'S III', 'STRATA III', 'STRATA 3', 'DOKTOR'],
+            'SMA' => ['SMA', 'SMA/SEDERAJAT', 'SLTA', 'SLTA/SEDERAJAT', 'SMK', 'SMK/SEDERAJAT', 'MA', 'MA/SEDERAJAT'],
+            'SMP' => ['SMP', 'SMP/SEDERAJAT', 'SLTP', 'SLTP/SEDERAJAT', 'MTS', 'MTS/SEDERAJAT'],
+            'SD' => ['SD', 'SD/SEDERAJAT', 'TAMAT SD', 'TAMAT SD/SEDERAJAT', 'BELUM TAMAT SD', 'BELUM TAMAT SD/SEDERAJAT'],
+            'Tidak/Belum Sekolah' => ['Tidak/Belum Sekolah', 'TIDAK/BELUM SEKOLAH', 'TIDAK BELUM SEKOLAH', 'BELUM SEKOLAH', 'TIDAK SEKOLAH'],
+        ];
+
+        $upperInput = mb_strtoupper($normalized);
+        foreach ($aliasGroups as $targetCanonical => $groupAliases) {
+            foreach ($groupAliases as $alias) {
+                if ($upperInput === mb_strtoupper($alias)) {
+                    $targetId = Education::query()
+                        ->whereRaw('UPPER(name) = ?', [mb_strtoupper($targetCanonical)])
+                        ->value('id');
+                    if ($targetId !== null) {
+                        return (int) $targetId;
+                    }
+
+                    foreach ($groupAliases as $candidate) {
+                        $candId = Education::query()
+                            ->whereRaw('UPPER(name) = ?', [mb_strtoupper($candidate)])
+                            ->value('id');
+                        if ($candId !== null) {
+                            return (int) $candId;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        $created = Education::firstOrCreate(['name' => trim((string) $value)]);
+
+        return (int) $created->id;
     }
 
     /**
-     * Cari ID pekerjaan berdasarkan label OCR.
+     * Cari ID pekerjaan berdasarkan label OCR / alias.
      */
     protected function resolveOccupationId(mixed $value): int
     {
@@ -296,13 +401,52 @@ class PendudukKkService
             ->whereRaw('LOWER(TRIM(name)) = ?', [$normalized])
             ->first();
 
-        if ($model === null) {
-            throw ValidationException::withMessages([
-                'ocr' => "Pekerjaan '{$value}' tidak ditemukan pada master pekerjaan.",
-            ]);
+        if ($model !== null) {
+            return (int) $model->id;
         }
 
-        return (int) $model->id;
+        $occGroups = [
+            'Pegawai Negeri Sipil' => ['Pegawai Negeri Sipil', 'PEGAWAI NEGERI SIPIL', 'PNS', 'ASN', 'PEGAWAI NEGERI'],
+            'Ibu Rumah Tangga' => ['Ibu Rumah Tangga', 'IBU RUMAH TANGGA', 'Mengurus Rumah Tangga', 'MENGURUS RUMAH TANGGA', 'RUMAH TANGGA', 'IRT'],
+            'Buruh' => ['Buruh', 'BURUH', 'Buruh Harian Lepas', 'BURUH HARIAN LEPAS', 'Buruh Harian', 'BURUH HARIAN', 'Buruh Tani', 'BURUH TANI', 'Buruh Pabrik', 'BURUH PABRIK'],
+            'Karyawan Swasta' => ['Karyawan Swasta', 'KARYAWAN SWASTA', 'Karyawan', 'KARYAWAN', 'Pegawai Swasta', 'PEGAWAI SWASTA', 'Karyawan BUMN', 'Karyawan BUMD', 'Swasta', 'SWASTA'],
+            'Pelajar/Mahasiswa' => ['Pelajar/Mahasiswa', 'PELAJAR/MAHASISWA', 'Pelajar', 'PELAJAR', 'Mahasiswa', 'MAHASISWA', 'Pelajar Mahasiswa', 'PELAJAR MAHASISWA', 'Pelajarimahasiswa', 'PELAJARIMAHASISWA'],
+            'Petani' => ['Petani', 'PETANI', 'Petani/Pekebun', 'PETANI/PEKEBUN', 'Pekebun', 'PEKEBUN', 'Petani Pekebun', 'PETANI PEKEBUN'],
+            'Pedagang' => ['Pedagang', 'PEDAGANG', 'Perdagangan', 'PERDAGANGAN'],
+            'Nelayan' => ['Nelayan', 'NELAYAN', 'Nelayan/Perikanan', 'NELAYAN/PERIKANAN', 'Perikanan', 'PERIKANAN'],
+            'Wiraswasta' => ['Wiraswasta', 'WIRASWASTA', 'Wirausaha', 'WIRAUSAHA'],
+            'Pensiunan' => ['Pensiunan', 'PENSIUNAN', 'Pensiun', 'PENSIUN'],
+            'Tukang' => ['Tukang', 'TUKANG', 'Tukang Kayu', 'Tukang Batu', 'Tukang Jahit', 'Tukang Cukur', 'Tukang Las'],
+            'Lainnya' => ['Lainnya', 'LAINNYA', 'Belum/Tidak Bekerja', 'BELUM/TIDAK BEKERJA', 'Belum Bekerja', 'BELUM BEKERJA', 'Tidak Bekerja', 'TIDAK BEKERJA'],
+        ];
+
+        $upperInput = mb_strtoupper($normalized);
+        foreach ($occGroups as $targetCanonical => $groupAliases) {
+            foreach ($groupAliases as $alias) {
+                if ($upperInput === mb_strtoupper($alias)) {
+                    $targetId = Occupation::query()
+                        ->whereRaw('UPPER(name) = ?', [mb_strtoupper($targetCanonical)])
+                        ->value('id');
+                    if ($targetId !== null) {
+                        return (int) $targetId;
+                    }
+
+                    foreach ($groupAliases as $candidate) {
+                        $candId = Occupation::query()
+                            ->whereRaw('UPPER(name) = ?', [mb_strtoupper($candidate)])
+                            ->value('id');
+                        if ($candId !== null) {
+                            return (int) $candId;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        $created = Occupation::firstOrCreate(['name' => ucwords(strtolower((string) $value))]);
+
+        return (int) $created->id;
     }
 
     /**
@@ -324,28 +468,90 @@ class PendudukKkService
             return null;
         }
 
-        return match (mb_strtoupper($value)) {
+        $upper = mb_strtoupper($value);
+
+        return match ($upper) {
             'LAKI-LAKI',
-            'LAKI LAKI' => 'LAKI_LAKI',
+            'LAKI LAKI',
+            'LAKI_LAKI',
+            'L' => 'LAKI_LAKI',
 
-            'PEREMPUAN' => 'PEREMPUAN',
+            'PEREMPUAN',
+            'P' => 'PEREMPUAN',
 
-            'BELUM KAWIN' => 'BELUM_KAWIN',
-            'KAWIN' => 'KAWIN',
-            'CERAI HIDUP' => 'CERAI_HIDUP',
-            'CERAI MATI' => 'CERAI_MATI',
+            'BELUM KAWIN',
+            'BELUM_KAWIN',
+            'BELUMKAWIN',
+            'BELUM KAWN',
+            'BELUMKAWN',
+            'BELUM NIKAH',
+            'SINGLE' => 'BELUM_KAWIN',
 
-            'KEPALA KELUARGA' => 'KEPALA_KELUARGA',
-            'ISTRI' => 'ISTRI',
-            'ANAK' => 'ANAK',
+            'KAWIN',
+            'KAW1N',
+            'NIKAH',
+            'MARRIED',
+            'KAWIN TERCATAT' => 'KAWIN',
+
+            'CERAI HIDUP',
+            'CERAI_HIDUP',
+            'CERAIHIDUP',
+            'CERAI',
+            'DUDA' => 'CERAI_HIDUP',
+
+            'CERAI MATI',
+            'CERAI_MATI',
+            'CERAIMATI',
+            'JANDA' => 'CERAI_MATI',
+
+            'KEPALA KELUARGA',
+            'KEPALA_KELUARGA',
+            'KEPALA KEL.',
+            'KEPALA KEL',
+            'KEPALAKELUARGA',
+            'KEPALAKEUARGA',
+            'KEPALAKEL',
+            'KEPALA' => 'KEPALA_KELUARGA',
+
+            'ISTRI',
+            'ISTERI',
+            '1STRI',
+            'ISTRI KEPALA KELUARGA' => 'ISTRI',
+
+            'ANAK',
+            'ANAK2',
+            'ANAK-',
+            'AN4K',
+            'ANAK KANDUNG',
+            'ANAK ANGKAT',
+            'ANAK TIRI' => 'ANAK',
+
             'MENANTU' => 'MENANTU',
             'CUCU' => 'CUCU',
-            'ORANG TUA' => 'ORANG_TUA',
-            'MERTUA' => 'MERTUA',
-            'FAMILI LAIN' => 'FAMILI_LAIN',
-            'LAINNYA' => 'LAINNYA',
 
-            default => null,
+            'ORANG TUA',
+            'ORANG_TUA',
+            'ORANGTUA',
+            'AYAH',
+            'IBU',
+            'BAPAK' => 'ORANG_TUA',
+
+            'MERTUA' => 'MERTUA',
+
+            'FAMILI LAIN',
+            'FAMILI_LAIN',
+            'FAMILI LAINNYA',
+            'FAMILI',
+            'FAMILILAIN' => 'FAMILI_LAIN',
+
+            'PEMBANTU',
+            'LAINNYA',
+            'LAIN' => 'LAINNYA',
+
+            default => FamilyRelation::tryFrom($upper)?->value
+                ?? MaritalStatus::tryFrom($upper)?->value
+                ?? Gender::tryFrom($upper)?->value
+                ?? null,
         };
     }
 
@@ -388,48 +594,30 @@ class PendudukKkService
             }
 
             /*
-             * Saat Edit, cari berdasarkan record yang sedang diedit.
-             * Saat Create, cari berdasarkan NIK.
+             * Saat Edit ($existing !== null):
+             * NIK boleh tetap sama, tetapi tidak boleh menabrak NIK milik record lain.
+             *
+             * Saat Create ($existing === null):
+             * NIK tidak boleh sudah terdaftar di database.
              */
-            $penduduk = $existing;
-
-            if ($penduduk === null) {
-                $penduduk = Penduduk::query()
-                    ->lockForUpdate()
-                    ->where('nik', $nik)
-                    ->first();
-            } else {
-                /*
-                 * Saat Edit, NIK boleh diperbaiki, tetapi tidak boleh
-                 * menabrak NIK milik orang lain.
-                 *
-                 * Tanpa penjagaan ini, unique index pada penduduk.nik
-                 * akan melempar QueryException (HTTP 500), bukan pesan
-                 * validasi yang bisa dibaca operator.
-                 */
+            if ($existing === null) {
                 $conflict = Penduduk::query()
                     ->where('nik', $nik)
-                    ->where('id', '!=', $penduduk->getKey())
                     ->first();
 
                 if ($conflict !== null) {
                     throw ValidationException::withMessages([
                         'nik' => sprintf(
-                            'NIK %s sudah digunakan oleh penduduk lain (%s).',
+                            'Penduduk dengan NIK %s sudah terdaftar (%s).',
                             $nik,
                             $conflict->full_name ?? 'tanpa nama',
                         ),
                     ]);
                 }
-            }
 
-            /*
-             * Jika tidak ada NIK tersebut:
-             * buat Penduduk baru.
-             */
-            if ($penduduk === null) {
                 $data['nik'] = $nik;
                 $data['kk_id'] = $kk->id;
+                $data['blood_type'] ??= BloodType::TIDAK_DIKETAHUI->value;
 
                 /** @var Penduduk $penduduk */
                 $penduduk = Penduduk::create($data);
@@ -443,6 +631,23 @@ class PendudukKkService
                 return $penduduk->fresh([
                     'kartuKeluarga',
                     'kkAnggotas',
+                ]);
+            }
+
+            $penduduk = $existing;
+
+            $conflict = Penduduk::query()
+                ->where('nik', $nik)
+                ->where('id', '!=', $penduduk->getKey())
+                ->first();
+
+            if ($conflict !== null) {
+                throw ValidationException::withMessages([
+                    'nik' => sprintf(
+                        'NIK %s sudah digunakan oleh penduduk lain (%s).',
+                        $nik,
+                        $conflict->full_name ?? 'tanpa nama',
+                    ),
                 ]);
             }
 

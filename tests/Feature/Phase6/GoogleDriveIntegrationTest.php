@@ -3,6 +3,7 @@
 namespace Tests\Feature\Phase6;
 
 use App\Enums\BackupStatus;
+use App\Enums\BackupType;
 use App\Enums\UserRole;
 use App\Exceptions\GoogleDriveException;
 use App\Filament\Pages\Backup;
@@ -53,6 +54,24 @@ class GoogleDriveIntegrationTest extends TestCase
         $this->assertStringContainsString('scope='.rawurlencode(GoogleDriveOAuthService::SCOPE), $url);
         $this->assertStringContainsString('state=state-123', $url);
         $this->assertStringContainsString('access_type=offline', $url);
+        $this->assertStringContainsString('redirect_uri='.rawurlencode('http://localhost/admin/backup/google/callback'), $url);
+    }
+
+    public function test_oauth_authorization_url_supports_custom_redirect_uri(): void
+    {
+        $url = app(GoogleDriveOAuthService::class)->authorizationUrl('state-456', 'http://localhost:8100/admin/backup/google/callback');
+
+        $this->assertStringContainsString('redirect_uri='.rawurlencode('http://localhost:8100/admin/backup/google/callback'), $url);
+    }
+
+    public function test_oauth_connect_saves_state_and_redirect_uri_in_session(): void
+    {
+        $admin = User::factory()->create(['role' => UserRole::SUPER_ADMIN]);
+        $response = $this->actingAs($admin)->get(route('google-drive.connect'));
+
+        $response->assertRedirect();
+        $this->assertNotNull(session('google_drive_oauth_state'));
+        $this->assertNotNull(session('google_drive_oauth_redirect_uri'));
     }
 
     public function test_oauth_state_is_required_and_operator_is_blocked(): void
@@ -396,6 +415,161 @@ class GoogleDriveIntegrationTest extends TestCase
                 $this->assertSame(403, $e->getStatusCode(), "Unexpected status for {$method}.");
             }
         }
+    }
+
+    public function test_sync_from_drive_is_idempotent_and_reflects_remote_files(): void
+    {
+        $this->saveCredentials();
+
+        Http::fake([
+            $this->driveUri.'/files*' => Http::response([
+                'files' => [
+                    [
+                        'id' => 'drive-file-remote-1',
+                        'name' => 'backup_2026-08-18_010000.zip',
+                        'size' => 1024000,
+                        'createdTime' => '2026-08-18T01:00:00Z',
+                        'appProperties' => [
+                            'sipeta_checksum' => 'sha256:remote1',
+                        ],
+                    ],
+                    [
+                        'id' => 'drive-file-remote-2',
+                        'name' => 'backup_2026-08-18_020000.zip',
+                        'size' => 2048000,
+                        'createdTime' => '2026-08-18T02:00:00Z',
+                        'appProperties' => [
+                            'sipeta_checksum' => 'sha256:remote2',
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $driveClient = app(GoogleDriveClient::class);
+        $backupService = app(BackupService::class);
+
+        // First sync
+        $backupService->syncFromDrive($driveClient);
+
+        $this->assertSame(2, BackupLog::count());
+        $this->assertDatabaseHas('backup_logs', ['drive_file_id' => 'drive-file-remote-1', 'backup_status' => BackupStatus::SUCCESS->value]);
+        $this->assertDatabaseHas('backup_logs', ['drive_file_id' => 'drive-file-remote-2', 'backup_status' => BackupStatus::SUCCESS->value]);
+
+        // Second sync (idempotent)
+        $backupService->syncFromDrive($driveClient);
+        $this->assertSame(2, BackupLog::count());
+    }
+
+    public function test_view_data_is_empty_when_disconnected_even_if_stale_logs_exist(): void
+    {
+        // Create stale local log
+        BackupLog::create([
+            'filename' => 'stale_backup.zip',
+            'backup_type' => BackupType::MANUAL,
+            'backup_status' => BackupStatus::SUCCESS,
+            'backup_size' => 1024,
+            'checksum' => 'sha256:stale',
+            'drive_file_id' => 'stale-id',
+            'started_at' => now(),
+            'finished_at' => now(),
+        ]);
+
+        $admin = User::factory()->create(['role' => UserRole::SUPER_ADMIN]);
+        $this->actingAs($admin);
+
+        // Ensure Setting has no google drive connection
+        $setting = Setting::firstOrCreate(['id' => 1], [
+            'kelurahan_name' => 'Kelurahan Tanete',
+            'kecamatan_name' => 'Bulukumpa',
+            'kabupaten_name' => 'Bulukumba',
+            'province_name' => 'Sulawesi Selatan',
+        ]);
+        $setting->update([
+            'google_drive_account_email' => null,
+            'google_drive_credentials' => null,
+            'google_drive_folder_id' => null,
+        ]);
+
+        $component = new Backup;
+        $viewData = $component->getViewData();
+
+        $this->assertCount(0, $viewData['driveBackups']);
+    }
+
+    public function test_sync_cleans_deleted_remote_files(): void
+    {
+        $this->saveCredentials();
+
+        $syncCallCount = 0;
+        Http::fake(function (Request $request) use (&$syncCallCount) {
+            if (str_contains($request->url(), '/files/folder-1')) {
+                return Http::response([
+                    'id' => 'folder-1',
+                    'name' => 'SIPETA Backup',
+                    'mimeType' => 'application/vnd.google-apps.folder',
+                    'trashed' => false,
+                ], 200);
+            }
+
+            if (str_contains($request->url(), '/files')) {
+                $syncCallCount++;
+                if ($syncCallCount === 1) {
+                    return Http::response([
+                        'files' => [
+                            [
+                                'id' => 'file-1',
+                                'name' => 'backup_1.zip',
+                                'size' => 1024,
+                                'createdTime' => '2026-08-18T01:00:00Z',
+                            ],
+                            [
+                                'id' => 'file-2',
+                                'name' => 'backup_2.zip',
+                                'size' => 2048,
+                                'createdTime' => '2026-08-18T02:00:00Z',
+                            ],
+                        ],
+                    ], 200);
+                }
+
+                if ($syncCallCount === 2) {
+                    return Http::response([
+                        'files' => [
+                            [
+                                'id' => 'file-1',
+                                'name' => 'backup_1.zip',
+                                'size' => 1024,
+                                'createdTime' => '2026-08-18T01:00:00Z',
+                            ],
+                        ],
+                    ], 200);
+                }
+
+                return Http::response([
+                    'files' => [],
+                ], 200);
+            }
+
+            return Http::response([], 200);
+        });
+
+        $driveClient = app(GoogleDriveClient::class);
+        $backupService = app(BackupService::class);
+
+        // First sync -> 2 files
+        $backupService->syncFromDrive($driveClient);
+        $this->assertSame(2, BackupLog::count());
+
+        // Second sync -> 1 file
+        $backupService->syncFromDrive($driveClient);
+        $this->assertSame(1, BackupLog::count());
+        $this->assertDatabaseHas('backup_logs', ['drive_file_id' => 'file-1']);
+        $this->assertDatabaseMissing('backup_logs', ['drive_file_id' => 'file-2']);
+
+        // Third sync -> 0 files
+        $backupService->syncFromDrive($driveClient);
+        $this->assertSame(0, BackupLog::count());
     }
 
     private function saveCredentials(): void

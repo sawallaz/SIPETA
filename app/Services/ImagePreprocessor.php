@@ -392,66 +392,41 @@ class ImagePreprocessor
         /*
          * 1. Normalisasi brightness.
          *
-         * Target ~160 (tengah band 100–200). Foto terlalu terang (231)
-         * diturunkan secara signifikan; foto terlalu gelap dinaikkan.
-         * Dibatasi ±90 agar tidak menghancurkan gambar.
+         * Target ~160 (tengah band 100–200). Foto terlalu terang (>200)
+         * diturunkan; foto terlalu gelap (<100) dinaikkan.
+         * Dibatasi ±90 agar tidak merusak gambar.
          */
-        $target = 160;
-        $correction = (int) round($target - $brightness);
-        $correction = max(-90, min(90, $correction));
+        if ($brightness < self::BRIGHTNESS_MIN || $brightness > self::BRIGHTNESS_MAX) {
+            $target = 160;
+            $correction = (int) round($target - $brightness);
+            $correction = max(-90, min(90, $correction));
 
-        if ($correction !== 0) {
-            imagefilter(
-                $image,
-                IMG_FILTER_BRIGHTNESS,
-                $correction,
-            );
+            if ($correction !== 0) {
+                imagefilter(
+                    $image,
+                    IMG_FILTER_BRIGHTNESS,
+                    $correction,
+                );
 
-            $transforms[] = $correction < 0
-                ? 'brightness_down'
-                : 'brightness_up';
+                $transforms[] = $correction < 0
+                    ? 'brightness_down'
+                    : 'brightness_up';
+            }
         }
 
         /*
-         * 2. Tingkatkan kontras.
+         * 2. Tingkatkan kontras ringan.
          *
          * GD: -100 = kontras sangat tinggi, 0 = normal.
-         * Nilai -12 cukup ringan untuk dokumen.
+         * Nilai -6 cukup ringan untuk dokumen teks tanpa merusak garis.
          */
         imagefilter(
             $image,
             IMG_FILTER_CONTRAST,
-            -12,
+            -6,
         );
 
         $transforms[] = 'contrast';
-
-        /*
-         * 3. Sharpen ringan.
-         *
-         * Kernel:
-         *
-         *   0 -1  0
-         *  -1  5 -1
-         *   0 -1  0
-         *
-         * Mempertajam tepi huruf tanpa terlalu merusak
-         * tabel/garis KK.
-         */
-        if (function_exists('imageconvolution')) {
-            imageconvolution(
-                $image,
-                [
-                    [-1, -1, -1],
-                    [-1,  9, -1],
-                    [-1, -1, -1],
-                ],
-                1,
-                0,
-            );
-
-            $transforms[] = 'sharpen';
-        }
 
         return $transforms;
     }

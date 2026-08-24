@@ -5,9 +5,11 @@ namespace Tests\Feature\Phase4;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Widgets\PendudukPerAgamaChart;
 use App\Filament\Widgets\PendudukPerGenderChart;
+use App\Filament\Widgets\PendudukPerKelompokUmurChart;
 use App\Filament\Widgets\PendudukPerLingkunganChart;
 use App\Filament\Widgets\PendudukPerPekerjaanChart;
 use App\Filament\Widgets\PendudukPerPendidikanChart;
+use App\Filament\Widgets\PendudukPerPerkawinanChart;
 use App\Filament\Widgets\PendudukPerRTChart;
 use App\Filament\Widgets\PendudukPerStatusChart;
 use App\Filament\Widgets\QuickActionsWidget;
@@ -19,12 +21,6 @@ use Tests\TestCase;
 
 /**
  * PHASE UI-1 — dashboard redesign visual structure.
- *
- * Locks in the production dashboard layout contract: KPI cards first, Quick
- * Actions directly beneath them, the charts section tiled compactly, and
- * Recent Activity always last. KPI / Quick Actions / Recent Activity span the
- * full dashboard width; charts occupy a single page-grid column (or less) so
- * they never dominate the viewport.
  */
 class DashboardLayoutTest extends TestCase
 {
@@ -47,9 +43,14 @@ class DashboardLayoutTest extends TestCase
                 SipetaStatsOverview::class,
                 QuickActionsWidget::class,
                 PendudukPerGenderChart::class,
-                PendudukPerPekerjaanChart::class,
-                PendudukPerLingkunganChart::class,
+                PendudukPerKelompokUmurChart::class,
+                PendudukPerStatusChart::class,
+                PendudukPerPerkawinanChart::class,
                 PendudukPerPendidikanChart::class,
+                PendudukPerPekerjaanChart::class,
+                PendudukPerAgamaChart::class,
+                PendudukPerRTChart::class,
+                PendudukPerLingkunganChart::class,
                 RecentActivityWidget::class,
             ],
             invade(new Dashboard)->getWidgets(),
@@ -75,7 +76,9 @@ class DashboardLayoutTest extends TestCase
     {
         foreach ([
             PendudukPerGenderChart::class,
+            PendudukPerKelompokUmurChart::class,
             PendudukPerStatusChart::class,
+            PendudukPerPerkawinanChart::class,
             PendudukPerPekerjaanChart::class,
             PendudukPerPendidikanChart::class,
             PendudukPerAgamaChart::class,
@@ -94,7 +97,7 @@ class DashboardLayoutTest extends TestCase
     {
         $this->get('/admin')
             ->assertOk()
-            ->assertSee('Aksi Cepat')
+            ->assertSee('Akses Cepat')
             ->assertSee('Aktivitas Terbaru')
             ->assertSee('Jenis Kelamin');
     }

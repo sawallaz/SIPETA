@@ -48,6 +48,7 @@ final readonly class ParsedOcrResult
         public array $warnings,
         public array $validationErrors,
         public float $durationMs,
+        public ?string $postalCode = null,
     ) {}
 
     /**
@@ -58,6 +59,11 @@ final readonly class ParsedOcrResult
     public function isEmpty(): bool
     {
         return $this->kkNumber === null && $this->members === [];
+    }
+
+    public function isValid(): bool
+    {
+        return empty($this->validationErrors);
     }
 
     public function memberCount(): int

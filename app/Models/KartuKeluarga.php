@@ -300,10 +300,7 @@ class KartuKeluarga extends Model
     {
         $photo = $this->activePhoto();
 
-        if (
-            $photo === null
-            || $photo->thumbnail_filename === null
-        ) {
+        if ($photo === null) {
             return null;
         }
 
@@ -450,6 +447,22 @@ class KartuKeluarga extends Model
                             );
                     }
                 );
+        });
+    }
+
+    /**
+     * Scope KK aktif (daftar utama sistem).
+     *
+     * 1. Masih mempunyai penduduk saat ini (penduduks)
+     * ATAU
+     * 2. Baru dibuat dan belum memiliki histori anggota (kkAnggotas)
+     */
+    public function scopeActive($query)
+    {
+        return $query->where(function ($query): void {
+            $query
+                ->whereHas('penduduks')
+                ->orWhereDoesntHave('kkAnggotas');
         });
     }
 

@@ -1519,3 +1519,164 @@
         background-color: #1f2937;
     }
 }
+
+/* ================================================================
+   13. AUTHENTICATION & LOGIN PAGE BRANDING
+   ================================================================ */
+
+.fi-simple-layout {
+    position: relative;
+    min-height: 100vh;
+    width: 100%;
+    background-color: #0f172a;
+    background-image: url('/images/auth-bg.jpg');
+    background-size: cover;
+    background-position: center 35%;
+    background-repeat: no-repeat;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    overflow-x: hidden;
+}
+
+.fi-simple-layout::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(15, 28, 20, 0.82) 0%, rgba(20, 31, 23, 0.88) 50%, rgba(10, 18, 13, 0.94) 100%);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 1;
+}
+
+.fi-simple-main-ctn {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    max-width: 28rem;
+    margin-inline: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.fi-simple-main {
+    width: 100% !important;
+    max-width: 28rem !important;
+    background: rgba(255, 255, 255, 0.88) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.6) !important;
+    border-radius: 1.25rem !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.3) !important;
+    padding: 2.25rem 2rem !important;
+}
+
+.dark .fi-simple-main {
+    background: rgba(24, 39, 29, 0.85) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(110, 231, 183, 0.15) !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+}
+
+.fi-simple-header {
+    text-align: center;
+    margin-bottom: 1.25rem;
+}
+
+.fi-simple-header .fi-logo {
+    height: auto !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    margin-bottom: 0 !important;
+}
+
+.fi-simple-header-heading {
+    font-size: 1.5rem !important;
+    font-weight: 800 !important;
+    color: #1e3824 !important;
+    letter-spacing: -0.025em !important;
+}
+
+.dark .fi-simple-header-heading {
+    color: #f1f5f9 !important;
+}
+
+.fi-simple-header-subheading {
+    font-size: 0.875rem !important;
+    color: #64748b !important;
+    margin-top: 0.25rem !important;
+}
+
+.dark .fi-simple-header-subheading {
+    color: #94a3b8 !important;
+}
+
+.fi-simple-main button.fi-btn-color-primary,
+.fi-simple-main button[type="submit"] {
+    background-color: #456b4f !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    padding-block: 0.75rem !important;
+    border-radius: 0.75rem !important;
+    transition: all 150ms ease !important;
+    box-shadow: 0 4px 6px -1px rgba(69, 107, 79, 0.25) !important;
+}
+
+.fi-simple-main button.fi-btn-color-primary:hover,
+.fi-simple-main button[type="submit"]:hover {
+    background-color: #385640 !important;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 12px -2px rgba(69, 107, 79, 0.35) !important;
+}
+
+/* Scoped Brand Logo Colors */
+.fi-topbar .fi-brand-title {
+    color: #ffffff !important;
+}
+
+.fi-topbar .fi-brand-badge {
+    background-color: rgba(255, 255, 255, 0.18) !important;
+    color: #a7f3d0 !important;
+}
+
+.fi-topbar .fi-brand-sub {
+    color: rgba(226, 232, 240, 0.85) !important;
+}
+
+.fi-sidebar .fi-brand-title,
+.fi-simple-main .fi-brand-title {
+    color: #1e3824 !important;
+}
+
+.fi-sidebar .fi-brand-badge,
+.fi-simple-main .fi-brand-badge {
+    background-color: rgba(69, 107, 79, 0.1) !important;
+    color: #2f4635 !important;
+}
+
+.fi-sidebar .fi-brand-sub,
+.fi-simple-main .fi-brand-sub {
+    color: #64748b !important;
+}
+
+.dark .fi-sidebar .fi-brand-title,
+.dark .fi-simple-main .fi-brand-title {
+    color: #ffffff !important;
+}
+
+.dark .fi-sidebar .fi-brand-badge,
+.dark .fi-simple-main .fi-brand-badge {
+    background-color: rgba(110, 231, 183, 0.2) !important;
+    color: #6ee7b7 !important;
+}
+
+.dark .fi-sidebar .fi-brand-sub,
+.dark .fi-simple-main .fi-brand-sub {
+    color: #94a3b8 !important;
+}
+
+

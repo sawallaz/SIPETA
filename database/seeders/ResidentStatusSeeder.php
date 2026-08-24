@@ -19,29 +19,28 @@ use Illuminate\Database\Seeder;
 
 /**
  * Resident status enum fixture (ACTIVE / PINDAH / MENINGGAL).
- *
- * NOTE: there is no standalone status table — the status lives on `penduduk`.
- * This seeder demonstrates all three status values with OBVIOUSLY-FAKE demo
- * records (NIK/KK prefixed 9000...) so they are easy to delete. It reuses the
- * masters/region seeded earlier in DatabaseSeeder. Idempotent: the demo KK
- * chain is deleted and recreated each run (children first to respect RESTRICT).
- *
- * Run only in dev/test.
+ * KK number dibuat singkat (16 digit) sesuai schema.
  */
 class ResidentStatusSeeder extends Seeder
 {
-    private const KK_PREFIX = '90000000';
+    private const KK_PREFIX = '900000000000';
 
     public function run(): void
     {
-        $this->seedOne('9000000000000001', ResidentStatus::ACTIVE, FamilyRelation::KEPALA_KELUARGA, null);
-        $this->seedOne('9000000000000002', ResidentStatus::PINDAH, FamilyRelation::ISTRI, 'PINDAH');
-        $this->seedOne('9000000000000003', ResidentStatus::MENINGGAL, FamilyRelation::ANAK, 'MENINGGAL');
+        $religion = Religion::firstOrCreate(['name' => 'Islam']);
+        $education = Education::firstOrCreate(['name' => 'SMA']);
+        $occupation = Occupation::firstOrCreate(['name' => 'Wiraswasta']);
+        $rt = Rt::first();
+
+        $this->seedOne('000001', ResidentStatus::ACTIVE, FamilyRelation::KEPALA_KELUARGA, null, $religion, $education, $occupation, $rt);
+        $this->seedOne('000002', ResidentStatus::PINDAH, FamilyRelation::ISTRI, 'PINDAH', $religion, $education, $occupation, $rt);
+        $this->seedOne('000003', ResidentStatus::MENINGGAL, FamilyRelation::ANAK, 'MENINGGAL', $religion, $education, $occupation, $rt);
     }
 
-    private function seedOne(string $nik, ResidentStatus $status, FamilyRelation $relation, ?string $suffix): void
+    private function seedOne(string $nikSuffix, ResidentStatus $status, FamilyRelation $relation, ?string $suffix, Religion $religion, Education $education, Occupation $occupation, Rt $rt): void
     {
-        $kkNumber = self::KK_PREFIX.$nik;
+        $nik = '900000000000'.$nikSuffix;
+        $kkNumber = self::KK_PREFIX.$nikSuffix;
 
         $existing = KartuKeluarga::where('kk_number', $kkNumber)->first();
         if ($existing) {
@@ -52,7 +51,7 @@ class ResidentStatusSeeder extends Seeder
 
         $kk = KartuKeluarga::create([
             'kk_number' => $kkNumber,
-            'address' => 'Jl. Demo Status '.$nik,
+            'address' => 'Jl. Demo Status '.$nikSuffix,
             'postal_code' => '90000',
             'notes' => 'DEMO ResidentStatusSeeder',
         ]);
@@ -60,18 +59,18 @@ class ResidentStatusSeeder extends Seeder
         $penduduk = Penduduk::create([
             'kk_id' => $kk->id,
             'nik' => $nik,
-            'full_name' => 'Demo '.$status->value.$suffix,
+            'full_name' => 'Demo '.$status->value.($suffix ?? ''),
             'gender' => Gender::LAKI_LAKI->value,
             'birth_place' => 'Tanete',
             'birth_date' => '1990-01-01',
-            'religion_id' => Religion::inRandomOrder()->first()->id,
-            'education_id' => Education::inRandomOrder()->first()->id,
-            'occupation_id' => Occupation::inRandomOrder()->first()->id,
+            'religion_id' => $religion->id,
+            'education_id' => $education->id,
+            'occupation_id' => $occupation->id,
             'marital_status' => MaritalStatus::KAWIN->value,
             'family_relation' => $relation->value,
             'blood_type' => BloodType::TIDAK_DIKETAHUI->value,
             'resident_status' => $status->value,
-            'rt_id' => Rt::inRandomOrder()->first()->id,
+            'rt_id' => $rt->id,
             'moved_at' => $status === ResidentStatus::PINDAH ? now()->toDateString() : null,
             'moved_destination' => $status === ResidentStatus::PINDAH ? 'Lain Kota' : null,
             'moved_note' => $status === ResidentStatus::PINDAH ? 'Demo pindah' : null,

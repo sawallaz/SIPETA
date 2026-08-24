@@ -41,4 +41,9 @@ class Setting extends Model
             'google_drive_connected_at' => 'datetime',
         ];
     }
+
+    public function isGoogleDriveConnected(): bool
+    {
+        return filled($this->google_drive_account_email) && is_array($this->google_drive_credentials) && ! empty($this->google_drive_credentials);
+    }
 }

@@ -207,21 +207,19 @@ class CreateKartuKeluarga extends CreateRecord
                 return;
             }
 
-            $summary = collect($parsed->validationErrors)
-                ->merge($parsed->warnings)
-                ->filter(fn ($messageOrArray): bool => is_scalar($messageOrArray))
-                ->map(fn ($messageOrArray): string => (string) $messageOrArray)
-                ->take(3)
-                ->implode(' · ');
-
-            Notification::make()
-                ->success()
-                ->title('Data Kartu Keluarga berhasil dibaca')
-                ->body(
-                    'Periksa kembali setiap hasil OCR sebelum menyimpan.'
-                    .($summary !== '' ? ' '.$summary : '')
-                )
-                ->send();
+            if ($parsed->isValid()) {
+                Notification::make()
+                    ->success()
+                    ->title('Data KK berhasil dibaca')
+                    ->body('Silakan periksa hasil OCR sebelum menyimpan.')
+                    ->send();
+            } else {
+                Notification::make()
+                    ->info()
+                    ->title('OCR Selesai')
+                    ->body('Beberapa field perlu diperiksa sebelum menyimpan.')
+                    ->send();
+            }
         } catch (Throwable $e) {
             Log::warning('KK scan failed', [
                 'error' => $e->getMessage(),
@@ -383,6 +381,13 @@ class CreateKartuKeluarga extends CreateRecord
                 if ($uploadedFile instanceof TemporaryUploadedFile) {
                     return $this->storeOcrTemporaryFile($uploadedFile);
                 }
+
+                if (is_string($uploadedFile) && filled($uploadedFile)) {
+                    $resolved = $this->normalizePhotoPath($uploadedFile);
+                    if ($resolved !== null) {
+                        return $resolved;
+                    }
+                }
             }
 
             return null;
@@ -416,7 +421,9 @@ class CreateKartuKeluarga extends CreateRecord
         ) {
             $extension = strtolower($match[1]) === 'jpeg'
                 ? 'jpg'
-                : 'png';
+                : strtolower($match[1]);
+        } elseif (str_starts_with($bytes, "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A")) {
+            $extension = 'png';
         }
 
         $path = 'ocr-tmp/'.Str::uuid().'.'.$extension;
@@ -468,28 +475,47 @@ class CreateKartuKeluarga extends CreateRecord
             || str_contains($message, 'image could not be decoded')
         ) {
             return 'File foto tidak dapat dibaca sebagai gambar. '
-                .'Gunakan JPG atau PNG yang dapat dibuka dengan normal.';
+                .'Gunakan format JPG atau PNG yang valid.';
         }
 
         if (
             str_contains($message, 'resolution below minimum')
         ) {
             return 'Resolusi foto terlalu rendah untuk OCR. '
-                .'Gunakan foto KK yang lebih jelas dan beresolusi lebih tinggi.';
+                .'Gunakan foto KK yang lebih jelas (minimal 800x600 px).';
         }
 
         if (
             str_contains($message, 'source image')
             || str_contains($message, 'file does not exist')
             || str_contains($message, 'unable to load')
+            || str_contains($message, 'tidak ditemukan')
         ) {
             return 'File foto KK tidak ditemukan atau belum selesai disimpan. '
                 .'Silakan upload ulang foto KK.';
         }
 
-        return 'Foto berhasil diterima, tetapi proses OCR gagal. '
-            .'Periksa kualitas foto lalu coba Scan Foto KK kembali. '
-            .'Jika tetap gagal, data dapat diisi secara manual.';
+        if (
+            str_contains($message, 'not recognized')
+            || str_contains($message, 'tesseract failed')
+            || str_contains($message, 'tesseract exited')
+            || str_contains($message, 'cannot find')
+            || str_contains($message, 'no such file')
+        ) {
+            return 'Komponen OCR (Tesseract) tidak tersedia atau gagal dijalankan. '
+                .'Pastikan Tesseract terinstal pada sistem. Data dapat diisi secara manual.';
+        }
+
+        if (
+            str_contains($message, 'timed out')
+            || str_contains($message, 'timeout')
+        ) {
+            return 'Waktu proses OCR habis (timeout). '
+                .'Coba kembali atau isi formulir secara manual.';
+        }
+
+        return 'Foto berhasil diterima, tetapi proses OCR gagal: ' . $e->getMessage() . '. '
+            .'Periksa kualitas foto atau isi formulir secara manual.';
     }
 
     private function runOcr(string $path): ParsedOcrResult
@@ -533,10 +559,15 @@ class CreateKartuKeluarga extends CreateRecord
 
         if ($parsed->kkNumber !== null) {
             $data['kk_number'] = $parsed->kkNumber;
+            $this->checkDuplicateKk($parsed->kkNumber);
         }
 
         if ($parsed->address !== null) {
             $data['address'] = $parsed->address;
+        }
+
+        if ($parsed->postalCode !== null) {
+            $data['postal_code'] = $parsed->postalCode;
         }
 
         /*
@@ -965,6 +996,122 @@ class CreateKartuKeluarga extends CreateRecord
 
         if ($existing !== null) {
             return (int) $existing;
+        }
+
+        if ($model === Education::class) {
+            $aliasGroups = [
+                'D1' => ['D1', 'D-I', 'D I', 'DIPLOMA I', 'DIPLOMA 1', 'DIPLOMA I/II'],
+                'D2' => ['D2', 'D-II', 'D II', 'DIPLOMA II', 'DIPLOMA 2'],
+                'D3' => ['D3', 'D-III', 'D III', 'DIPLOMA III', 'DIPLOMA 3', 'AKADEMI', 'SARJANA MUDA', 'AKADEMI/DIPLOMA III/SARJANA MUDA'],
+                'S1' => ['S1', 'S-I', 'S I', 'STRATA I', 'STRATA 1', 'SARJANA', 'D4', 'D-IV', 'D IV', 'DIPLOMA IV', 'DIPLOMA IV/STRATA I'],
+                'S2' => ['S2', 'S-II', 'S II', 'STRATA II', 'STRATA 2', 'MAGISTER'],
+                'S3' => ['S3', 'S-III', 'S III', 'STRATA III', 'STRATA 3', 'DOKTOR'],
+                'SMA' => ['SMA', 'SMA/SEDERAJAT', 'SLTA', 'SLTA/SEDERAJAT', 'SMK', 'SMK/SEDERAJAT', 'MA', 'MA/SEDERAJAT'],
+                'SMP' => ['SMP', 'SMP/SEDERAJAT', 'SLTP', 'SLTP/SEDERAJAT', 'MTS', 'MTS/SEDERAJAT'],
+                'SD' => ['SD', 'SD/SEDERAJAT', 'TAMAT SD', 'TAMAT SD/SEDERAJAT', 'BELUM TAMAT SD', 'BELUM TAMAT SD/SEDERAJAT'],
+                'Tidak/Belum Sekolah' => ['Tidak/Belum Sekolah', 'TIDAK/BELUM SEKOLAH', 'TIDAK BELUM SEKOLAH', 'BELUM SEKOLAH', 'TIDAK SEKOLAH'],
+            ];
+
+            $upperInput = mb_strtoupper($label);
+            foreach ($aliasGroups as $targetCanonical => $groupAliases) {
+                foreach ($groupAliases as $alias) {
+                    if ($upperInput === mb_strtoupper($alias)) {
+                        $targetId = $model::query()
+                            ->whereRaw('UPPER(name) = ?', [mb_strtoupper($targetCanonical)])
+                            ->value('id');
+                        if ($targetId !== null) {
+                            return (int) $targetId;
+                        }
+
+                        foreach ($groupAliases as $candidate) {
+                            $candId = $model::query()
+                                ->whereRaw('UPPER(name) = ?', [mb_strtoupper($candidate)])
+                                ->value('id');
+                            if ($candId !== null) {
+                                return (int) $candId;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($model === Occupation::class) {
+            $occGroups = [
+                'Pegawai Negeri Sipil' => ['Pegawai Negeri Sipil', 'PEGAWAI NEGERI SIPIL', 'PNS', 'ASN', 'PEGAWAI NEGERI'],
+                'Ibu Rumah Tangga' => ['Ibu Rumah Tangga', 'IBU RUMAH TANGGA', 'Mengurus Rumah Tangga', 'MENGURUS RUMAH TANGGA', 'RUMAH TANGGA', 'IRT'],
+                'Buruh' => ['Buruh', 'BURUH', 'Buruh Harian Lepas', 'BURUH HARIAN LEPAS', 'Buruh Harian', 'BURUH HARIAN', 'Buruh Tani', 'BURUH TANI', 'Buruh Pabrik', 'BURUH PABRIK'],
+                'Karyawan Swasta' => ['Karyawan Swasta', 'KARYAWAN SWASTA', 'Karyawan', 'KARYAWAN', 'Pegawai Swasta', 'PEGAWAI SWASTA', 'Karyawan BUMN', 'Karyawan BUMD', 'Swasta', 'SWASTA'],
+                'Pelajar/Mahasiswa' => ['Pelajar/Mahasiswa', 'PELAJAR/MAHASISWA', 'Pelajar', 'PELAJAR', 'Mahasiswa', 'MAHASISWA', 'Pelajar Mahasiswa', 'PELAJAR MAHASISWA', 'Pelajarimahasiswa', 'PELAJARIMAHASISWA'],
+                'Petani' => ['Petani', 'PETANI', 'Petani/Pekebun', 'PETANI/PEKEBUN', 'Pekebun', 'PEKEBUN', 'Petani Pekebun', 'PETANI PEKEBUN'],
+                'Pedagang' => ['Pedagang', 'PEDAGANG', 'Perdagangan', 'PERDAGANGAN'],
+                'Nelayan' => ['Nelayan', 'NELAYAN', 'Nelayan/Perikanan', 'NELAYAN/PERIKANAN', 'Perikanan', 'PERIKANAN'],
+                'Wiraswasta' => ['Wiraswasta', 'WIRASWASTA', 'Wirausaha', 'WIRAUSAHA'],
+                'Pensiunan' => ['Pensiunan', 'PENSIUNAN', 'Pensiun', 'PENSIUN'],
+                'Tukang' => ['Tukang', 'TUKANG', 'Tukang Kayu', 'Tukang Batu', 'Tukang Jahit', 'Tukang Cukur', 'Tukang Las'],
+                'Lainnya' => ['Lainnya', 'LAINNYA', 'Belum/Tidak Bekerja', 'BELUM/TIDAK BEKERJA', 'Belum Bekerja', 'BELUM BEKERJA', 'Tidak Bekerja', 'TIDAK BEKERJA'],
+            ];
+
+            $upperInput = mb_strtoupper($label);
+            foreach ($occGroups as $targetCanonical => $groupAliases) {
+                foreach ($groupAliases as $alias) {
+                    if ($upperInput === mb_strtoupper($alias)) {
+                        $targetId = $model::query()
+                            ->whereRaw('UPPER(name) = ?', [mb_strtoupper($targetCanonical)])
+                            ->value('id');
+                        if ($targetId !== null) {
+                            return (int) $targetId;
+                        }
+
+                        foreach ($groupAliases as $candidate) {
+                            $candId = $model::query()
+                                ->whereRaw('UPPER(name) = ?', [mb_strtoupper($candidate)])
+                                ->value('id');
+                            if ($candId !== null) {
+                                return (int) $candId;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($model === Religion::class) {
+            $relGroups = [
+                'Islam' => ['Islam', 'ISLAM'],
+                'Kristen' => ['Kristen', 'KRISTEN', 'Kristen Protestan', 'PROTESTAN', 'Protestan'],
+                'Katolik' => ['Katolik', 'KATOLIK', 'Catholic', 'CATHOLIC'],
+                'Hindu' => ['Hindu', 'HINDU'],
+                'Buddha' => ['Buddha', 'BUDDHA', 'Budha', 'BUDHA'],
+                'Konghucu' => ['Konghucu', 'KONGHUCU', 'Khonghucu', 'KHONGHUCU'],
+                'Lainnya' => ['Lainnya', 'LAINNYA', 'Kepercayaan', 'KEPERCAYAAN', 'Penghayat Kepercayaan'],
+            ];
+
+            $upperInput = mb_strtoupper($label);
+            foreach ($relGroups as $targetCanonical => $groupAliases) {
+                foreach ($groupAliases as $alias) {
+                    if ($upperInput === mb_strtoupper($alias)) {
+                        $targetId = $model::query()
+                            ->whereRaw('UPPER(name) = ?', [mb_strtoupper($targetCanonical)])
+                            ->value('id');
+                        if ($targetId !== null) {
+                            return (int) $targetId;
+                        }
+
+                        foreach ($groupAliases as $candidate) {
+                            $candId = $model::query()
+                                ->whereRaw('UPPER(name) = ?', [mb_strtoupper($candidate)])
+                                ->value('id');
+                            if ($candId !== null) {
+                                return (int) $candId;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
         }
 
         return (int) $model::create([
