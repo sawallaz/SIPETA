@@ -70,8 +70,11 @@ class GoogleDriveIntegrationTest extends TestCase
         $response = $this->actingAs($admin)->get(route('google-drive.connect'));
 
         $response->assertRedirect();
+        // State is stored in session (same-host fallback)
         $this->assertNotNull(session('google_drive_oauth_state'));
-        $this->assertNotNull(session('google_drive_oauth_redirect_uri'));
+        // State is also stored in Cache (cross-host primary) — key format: google_oauth_state_{state}
+        $stateFromSession = session('google_drive_oauth_state');
+        $this->assertNotNull(\Illuminate\Support\Facades\Cache::get('google_oauth_state_' . $stateFromSession));
     }
 
     public function test_oauth_state_is_required_and_operator_is_blocked(): void

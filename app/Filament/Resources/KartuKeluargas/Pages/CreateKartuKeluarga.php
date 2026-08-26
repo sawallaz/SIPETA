@@ -562,6 +562,39 @@ class CreateKartuKeluarga extends CreateRecord
             $this->checkDuplicateKk($parsed->kkNumber);
         }
 
+        if (empty($this->duplicateKk)) {
+            $parsedNiks = [];
+            foreach ($parsed->members as $member) {
+                $nik = preg_replace('/\D/', '', (string) ($member->nik ?? ''));
+                if (strlen($nik) === 16) {
+                    $parsedNiks[] = $nik;
+                }
+            }
+            if (! empty($parsedNiks)) {
+                $conflictResident = Penduduk::query()
+                    ->with(['kartuKeluarga.rt.areaUnit'])
+                    ->whereIn('nik', $parsedNiks)
+                    ->whereNotNull('kk_id')
+                    ->first();
+
+                if ($conflictResident !== null && $conflictResident->kartuKeluarga !== null) {
+                    $otherKk = $conflictResident->kartuKeluarga;
+                    $this->duplicateKk = [
+                        'id' => $otherKk->getKey(),
+                        'number' => (string) $otherKk->kk_number,
+                        'kepala' => $otherKk->kepalaKeluarga?->full_name ?? 'Belum ditentukan',
+                        'address' => (string) ($otherKk->address ?? '-'),
+                        'rt' => $otherKk->nomor_rt ? 'RT '.$otherKk->nomor_rt : '-',
+                        'rw' => (string) ($otherKk->nama_wilayah ?? '-'),
+                        'wilayah' => $otherKk->rt_rw_label ?? '-',
+                        'member_count' => $otherKk->jumlah_anggota.' orang',
+                        'view_url' => KartuKeluargaResource::getUrl('view', ['record' => $otherKk]),
+                        'edit_url' => KartuKeluargaResource::getUrl('edit', ['record' => $otherKk]),
+                    ];
+                }
+            }
+        }
+
         if ($parsed->address !== null) {
             $data['address'] = $parsed->address;
         }

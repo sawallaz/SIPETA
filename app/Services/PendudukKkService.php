@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\BloodType;
+use App\Enums\FamilyRelation;
 use App\Enums\KkAnggotaStatus;
 use App\Enums\ResidentStatus;
 use App\Models\Education;
@@ -221,7 +222,7 @@ class PendudukKkService
 
             /*
              * ============================================================
-             * 2. CEK DUPLICATE NIK DALAM SATU APPROVAL
+             * 2. CEK DUPLICATE NIK & KEPALA KELUARGA DALAM SATU APPROVAL
              * ============================================================
              */
             $niks = array_column($prepared, 'nik');
@@ -236,6 +237,16 @@ class PendudukKkService
                 throw ValidationException::withMessages([
                     'ocr' => 'NIK duplikat dalam hasil OCR: '
                         .$duplicates->implode(', '),
+                ]);
+            }
+
+            $kepalaCount = collect($prepared)
+                ->filter(fn (array $m): bool => ($m['family_relation'] ?? null) === FamilyRelation::KEPALA_KELUARGA->value)
+                ->count();
+
+            if ($kepalaCount > 1) {
+                throw ValidationException::withMessages([
+                    'ocr' => 'Dalam satu Kartu Keluarga hanya boleh terdapat 1 Kepala Keluarga (ditemukan '.$kepalaCount.' anggota).',
                 ]);
             }
 

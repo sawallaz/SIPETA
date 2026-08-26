@@ -282,10 +282,11 @@ class EditKartuKeluarga extends EditRecord
         }
 
         if (! empty($this->ocrPreview['is_kk_conflict'])) {
+            $conflictMsg = $this->ocrPreview['conflict_reason'] ?? 'Nomor KK atau NIK hasil OCR sudah terdaftar pada KK lain dan tidak dapat diterapkan ke formulir ini.';
             Notification::make()
                 ->danger()
-                ->title('Nomor KK sudah digunakan oleh KK lain')
-                ->body('Nomor KK hasil OCR sudah terdaftar pada KK lain dan tidak dapat diterapkan ke formulir ini.')
+                ->title('⚠️ Nomor KK / NIK Sudah Terdaftar di Sistem!')
+                ->body($conflictMsg)
                 ->send();
 
             return;
@@ -591,8 +592,9 @@ class EditKartuKeluarga extends EditRecord
     {
         $isKkConflict = false;
         $conflictKkData = null;
+        $conflictReason = null;
 
-        // Check if parsed KK number belongs to another KK in database
+        // 1. Check if parsed KK number belongs to another KK in database
         if (
             filled($parsed->kkNumber)
             && $parsed->kkNumber !== $this->record?->kk_number
@@ -610,7 +612,7 @@ class EditKartuKeluarga extends EditRecord
                     $conflictKkData = [
                         'id' => $conflictRecord->getKey(),
                         'number' => (string) $conflictRecord->kk_number,
-                        'kepala' => $conflictRecord->kepalaKeluarga()?->full_name ?? 'Belum ditentukan',
+                        'kepala' => $conflictRecord->kepalaKeluarga?->full_name ?? 'Belum ditentukan',
                         'address' => (string) ($conflictRecord->address ?? '-'),
                         'rt' => $conflictRecord->nomor_rt ? 'RT '.$conflictRecord->nomor_rt : '-',
                         'rw' => (string) ($conflictRecord->nama_wilayah ?? '-'),
@@ -618,9 +620,45 @@ class EditKartuKeluarga extends EditRecord
                         'view_url' => KartuKeluargaResource::getUrl('view', ['record' => $conflictRecord]),
                         'edit_url' => KartuKeluargaResource::getUrl('edit', ['record' => $conflictRecord]),
                     ];
-
+                    $conflictReason = 'Nomor KK '.$conflictRecord->kk_number.' atas nama '.($conflictRecord->kepalaKeluarga?->full_name ?? 'Belum ditentukan').' sudah ada di database (ID: #'.$conflictRecord->id.').';
                     $this->duplicateKk = $conflictKkData;
                 }
+            }
+        }
+
+        // 2. Check if any member's NIK belongs to another KK in database
+        $parsedNiks = [];
+        foreach ($parsed->members as $member) {
+            $nik = preg_replace('/\D/', '', (string) ($member->nik ?? ''));
+            if (strlen($nik) === 16) {
+                $parsedNiks[] = $nik;
+            }
+        }
+
+        if (! empty($parsedNiks)) {
+            $conflictResident = Penduduk::query()
+                ->with(['kartuKeluarga.rt.areaUnit'])
+                ->whereIn('nik', $parsedNiks)
+                ->where('kk_id', '!=', $this->record?->getKey())
+                ->whereNotNull('kk_id')
+                ->first();
+
+            if ($conflictResident !== null && $conflictResident->kartuKeluarga !== null) {
+                $otherKk = $conflictResident->kartuKeluarga;
+                $isKkConflict = true;
+                $conflictKkData = [
+                    'id' => $otherKk->getKey(),
+                    'number' => (string) $otherKk->kk_number,
+                    'kepala' => $otherKk->kepalaKeluarga?->full_name ?? 'Belum ditentukan',
+                    'address' => (string) ($otherKk->address ?? '-'),
+                    'rt' => $otherKk->nomor_rt ? 'RT '.$otherKk->nomor_rt : '-',
+                    'rw' => (string) ($otherKk->nama_wilayah ?? '-'),
+                    'member_count' => $otherKk->jumlah_anggota.' orang',
+                    'view_url' => KartuKeluargaResource::getUrl('view', ['record' => $otherKk]),
+                    'edit_url' => KartuKeluargaResource::getUrl('edit', ['record' => $otherKk]),
+                ];
+                $conflictReason = 'NIK '.$conflictResident->nik.' ('.$conflictResident->full_name.') sudah terdaftar pada KK lain (No KK: '.$otherKk->kk_number.', Kepala: '.($otherKk->kepalaKeluarga?->full_name ?? 'Belum ditentukan').', ID: #'.$otherKk->id.').';
+                $this->duplicateKk = $conflictKkData;
             }
         }
 
@@ -658,6 +696,7 @@ class EditKartuKeluarga extends EditRecord
             'rt' => $parsed->rt,
             'is_kk_conflict' => $isKkConflict,
             'conflict_kk' => $conflictKkData,
+            'conflict_reason' => $conflictReason,
             'members' => $members,
             'confidence' => $parsed->confidence,
             'validation_errors' => $parsed->validationErrors,
@@ -842,24 +881,28 @@ HTML;
 
         // 1. Status Summary Banner
         if ($isConflict && $conflictKk !== null) {
-            $html .= '<div class="rounded-xl border border-red-300 bg-red-50 p-4 text-red-900 shadow-sm">';
+            $html .= '<div class="rounded-xl border border-red-300 bg-red-50 dark:bg-red-950/40 dark:border-red-800 p-4 text-red-900 dark:text-red-200 shadow-sm">';
             $html .= '<div class="flex items-start gap-3">';
-            $html .= '<div class="mt-0.5 text-red-600">';
+            $html .= '<div class="mt-0.5 text-red-600 dark:text-red-400">';
             $html .= '<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>';
             $html .= '</div>';
             $html .= '<div class="space-y-2 flex-1">';
-            $html .= '<h3 class="font-bold text-sm text-red-900">Nomor KK hasil pemindaian sudah terdaftar pada KK lain!</h3>';
-            $html .= '<p class="text-xs text-red-700 leading-relaxed">';
-            $html .= 'Nomor KK <strong class="font-mono font-bold">'.e($conflictKk['number']).'</strong> sudah dimiliki oleh keluarga <strong>'.e($conflictKk['kepala']).'</strong> ('.e($conflictKk['address']).', '.e($conflictKk['rt']).'/'.e($conflictKk['rw']).'). ';
-            $html .= 'Sistem memblokir penggabungan otomatis untuk menjaga integritas data.';
+            $html .= '<h3 class="font-bold text-sm text-red-900 dark:text-red-100">⚠️ Nomor KK / NIK Sudah Terdaftar di Sistem!</h3>';
+            $html .= '<p class="text-xs text-red-700 dark:text-red-300 leading-relaxed">';
+            if (! empty($preview['conflict_reason'])) {
+                $html .= e($preview['conflict_reason']).' ';
+            } else {
+                $html .= 'Nomor KK <strong class="font-mono font-bold">'.e($conflictKk['number']).'</strong> atas nama <strong>'.e($conflictKk['kepala']).'</strong> sudah ada di database (ID: #'.e($conflictKk['id']).'). ';
+            }
+            $html .= 'Mengubah data di sini akan merusak data yang sudah ada.';
             $html .= '</p>';
             $html .= '<div class="flex items-center gap-2 pt-1">';
-            if (! empty($conflictKk['view_url'])) {
-                $html .= '<a href="'.e($conflictKk['view_url']).'" target="_blank" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700">Lihat KK Terdaftar</a>';
-            }
             if (! empty($conflictKk['edit_url'])) {
-                $html .= '<a href="'.e($conflictKk['edit_url']).'" target="_blank" class="inline-flex items-center gap-1 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50">Ubah KK Terdaftar</a>';
+                $html .= '<a href="'.e($conflictKk['edit_url']).'" target="_blank" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700">Lihat / Edit Data KK Tersebut</a>';
+            } elseif (! empty($conflictKk['view_url'])) {
+                $html .= '<a href="'.e($conflictKk['view_url']).'" target="_blank" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700">Lihat Data KK Tersebut</a>';
             }
+            $html .= '<button type="button" wire:click="closeOcrModal" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700">Batal / Gunakan Foto Lain</button>';
             $html .= '</div>';
             $html .= '</div>';
             $html .= '</div>';
@@ -1022,39 +1065,25 @@ HTML;
         }
 
         $html .= '</div>'; // End Section 2
+        $html .= '</div>'; // End Modal body
 
-        $html .= <<<'HTML'
-        </div>
+        // Modal Footer
+        $html .= '<div class="flex items-center justify-between border-t border-gray-200 dark:border-gray-800 px-6 py-4 bg-gray-50 dark:bg-gray-800/60">';
+        $html .= '<button type="button" wire:click="closeOcrModal" class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition">';
+        $html .= '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>';
+        $html .= $isConflict ? 'Batal / Gunakan Foto Lain' : 'Kembali';
+        $html .= '</button>';
 
-        <!-- Modal Footer: HANYA DUA TOMBOL: [ Kembali ] dan [ Setuju ] -->
-        <div class="flex items-center justify-between border-t border-gray-200 dark:border-gray-800 px-6 py-4 bg-gray-50 dark:bg-gray-800/60">
-            <button
-                type="button"
-                wire:click="closeOcrModal"
-                class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition"
-            >
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-                Kembali
-            </button>
+        if ($isConflict) {
+            $html .= '<span class="text-xs text-red-600 dark:text-red-400 font-medium flex items-center gap-1"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>Terapkan dinonaktifkan (Konflik Data)</span>';
+        } else {
+            $html .= '<button type="button" wire:click="applyOcrResult" wire:loading.attr="disabled" class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition disabled:opacity-50">';
+            $html .= '<span wire:loading.remove wire:target="applyOcrResult"><svg class="h-4 w-4 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Setuju</span>';
+            $html .= '<span wire:loading wire:target="applyOcrResult">Menerapkan...</span>';
+            $html .= '</button>';
+        }
 
-            <button
-                type="button"
-                wire:click="applyOcrResult"
-                wire:loading.attr="disabled"
-                class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition disabled:opacity-50"
-            >
-                <span wire:loading.remove wire:target="applyOcrResult">
-                    <svg class="h-4 w-4 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                    Setuju
-                </span>
-                <span wire:loading wire:target="applyOcrResult">
-                    Menerapkan...
-                </span>
-            </button>
-        </div>
-    </div>
-</div>
-HTML;
+        $html .= '</div></div></div>';
 
         return new HtmlString($html);
     }

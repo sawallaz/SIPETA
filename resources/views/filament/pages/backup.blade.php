@@ -71,6 +71,17 @@
                                 <span wire:loading wire:target="syncDriveBackups">Sinkronisasi...</span>
                             </button>
 
+                            <a
+                                href="{{ route('admin.backup.download-local') }}"
+                                class="sipeta-btn sipeta-btn-secondary inline-flex items-center gap-1.5"
+                                title="Unduh arsip ZIP database & lampiran langsung ke komputer lokal"
+                            >
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                                Unduh ZIP Lokal
+                            </a>
+
                             <button
                                 type="button"
                                 class="sipeta-btn sipeta-btn-secondary inline-flex items-center gap-1.5"
@@ -112,12 +123,18 @@
                         </div>
                         <h4 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Hubungkan Akun Google Drive</h4>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-md mx-auto">Untuk mengaktifkan fitur pencadangan otomatis dan pemulihan, hubungkan SIPETA dengan Google Drive Anda.</p>
-                        <div class="mt-4">
+                        <div class="mt-4 flex items-center justify-center gap-3">
                             <a class="sipeta-btn sipeta-btn-primary inline-flex items-center gap-2" href="{{ route('google-drive.connect') }}">
                                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                                     <path d="M12.0003 2C6.4773 2 2.00031 6.477 2.00031 12C2.00031 17.523 6.4773 22 12.0003 22C17.5233 22 22.0003 17.523 22.0003 12C22.0003 6.477 17.5233 2 12.0003 2ZM17.2003 7.8L12.0003 16.8L6.80031 7.8H17.2003Z"/>
                                 </svg>
                                 Hubungkan Google Drive
+                            </a>
+                            <a class="sipeta-btn sipeta-btn-secondary inline-flex items-center gap-1.5" href="{{ route('admin.backup.download-local') }}" title="Unduh arsip cadangan SQLite & foto KK langsung ke komputer">
+                                <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                                Unduh Backup Lokal (ZIP)
                             </a>
                         </div>
                     </div>
@@ -199,6 +216,16 @@
                                     </td>
                                     <td>
                                         <div class="flex items-center justify-end gap-2">
+                                            <a
+                                                href="{{ route('admin.backup.download', $backup) }}"
+                                                class="sipeta-btn sipeta-btn-sm sipeta-btn-secondary inline-flex items-center gap-1"
+                                                title="Unduh file backup ZIP ke komputer"
+                                            >
+                                                <svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                                </svg>
+                                                Unduh
+                                            </a>
                                             <button
                                                 type="button"
                                                 class="sipeta-btn sipeta-btn-sm sipeta-btn-primary inline-flex items-center gap-1"

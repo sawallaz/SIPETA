@@ -97,11 +97,11 @@ class KkDocumentUploadServiceTest extends TestCase
 
     public function test_oversized_file_is_rejected(): void
     {
-        $file = UploadedFile::fake()->create('kk-scan.jpg', 6000, 'image/jpeg');
+        $file = UploadedFile::fake()->create('kk-scan.jpg', 30000, 'image/jpeg');
 
         try {
             $this->service->upload($file);
-            $this->fail('Expected ValidationException for a file larger than 5 MB.');
+            $this->fail('Expected ValidationException for a file larger than 25 MB.');
         } catch (ValidationException $e) {
             $this->assertArrayHasKey('document', $e->errors());
         }

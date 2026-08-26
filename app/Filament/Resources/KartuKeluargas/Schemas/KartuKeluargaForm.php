@@ -53,7 +53,7 @@ class KartuKeluargaForm
                          * diteruskan sebagai update reaktif.
                          */
                         ->live()
-                        ->maxSize(10240)
+                        ->maxSize(25600)
                         ->acceptedFileTypes([
                             'image/jpeg',
                             'image/png',

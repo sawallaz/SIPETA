@@ -812,7 +812,7 @@ pub fn is_sipeta_process(pid: u32) -> bool {
         .output()
     {
         let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
-        if stdout.contains("sipeta") {
+        if stdout.contains("sipeta") || stdout.contains("php") {
             return true;
         }
     }

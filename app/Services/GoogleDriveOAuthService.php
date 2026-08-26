@@ -66,6 +66,7 @@ class GoogleDriveOAuthService
         try {
             $response = Http::asForm()
                 ->timeout((int) config('services.google_drive.timeout', 120))
+                ->withOptions(['verify' => base_path('resources/php/cacert.pem')])
                 ->post((string) config('services.google_drive.token_uri'), [
                     'code' => $code,
                     'client_id' => config('services.google_drive.client_id'),
@@ -78,6 +79,11 @@ class GoogleDriveOAuthService
         }
 
         if ($response->failed()) {
+            \Illuminate\Support\Facades\Log::error('Google OAuth token exchange failed', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+                'redirect_uri_sent' => $uri,
+            ]);
             throw new GoogleDriveException('Otorisasi Google Drive gagal.', $response->status(), null, $response->status());
         }
 
@@ -112,6 +118,7 @@ class GoogleDriveOAuthService
         try {
             $response = Http::asForm()
                 ->timeout((int) config('services.google_drive.timeout', 120))
+                ->withOptions(['verify' => base_path('resources/php/cacert.pem')])
                 ->post((string) config('services.google_drive.token_uri'), [
                     'client_id' => config('services.google_drive.client_id'),
                     'client_secret' => config('services.google_drive.client_secret'),

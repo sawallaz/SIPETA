@@ -81,7 +81,7 @@ trait ChecksDuplicateKkNumber
         $this->duplicateKk = [
             'id' => $kk->getKey(),
             'number' => (string) $kk->kk_number,
-            'kepala' => $kk->kepalaKeluarga()?->full_name
+            'kepala' => $kk->kepalaKeluarga?->full_name
                 ?? 'Belum ditentukan',
             'address' => (string) ($kk->address ?? '-'),
             'rt' => $kk->nomor_rt ? 'RT '.$kk->nomor_rt : '-',

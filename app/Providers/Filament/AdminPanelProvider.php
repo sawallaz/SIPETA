@@ -13,11 +13,13 @@ use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
 use Filament\Support\Enums\Width;
+use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\HtmlString;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
@@ -63,6 +65,24 @@ class AdminPanelProvider extends PanelProvider
             ->pages([
                 Dashboard::class,
             ])
+            ->renderHook(
+                PanelsRenderHook::USER_MENU_BEFORE,
+                function (): HtmlString {
+                    $ip = request()->server('SERVER_ADDR');
+                    if (empty($ip) || $ip === '0.0.0.0' || $ip === '127.0.0.1' || $ip === '::1') {
+                        $ip = gethostbyname(gethostname());
+                    }
+                    $url = "http://{$ip}:8100";
+
+                    return new HtmlString('
+                        <div style="display:inline-flex;align-items:center;gap:8px;margin-right:12px;padding:5px 12px;background:#1e293b;border:1px solid #0284c7;border-radius:6px;color:#ffffff;font-size:12px;font-weight:600;z-index:9999;">
+                            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;"></span>
+                            <span style="font-family:monospace;color:#38bdf8;">LAN: ' . $url . '</span>
+                            <button type="button" onclick="navigator.clipboard.writeText(\'' . $url . '\'); alert(\'URL ' . $url . ' berhasil disalin!\');" style="background:#0284c7;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Salin</button>
+                        </div>
+                    ');
+                }
+            )
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
             ->middleware([
                 EncryptCookies::class,

@@ -5,6 +5,9 @@
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
+  ; Copy WebView2Loader.dll next to sipeta.exe
+  File "/oname=$INSTDIR\WebView2Loader.dll" "C:\tools\target\release\WebView2Loader.dll"
+
   ; Create sipeta.cmd wrapper in $INSTDIR
   FileOpen $0 "$INSTDIR\sipeta.cmd" w
   FileWrite $0 "@echo off$\r$\n"
@@ -33,4 +36,10 @@
     ; Broadcast WM_SETTINGCHANGE (0x001A) so new CMD/PowerShell terminals pick up the updated PATH
     System::Call 'user32::SendMessageTimeout(i 0xffff, i 0x001A, i 0, str "Environment", i 2, i 5000, *i .r1)'
   ${EndIf}
+
+  ; Copy Info_Alamat_SIPETA.bat into installation directory
+  File "/oname=$INSTDIR\Info_Alamat_SIPETA.bat" "C:\Users\HYPE AMD\Documents\SIPETA\Info_Alamat_SIPETA.bat"
+
+  ; Create Desktop shortcut for "Cek Alamat Jaringan SIPETA"
+  CreateShortCut "$DESKTOP\Cek Alamat Jaringan SIPETA.lnk" "$INSTDIR\Info_Alamat_SIPETA.bat" "" "$INSTDIR\sipeta.exe" 0
 !macroend

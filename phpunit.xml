@@ -19,6 +19,9 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <env name="APP_KEY" value="base64:LY8ZE0zYet/zuyCnO6OO+I+P5IykjlJJ4HY0I/IfCKk="/>
+        <env name="APP_LOCALE" value="id"/>
+        <env name="APP_FALLBACK_LOCALE" value="id"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>

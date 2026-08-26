@@ -157,7 +157,7 @@ class KartuKeluargaResource extends Resource
                             ->schema([
                                 TextEntry::make('kepala_keluarga')
                                     ->label('Nama')
-                                    ->state(fn (KartuKeluarga $record): ?string => $record->kepalaKeluarga()?->full_name
+                                    ->state(fn (KartuKeluarga $record): ?string => $record->kepalaKeluarga?->full_name
                                     )
                                     ->placeholder('Belum ditentukan'),
                             ]),

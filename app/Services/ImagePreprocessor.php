@@ -43,6 +43,11 @@ class ImagePreprocessor
     public const MAX_DIMENSION = 4000;
 
     /**
+     * Minimum width threshold for smart upscaling of low-resolution images.
+     */
+    public const MIN_UPSCALE_WIDTH = 1800;
+
+    /**
      * Acceptable mean-brightness band (100–200).
      */
     public const BRIGHTNESS_MIN = 100;
@@ -83,6 +88,7 @@ class ImagePreprocessor
         string $bytes,
         string $sourcePath,
     ): PreprocessResult {
+        @ini_set('memory_limit', '512M');
         $started = hrtime(true);
 
         $image = @imagecreatefromstring($bytes);
@@ -240,6 +246,41 @@ class ImagePreprocessor
 
         /*
          * ============================================================
+         * 4b. SMART UPSCALER — Low-resolution image enhancement
+         * ============================================================
+         *
+         * Jika gambar memiliki lebar < MIN_UPSCALE_WIDTH (1800px) setelah
+         * downscale, perbesar 2x agar Tesseract dapat membaca detail huruf
+         * pada foto HP resolusi rendah atau hasil scan buram.
+         *
+         * imagecopyresampled() pada GD setara Bicubic interpolation yang
+         * menghasilkan hasil lebih halus daripada imagecopyresized().
+         */
+        if ($width < self::MIN_UPSCALE_WIDTH) {
+            $upW = min((int) round($width * 2), self::MAX_DIMENSION);
+            $upH = min((int) round($height * 2), self::MAX_DIMENSION);
+
+            $upscaled = imagecreatetruecolor($upW, $upH);
+
+            if ($upscaled !== false) {
+                imagecopyresampled(
+                    $upscaled,
+                    $image,
+                    0, 0, 0, 0,
+                    $upW, $upH,
+                    $width, $height,
+                );
+
+                imagedestroy($image);
+                $image   = $upscaled;
+                $width   = $upW;
+                $height  = $upH;
+                $transforms[] = 'upscale';
+            }
+        }
+
+        /*
+         * ============================================================
          * 5. MEASURE BRIGHTNESS BEFORE ENHANCEMENT
          * ============================================================
          */
@@ -306,6 +347,9 @@ class ImagePreprocessor
         ).'-preprocessed.png';
 
         $png = $this->encodePng($image);
+
+        // Simpan debug image untuk verifikasi visual kualitas pra-pemrosesan OCR
+        @file_put_contents(storage_path('app/debug_ocr_processed.png'), $png);
 
         imagedestroy($image);
 
@@ -415,18 +459,30 @@ class ImagePreprocessor
         }
 
         /*
-         * 2. Tingkatkan kontras ringan.
+         * 2. Tingkatkan kontras.
          *
          * GD: -100 = kontras sangat tinggi, 0 = normal.
-         * Nilai -6 cukup ringan untuk dokumen teks tanpa merusak garis.
+         * Nilai -15 memperjelas cetakan huruf tipis/dot-matrix pada kertas KK.
          */
         imagefilter(
             $image,
             IMG_FILTER_CONTRAST,
-            -6,
+            -15,
         );
 
         $transforms[] = 'contrast';
+
+        /*
+         * 3. Sharpening filter untuk mempertegas garis tabel dan angka NIK.
+         */
+        $sharpenMatrix = [
+            [-1, -1, -1],
+            [-1, 16, -1],
+            [-1, -1, -1],
+        ];
+        imageconvolution($image, $sharpenMatrix, 8, 0);
+
+        $transforms[] = 'sharpen';
 
         return $transforms;
     }

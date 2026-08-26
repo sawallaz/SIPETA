@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Services\DataResetService;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -85,13 +86,83 @@ class Settings extends Page
                 ->icon('heroicon-o-arrow-up-tray')
                 ->color('gray')
                 ->url(fn (): string => ImportPenduduk::getUrl()),
+
             Action::make('save')
                 ->label('Simpan')
                 ->icon('heroicon-o-check')
                 ->color('primary')
                 ->action('save'),
+
+            /*
+            |------------------------------------------------------------------
+            | DANGER ZONE: Reset / Hapus Seluruh Data Kependudukan
+            |------------------------------------------------------------------
+            | Double-confirmation: user wajib mengetik kata kunci persis
+            | "HAPUS SEMUA DATA" sebelum eksekusi diizinkan.
+            */
+            Action::make('resetDataKependudukan')
+                ->label('Reset Data Kependudukan')
+                ->icon('heroicon-o-trash')
+                ->color('danger')
+                ->requiresConfirmation(false)
+                ->modalHeading('⚠️ Konfirmasi Reset Seluruh Data Kependudukan')
+                ->modalDescription(
+                    'Tindakan ini akan menghapus permanen seluruh data Kartu Keluarga, '.
+                    'data Penduduk, dan arsip foto KK. Data yang sudah dihapus tidak dapat '.
+                    'dikembalikan. Akun pengguna dan pengaturan backup akan tetap tersimpan.'
+                )
+                ->modalSubmitActionLabel('Hapus Semua Data Sekarang')
+                ->modalWidth('lg')
+                ->form([
+                    TextInput::make('confirmation_keyword')
+                        ->label('Ketik kata kunci konfirmasi')
+                        ->placeholder('HAPUS SEMUA DATA')
+                        ->helperText('Ketik persis: HAPUS SEMUA DATA (huruf kapital, tanpa tanda kutip)')
+                        ->required()
+                        ->rule(function () {
+                            return function (string $attribute, mixed $value, \Closure $fail) {
+                                if ($value !== 'HAPUS SEMUA DATA') {
+                                    $fail('Kata kunci tidak sesuai. Ketik persis: HAPUS SEMUA DATA');
+                                }
+                            };
+                        }),
+                ])
+                ->action(function (array $data) {
+                    if (($data['confirmation_keyword'] ?? '') !== 'HAPUS SEMUA DATA') {
+                        Notification::make()
+                            ->title('Kata kunci tidak sesuai')
+                            ->body('Penghapusan dibatalkan. Kata kunci harus persis: HAPUS SEMUA DATA')
+                            ->danger()
+                            ->send();
+
+                        return;
+                    }
+
+                    try {
+                        $stats = app(DataResetService::class)->resetAll();
+
+                        Notification::make()
+                            ->title('Seluruh data kependudukan berhasil dibersihkan.')
+                            ->body(
+                                "KK dihapus: {$stats['kk_deleted']} • ".
+                                "Penduduk dihapus: {$stats['penduduk_deleted']} • ".
+                                "File foto dihapus: {$stats['photo_files_deleted']}"
+                            )
+                            ->success()
+                            ->send();
+
+                        $this->redirect(route('filament.admin.pages.dashboard'));
+                    } catch (\Throwable $e) {
+                        Notification::make()
+                            ->title('Gagal melakukan reset data')
+                            ->body('Error: '.$e->getMessage())
+                            ->danger()
+                            ->send();
+                    }
+                }),
         ];
     }
+
 
     /**
      * Simpan pengaturan.

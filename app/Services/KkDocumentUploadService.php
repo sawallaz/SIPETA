@@ -26,8 +26,8 @@ class KkDocumentUploadService
     /** Private local disk holding uploaded KK documents. */
     public const DISK = 'kk_uploads';
 
-    /** Maximum accepted upload size in kilobytes (5 MB per .ai/ocr.md §4.1). */
-    public const MAX_SIZE_KB = 5120;
+    /** Maximum accepted upload size in kilobytes (25 MB). */
+    public const MAX_SIZE_KB = 25600;
 
     /** Accepted file extensions (.ai/ocr.md §4.1: JPG, JPEG, PNG). */
     public const ALLOWED_EXTENSIONS = 'jpg,jpeg,png';

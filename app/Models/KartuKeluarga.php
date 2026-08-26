@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class KartuKeluarga extends Model
@@ -178,15 +179,20 @@ class KartuKeluarga extends Model
      *
      * Jika belum ada kepala keluarga, return null.
      */
-    public function kepalaKeluarga(): ?Penduduk
+    public function kepalaKeluarga(): HasOne
     {
-        return $this->penduduks()
-            ->where(
-                'family_relation',
-                FamilyRelation::KEPALA_KELUARGA->value
-            )
-            ->latest('id')
-            ->first();
+        return $this->hasOne(
+            Penduduk::class,
+            'kk_id'
+        )->ofMany(
+            ['id' => 'max'],
+            function ($query): void {
+                $query->where(
+                    'family_relation',
+                    FamilyRelation::KEPALA_KELUARGA->value
+                );
+            }
+        );
     }
 
     /**
@@ -198,7 +204,7 @@ class KartuKeluarga extends Model
      */
     public function getNamaKepalaKeluargaAttribute(): ?string
     {
-        return $this->kepalaKeluarga()?->full_name;
+        return $this->kepalaKeluarga?->full_name;
     }
 
     /**
@@ -283,12 +289,17 @@ class KartuKeluarga extends Model
      *
      * Service layer memastikan hanya satu foto aktif.
      */
-    public function activePhoto(): ?KkPhoto
+    public function activePhoto(): HasOne
     {
-        return $this->kkPhotos()
-            ->where('is_active', true)
-            ->latest('id')
-            ->first();
+        return $this->hasOne(
+            KkPhoto::class,
+            'kk_id'
+        )->ofMany(
+            ['id' => 'max'],
+            function ($query): void {
+                $query->where('is_active', true);
+            }
+        );
     }
 
     /**
@@ -298,7 +309,7 @@ class KartuKeluarga extends Model
      */
     public function getActivePhotoThumbnailUrlAttribute(): ?string
     {
-        $photo = $this->activePhoto();
+        $photo = $this->activePhoto;
 
         if ($photo === null) {
             return null;
@@ -320,7 +331,7 @@ class KartuKeluarga extends Model
      */
     public function getActivePhotoFullUrlAttribute(): ?string
     {
-        $photo = $this->activePhoto();
+        $photo = $this->activePhoto;
 
         if ($photo === null) {
             return null;
@@ -337,7 +348,7 @@ class KartuKeluarga extends Model
      */
     public function hasActivePhoto(): bool
     {
-        return $this->activePhoto() !== null;
+        return $this->activePhoto !== null;
     }
 
     /**
@@ -345,7 +356,7 @@ class KartuKeluarga extends Model
      */
     public function hasKepalaKeluarga(): bool
     {
-        return $this->kepalaKeluarga() !== null;
+        return $this->kepalaKeluarga !== null;
     }
 
     /**

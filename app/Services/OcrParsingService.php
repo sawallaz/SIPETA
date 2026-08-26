@@ -897,6 +897,33 @@ final class OcrParsingService
             }
         }
 
+        if ($kkNumber === null) {
+            for ($i = 0; $i < $headerEnd; $i++) {
+                $line = $lines[$i];
+                if (preg_match('/(?:NO|NO\.|NOMOR|KARTU\s*KELUARGA)[\s\:\.\-_]*([0-9oOlIsSbBzZ\s]{16,25})/i', $line, $m)) {
+                    $candidate = $this->extractSixteenDigitNumber($m[1], true);
+                    if ($candidate !== null) {
+                        $kkNumber = $candidate;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($kkNumber === null) {
+            for ($i = 0; $i < min(12, $headerEnd); $i++) {
+                $line = $lines[$i];
+                if (preg_match('/^\s*\d{1,2}\s+[A-Z]/', $line)) {
+                    continue;
+                }
+                $candidate = $this->extractSixteenDigitNumber($line, true);
+                if ($candidate !== null) {
+                    $kkNumber = $candidate;
+                    break;
+                }
+            }
+        }
+
         return [
             $kkNumber,
             $address,
@@ -935,16 +962,36 @@ final class OcrParsingService
         /*
          * Jangan memasukkan label header lain ke alamat.
          */
+        $nonAddressMarkers = array_merge(
+            array_values(self::HEADER_KEYS),
+            [
+                'DESA',
+                'KELURAHAN',
+                'DESA/KELURAHAN',
+                'KECAMATAN',
+                'KABUPATEN',
+                'KOTA',
+                'KABUPATEN/KOTA',
+                'PROVINSI',
+                'PROP.',
+                'PROP',
+            ]
+        );
+
         $upper = strtoupper(trim($line));
 
         foreach (
-            self::HEADER_KEYS as $label
+            $nonAddressMarkers as $label
         ) {
             if (
                 $upper === $label
                 || str_starts_with(
                     $upper,
                     $label.' ',
+                )
+                || str_starts_with(
+                    $upper,
+                    $label.':',
                 )
             ) {
                 return false;
@@ -982,14 +1029,31 @@ final class OcrParsingService
                 'N0MOR',
                 'N0.',
                 'N0 ',
+                'RT/IRW',
+                'RT/|RW',
+                'RT/1RW',
+                'RT/LRW',
+                'RT / RW',
             ],
             [
                 'NOMOR',
                 'NO.',
                 'NO ',
+                'RT/RW',
+                'RT/RW',
+                'RT/RW',
+                'RT/RW',
+                'RT/RW',
             ],
             $upper,
         );
+
+        $rightKeywords = [
+            '/(?:^|\s+)KECAMATAN\s*[:.\s1|]?\s*(.*)$/i',
+            '/(?:^|\s+)(?:KABUPATEN\/KOTA|KABUPATEN|KOTA)\s*[:.\s1|]?\s*(.*)$/i',
+            '/(?:^|\s+)(?:KODE\s*POS|KODEPOS)\s*[:.\s1|]?\s*(.*)$/i',
+            '/(?:^|\s+)(?:PROVINSI|PROP\.?)\s*[:.\s1|]?\s*(.*)$/i',
+        ];
 
         foreach (
             self::HEADER_KEYS as $key => $token
@@ -1000,19 +1064,7 @@ final class OcrParsingService
             );
 
             /*
-             * Label + colon atau dot.
-             *
-             * Toleran terhadap OCR run-on di mana satu karakter
-             * menyatu ke label sebelum titik dua, contoh:
-             *   Lingkunganl:
-             *   LINGKUNGANl:
-             *   lingkunganx:
-             *   RT.001
-             *
-             * Satu karakter alfanumerik opsional diperbolehkan
-             * antara token dan colon. Ini aman karena hanya
-             * label yang diperiksa; nilai nilainya tetap diekstrak
-             * utuh.
+             * Label + colon atau dot atau space.
              */
             if (
                 preg_match(
@@ -1021,29 +1073,24 @@ final class OcrParsingService
                     $upper,
                     $matches,
                 ) === 1
-            ) {
-                return [
-                    $key,
-                    trim($matches[1]),
-                ];
-            }
-
-            /*
-             * Label tanpa colon.
-             *
-             * Pastikan ada boundary whitespace agar
-             * "RT" tidak memakan kata lain.
-             */
-            if (
-                preg_match(
+                || preg_match(
                     '/^'.$pattern.'(?:\\s+)(.*)$/u',
                     $upper,
                     $matches,
                 ) === 1
             ) {
+                $val = trim($matches[1]);
+                $val = trim(preg_replace('/^[ :|\\-._1!]+/', '', $val));
+
+                foreach ($rightKeywords as $rPat) {
+                    if (preg_match($rPat, $val, $rMatch, PREG_OFFSET_CAPTURE)) {
+                        $val = trim(substr($val, 0, $rMatch[0][1]));
+                    }
+                }
+
                 return [
                     $key,
-                    trim($matches[1]),
+                    $val,
                 ];
             }
 
@@ -1129,6 +1176,7 @@ final class OcrParsingService
             [
                 'O' => '0',
                 'o' => '0',
+                'D' => '0',
                 'I' => '1',
                 'l' => '1',
                 '|' => '1',
@@ -1136,6 +1184,10 @@ final class OcrParsingService
                 'S' => '5',
                 's' => '5',
                 'B' => '8',
+                'b' => '6',
+                'G' => '6',
+                'Z' => '2',
+                'z' => '2',
             ]
         );
     }
@@ -1590,9 +1642,9 @@ final class OcrParsingService
 
             /*
              * Stop jika sudah masuk bagian yang jelas bukan
-             * tabel anggota.
+             * tabel anggota atau masuk ke header Tabel 2.
              */
-            if ($this->isEndOfMemberTable($line)) {
+            if ($this->isEndOfMemberTable($line) || $this->isTableTwoHeader($line)) {
                 $flushCurrent();
 
                 break;
@@ -1678,9 +1730,9 @@ final class OcrParsingService
         $flushCurrent();
 
         /*
-         * Two-Table KK: Row stitching dengan Tabel 2 (Status Perkawinan & Hubungan Keluarga).
+         * Two-Table KK: Row stitching dengan Tabel 2 (Status Perkawinan, Hubungan Keluarga, Orang Tua).
          */
-        $table2Data = $this->parseTableTwo($lines, $warnings, $headerIndex);
+        $table2Data = $this->parseTableTwo($lines, $warnings, $headerIndex, $members);
         if ($table2Data !== []) {
             $stitched = [];
             foreach ($members as $idx => $member) {
@@ -1703,25 +1755,56 @@ final class OcrParsingService
                     familyRelation: $relation,
                     confidence: $member->confidence,
                     lowConfidence: $member->lowConfidence,
+                    ayah: $t2['ayah'] ?? null,
+                    ibu: $t2['ibu'] ?? null,
                 );
             }
             $members = $stitched;
+
+            // Bersihkan warning "hubungan keluarga belum terbaca lengkap" jika sudah terisi dari Tabel 2
+            $warnings = array_values(array_filter($warnings, function (string $w) use ($table2Data): bool {
+                if (preg_match('/Anggota ke-(\d+) belum terbaca lengkap: hubungan keluarga\./', $w, $m)) {
+                    $ord = (int) $m[1];
+                    return empty($table2Data[$ord]['relation']);
+                }
+                return true;
+            }));
         }
 
         return $members;
     }
 
     /**
-     * Parse Tabel 2 Kartu Keluarga (Status Perkawinan, Hubungan Keluarga, dll.)
+     * Periksa apakah baris teks merupakan header Tabel 2 KK.
+     */
+    private function isTableTwoHeader(string $line): bool
+    {
+        $curr = strtoupper(trim($line));
+
+        return str_contains($curr, 'STATUS PERKAWINAN')
+            || (str_contains($curr, 'PERKAWINAN') && str_contains($curr, 'STATUS'))
+            || str_contains($curr, 'STATUS HUBUNGAN')
+            || str_contains($curr, 'HUBUNGAN DALAM KELUARGA')
+            || str_contains($curr, 'HUBUNGAN KELUARGA')
+            || (str_contains($curr, 'NAMA AYAH') && str_contains($curr, 'NAMA IBU'))
+            || str_contains($curr, 'KEWARGANEGARAAN')
+            || str_contains($curr, 'DOKUMEN IMIGRASI')
+            || str_contains($curr, 'SHDK');
+    }
+
+    /**
+     * Parse Tabel 2 Kartu Keluarga (Status Perkawinan, Hubungan Keluarga, Nama Orang Tua, dll.)
      *
      * @param  array<int, string>  $lines
      * @param  array<int, string>  $warnings
-     * @return array<int, array{marital: ?string, relation: ?string}>
+     * @param  array<int, ParsedResident>  $members
+     * @return array<int, array{marital: ?string, relation: ?string, ayah: ?string, ibu: ?string}>
      */
     private function parseTableTwo(
         array $lines,
         array &$warnings,
         ?int $headerIndex = null,
+        array $members = [],
     ): array {
         $table2Index = null;
         $count = count($lines);
@@ -1736,22 +1819,7 @@ final class OcrParsingService
             $next = isset($lines[$i + 1]) ? strtoupper($lines[$i + 1]) : '';
             $combined = $curr.' '.$next;
 
-            $hasStatus = str_contains($curr, 'STATUS PERKAWINAN') || (str_contains($curr, 'PERKAWINAN') && str_contains($curr, 'STATUS'));
-            $hasHubungan = str_contains($curr, 'STATUS HUBUNGAN')
-                || str_contains($curr, 'HUBUNGAN DALAM KELUARGA')
-                || str_contains($curr, 'HUBUNGAN KELUARGA')
-                || str_contains($curr, 'STATUS HUBUNGAN DALAM')
-                || str_contains($curr, 'HUBUNGAN')
-                || str_contains($curr, 'SHDK');
-            $hasAyahIbu = str_contains($curr, 'NAMA AYAH')
-                || str_contains($curr, 'NAMA IBU')
-                || str_contains($curr, 'KEWARGANEGARAAN')
-                || str_contains($curr, 'DOKUMEN IMIGRASI')
-                || str_contains($curr, 'PASPOR')
-                || str_contains($curr, 'KITAS')
-                || str_contains($curr, 'KITAP');
-
-            if ($hasHubungan || ($hasStatus && $hasAyahIbu) || ($hasStatus && $hasHubungan) || ($hasStatus && str_contains($combined, 'HUBUNGAN'))) {
+            if ($this->isTableTwoHeader($curr) || $this->isTableTwoHeader($combined)) {
                 $lastHeaderLine = $i;
                 if (isset($lines[$i + 1]) && $this->looksLikeTableNoise($lines[$i + 1])) {
                     $lastHeaderLine = $i + 1;
@@ -1795,6 +1863,9 @@ final class OcrParsingService
         $table2Rows = [];
         $currentOrdinal = 1;
 
+        $knownFather = $members[0]->nama ?? null;
+        $knownMother = $members[1]->nama ?? null;
+
         for ($i = $table2Index + 1; $i < $count; $i++) {
             $line = $lines[$i];
 
@@ -1825,14 +1896,61 @@ final class OcrParsingService
             }
 
             $relationMatch = $this->findVocabularyMatch($tokens, 0, $this->phrasesFor('relation'), $usedRanges);
+            if ($relationMatch) {
+                $usedRanges[] = [$relationMatch[1], $relationMatch[1] + $relationMatch[2] - 1];
+            }
 
             $marital = $maritalMatch ? $maritalMatch[0] : null;
             $relation = $relationMatch ? $relationMatch[0] : null;
 
-            if ($marital !== null || $relation !== null) {
+            // Ekstrak Nama Ayah & Nama Ibu dari token setelah kewarganegaraan / hubungan
+            $father = null;
+            $mother = null;
+
+            $afterIndex = 0;
+            if ($relationMatch) {
+                $afterIndex = $relationMatch[1] + $relationMatch[2];
+            } elseif ($maritalMatch) {
+                $afterIndex = $maritalMatch[1] + $maritalMatch[2];
+            }
+
+            // Temukan posisi WNI / WNA jika ada untuk menentukan titik mulai nama orang tua
+            for ($k = $afterIndex; $k < count($tokens); $k++) {
+                if (in_array(strtoupper($tokens[$k][1]), ['WNI', 'WNA'], true)) {
+                    $afterIndex = $k + 1;
+                    break;
+                }
+            }
+
+            $parentsTokens = [];
+            for ($k = $afterIndex; $k < count($tokens); $k++) {
+                $raw = trim($tokens[$k][0], " -_|\t\n\r\0\x0B");
+                if ($raw !== '' && $raw !== '-' && !in_array(strtoupper($raw), ['WNI', 'WNA'], true)) {
+                    $parentsTokens[] = $raw;
+                }
+            }
+
+            if (count($parentsTokens) === 2) {
+                $father = $parentsTokens[0];
+                $mother = $parentsTokens[1];
+            } elseif (count($parentsTokens) > 2) {
+                $combined = implode(' ', $parentsTokens);
+                if ($knownFather !== null && str_starts_with(strtoupper($combined), strtoupper($knownFather))) {
+                    $father = $knownFather;
+                    $mother = trim(substr($combined, strlen($knownFather)));
+                } else {
+                    $half = (int) ceil(count($parentsTokens) / 2);
+                    $father = implode(' ', array_slice($parentsTokens, 0, $half));
+                    $mother = implode(' ', array_slice($parentsTokens, $half));
+                }
+            }
+
+            if ($marital !== null || $relation !== null || $father !== null || $mother !== null) {
                 $table2Rows[$ordinal] = [
                     'marital' => $marital,
                     'relation' => $relation,
+                    'ayah' => $father,
+                    'ibu' => $mother,
                 ];
                 $currentOrdinal = $ordinal + 1;
             }
@@ -2763,8 +2881,35 @@ final class OcrParsingService
             'PELAJARIMAHASISWA' => 'PELAJAR/MAHASISWA',
         ];
 
-        return ($aliases[$actual] ?? $actual)
-            === $expected;
+        $aliased = $aliases[$actual] ?? $actual;
+
+        if ($aliased === $expected) {
+            return true;
+        }
+
+        /*
+         * Fuzzy String Matcher (Levenshtein distance) untuk kata panjang non-akronim
+         * (misal: KELUARGA -> KEUARGA, PEKERJAAN -> PEKERJAN, WIRASWASTA -> WIRASWAST).
+         * Akronim pendek (SLTA, SLTP, SMA, SD, PNS, IRT) dikecualikan agar tidak tertukar.
+         */
+        $isAcronym = str_contains($expected, '/')
+            || str_contains($aliased, '/')
+            || in_array($expected, ['SLTA', 'SLTP', 'SD', 'SMP', 'SMA', 'SMK', 'PNS', 'TNI', 'POLRI', 'IRT', 'RT', 'RW', 'KK', 'S1', 'S2', 'S3', 'D1', 'D2', 'D3', 'D4', 'NIK']);
+
+        $lenA = strlen($aliased);
+        $lenE = strlen($expected);
+
+        if (! $isAcronym && $lenA >= 6 && $lenE >= 6 && abs($lenA - $lenE) <= 2) {
+            $lev = levenshtein($aliased, $expected);
+            if ($lenE <= 7 && $lev <= 1) {
+                return true;
+            }
+            if ($lenE > 7 && $lev <= 2) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

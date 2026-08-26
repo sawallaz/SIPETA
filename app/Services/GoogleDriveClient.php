@@ -301,7 +301,7 @@ class GoogleDriveClient
                 $token = $this->oauth->accessToken($refreshed);
                 $request = Http::withToken($token)->timeout(
                     (int) ($options['timeout'] ?? config('services.google_drive.timeout', 120))
-                );
+                )->withOptions(['verify' => base_path('resources/php/cacert.pem')]);
                 unset($options['timeout'], $options['retry']);
                 $response = $request->send($method, $uri, $options);
             } catch (ConnectionException $e) {

@@ -77,7 +77,7 @@ class KartuKeluargasTable
                  */
                 TextColumn::make('kepala_keluarga')
                     ->label('Kepala Keluarga')
-                    ->state(fn (KartuKeluarga $record): ?string => $record->kepalaKeluarga()?->full_name)
+                    ->state(fn (KartuKeluarga $record): ?string => $record->kepalaKeluarga?->full_name)
                     ->placeholder('Belum ditentukan')
                     /*
                      * `kepala_keluarga` BUKAN kolom pada tabel `kartu_keluarga`.

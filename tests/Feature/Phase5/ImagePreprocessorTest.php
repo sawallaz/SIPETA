@@ -52,9 +52,11 @@ class ImagePreprocessorTest extends TestCase
 
         $preprocessed = $this->service->preprocessResult();
         $this->assertNotNull($preprocessed);
-        $this->assertSame(800, $preprocessed->width);
-        $this->assertSame(600, $preprocessed->height);
+        // 800×600 source is upscaled 2× by the smart upscaler (width < 1800).
+        $this->assertSame(1600, $preprocessed->width);
+        $this->assertSame(1200, $preprocessed->height);
         $this->assertContains('grayscale', $preprocessed->appliedTransforms);
+        $this->assertContains('upscale', $preprocessed->appliedTransforms);
         $this->assertNotContains('exif_orientation', $preprocessed->appliedTransforms);
         $this->assertNull($preprocessed->skewAngle);
         $this->assertGreaterThan(0, $preprocessed->durationMs);
@@ -78,8 +80,9 @@ class ImagePreprocessorTest extends TestCase
 
         $decoded = imagecreatefromstring((string) $output);
         $this->assertNotFalse($decoded);
-        $this->assertSame(800, imagesx($decoded));
-        $this->assertSame(600, imagesy($decoded));
+        // 800×600 source is upscaled 2× by the smart upscaler (width < 1800).
+        $this->assertSame(1600, imagesx($decoded));
+        $this->assertSame(1200, imagesy($decoded));
         imagedestroy($decoded);
     }
 
@@ -157,9 +160,11 @@ class ImagePreprocessorTest extends TestCase
 
         $preprocessed = $this->service->preprocessResult();
         $this->assertNotNull($preprocessed);
-        $this->assertSame(600, $preprocessed->width);
-        $this->assertSame(800, $preprocessed->height);
+        // Orientation 6 rotates 800×600 → 600×800; smart upscaler then doubles to 1200×1600.
+        $this->assertSame(1200, $preprocessed->width);
+        $this->assertSame(1600, $preprocessed->height);
         $this->assertContains('exif_orientation', $preprocessed->appliedTransforms);
+        $this->assertContains('upscale', $preprocessed->appliedTransforms);
     }
 
     public function test_dark_image_records_brightness_warning_but_still_processes(): void

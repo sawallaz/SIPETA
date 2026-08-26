@@ -27,3 +27,5 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 /bootstrap/cache/*.php
+/.playwright-mcp
+/dist

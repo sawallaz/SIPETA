@@ -117,16 +117,35 @@ class TesseractOcrEngineTest extends TestCase
         $image = imagecreatetruecolor(1200, 400);
         $white = imagecolorallocate($image, 255, 255, 255);
         imagefill($image, 0, 0, $white);
-        imagettftext(
-            $image,
-            48,
-            0,
-            50,
-            250,
-            imagecolorallocate($image, 0, 0, 0),
+        $fontCandidates = [
+            'C:\\Windows\\Fonts\\arial.ttf',
+            'C:\\Windows\\Fonts\\segoeui.ttf',
+            'C:\\Windows\\Fonts\\calibri.ttf',
             '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-            'NIK 3207122801160001'
-        );
+            '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
+        ];
+        $fontPath = null;
+        foreach ($fontCandidates as $candidate) {
+            if (file_exists($candidate)) {
+                $fontPath = $candidate;
+                break;
+            }
+        }
+
+        if ($fontPath !== null) {
+            imagettftext(
+                $image,
+                48,
+                0,
+                50,
+                250,
+                imagecolorallocate($image, 0, 0, 0),
+                $fontPath,
+                'NIK 3207122801160001'
+            );
+        } else {
+            imagestring($image, 5, 50, 200, 'NIK 3207122801160001', imagecolorallocate($image, 0, 0, 0));
+        }
 
         ob_start();
         imagepng($image);

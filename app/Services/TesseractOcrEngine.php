@@ -87,7 +87,94 @@ class TesseractOcrEngine implements OcrEngine
             throw new OcrEngineException($this->failureMessage($process));
         }
 
-        return $this->parseOutput((string) $process->output(), hrtime(true) - $started);
+        $fullResult = $this->parseOutput((string) $process->output(), hrtime(true) - $started);
+
+        // Multi-zone Region of Interest (ROI) scanning untuk akurasi tinggi pada dokumen Kartu Keluarga
+        $zonedText = $this->runMultiZoneOcr($imagePath, $bin, $tessdata, $env);
+        if ($zonedText !== null && strlen($zonedText) > 20) {
+            $mergedText = $zonedText . "\n\n" . $fullResult->rawText;
+            return new OcrResult(
+                rawText: $mergedText,
+                confidence: $fullResult->confidence,
+                wordCount: $fullResult->wordCount,
+                durationMs: round((hrtime(true) - $started) / 1_000_000, 2),
+            );
+        }
+
+        return $fullResult;
+    }
+
+    /**
+     * Jalankan OCR tersegmentasi per Region of Interest (ROI):
+     * - Zona Header (0% - 28% tinggi gambar)
+     * - Zona Tabel I (24% - 65% tinggi gambar)
+     * - Zona Tabel II (60% - 95% tinggi gambar)
+     */
+    private function runMultiZoneOcr(string $imagePath, string $bin, ?string $tessdata, array $env): ?string
+    {
+        if (! file_exists($imagePath) || ! extension_loaded('gd')) {
+            return null;
+        }
+
+        $image = @imagecreatefrompng($imagePath)
+            ?: @imagecreatefromjpeg($imagePath)
+            ?: @imagecreatefromstring((string) @file_get_contents($imagePath));
+
+        if (! $image) {
+            return null;
+        }
+
+        $w = imagesx($image);
+        $h = imagesy($image);
+
+        if ($w < 500 || $h < 500) {
+            imagedestroy($image);
+            return null;
+        }
+
+        $zones = [
+            'header' => ['x' => 0, 'y' => 0, 'width' => $w, 'height' => (int) ($h * 0.28)],
+            'table1' => ['x' => 0, 'y' => (int) ($h * 0.24), 'width' => $w, 'height' => (int) ($h * 0.42)],
+            'table2' => ['x' => 0, 'y' => (int) ($h * 0.60), 'width' => $w, 'height' => (int) ($h * 0.38)],
+        ];
+
+        $zoneTexts = [];
+
+        foreach ($zones as $key => $rect) {
+            $cropped = imagecrop($image, $rect);
+            if (! $cropped) {
+                continue;
+            }
+
+            $tempFile = tempnam(sys_get_temp_dir(), 'sipeta_zone_'.$key.'_').'.png';
+            imagepng($cropped, $tempFile);
+            imagedestroy($cropped);
+
+            $cmd = $this->command($tempFile, $bin, $tessdata);
+            try {
+                $process = Process::timeout((int) config('ocr.timeout_seconds'))
+                    ->env($env)
+                    ->run($cmd);
+                if ($process->successful()) {
+                    $zoneRes = $this->parseOutput((string) $process->output(), 0);
+                    if (trim($zoneRes->rawText) !== '') {
+                        $zoneTexts[$key] = trim($zoneRes->rawText);
+                    }
+                }
+            } catch (\Throwable) {
+                // Abaikan kegagalan zona individu
+            } finally {
+                @unlink($tempFile);
+            }
+        }
+
+        imagedestroy($image);
+
+        if (count($zoneTexts) >= 2) {
+            return implode("\n\n", $zoneTexts);
+        }
+
+        return null;
     }
 
     /**

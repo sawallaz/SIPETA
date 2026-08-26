@@ -43,5 +43,7 @@ final readonly class ParsedResident
         public ?string $familyRelation,
         public float $confidence,
         public bool $lowConfidence,
+        public ?string $ayah = null,
+        public ?string $ibu = null,
     ) {}
 }

@@ -546,7 +546,7 @@ class Penduduk extends Model
     public function getKepalaKeluargaAttribute(): ?string
     {
         return $this->kartuKeluarga
-            ?->kepalaKeluarga()
+            ?->kepalaKeluarga
             ?->full_name;
     }
 

@@ -13,6 +13,7 @@ use App\Services\GoogleDriveClient;
 use App\Services\GoogleDriveOAuthService;
 use App\Services\SettingsService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
@@ -25,7 +26,8 @@ Route::get('/health', function () {
     } catch (Throwable) {
     }
 
-    $ocrPath = (string) config('ocr.tesseract_path');
+    $ocrEngine = app(\App\Services\TesseractOcrEngine::class);
+    $ocrPath = $ocrEngine->resolveTesseractBinary();
     $ocrAvailable = ! empty($ocrPath) && (file_exists($ocrPath) || is_executable($ocrPath));
 
     return response()->json([
@@ -44,41 +46,24 @@ Route::middleware(['web', 'auth'])->prefix('admin/backup/google')->group(functio
     Route::get('connect', function (Request $request, GoogleDriveOAuthService $oauth) {
         abort_unless(auth()->user()?->isSuperAdmin(), 403);
 
-        $host = $request->getHost();
-        $clientIp = $request->ip();
-        $isLocalClient = in_array($clientIp, ['127.0.0.1', '::1']) || in_array($host, ['localhost', '127.0.0.1']);
-
-        if (! $isLocalClient) {
-            return redirect(Backup::getUrl())->with(
-                'google_drive_error',
-                'Penyambungan Google Drive hanya dapat dilakukan langsung dari komputer server SIPETA (buka http://localhost:8100).'
-            );
-        }
-
-        if ($host !== 'localhost') {
-            $port = (int) ($request->getPort() ?: 8100);
-            Log::info('Redirecting Google Drive connect from non-canonical host to localhost origin.', [
-                'from_host' => $host,
-                'client_ip' => $clientIp,
-            ]);
-
-            return redirect()->away("http://localhost:{$port}/admin/backup/google/connect");
-        }
-
         $state = $oauth->newState();
-        $redirectUri = (string) config('services.google_drive.redirect_uri', 'http://localhost:8100/admin/backup/google/callback');
+
+        // Store state in Cache (15 min TTL) so callback works regardless of
+        // which host / session is used — fixes 419 when Webview or LAN IP
+        // causes a session mismatch with the localhost callback URI.
+        Cache::put('google_oauth_state_' . $state, auth()->id(), now()->addMinutes(15));
+
+        // Also keep session copy as fallback for same-host flow
         $request->session()->put('google_drive_oauth_state', $state);
-        $request->session()->put('google_drive_oauth_redirect_uri', $redirectUri);
         $request->session()->save();
 
+        $redirectUri = (string) config('services.google_drive.redirect_uri', 'http://localhost:8100/admin/backup/google/callback');
+
         Log::info('Google Drive OAuth connect initiated.', [
-            'host' => $request->getHost(),
-            'scheme' => $request->getScheme(),
-            'session_driver' => config('session.driver'),
-            'session_id_prefix' => substr((string) $request->session()->getId(), 0, 8),
-            'app_key_fingerprint' => substr(hash('sha256', (string) config('app.key')), 0, 10),
-            'redirect_uri' => $redirectUri,
-            'state_hash' => substr(hash('sha256', $state), 0, 12),
+            'host'               => $request->getHost(),
+            'user_id'            => auth()->id(),
+            'redirect_uri'       => $redirectUri,
+            'state_hash'         => substr(hash('sha256', $state), 0, 12),
         ]);
 
         try {
@@ -96,34 +81,40 @@ Route::middleware(['web', 'auth'])->prefix('admin/backup/google')->group(functio
     Route::get('callback', function (Request $request, GoogleDriveOAuthService $oauth, GoogleDriveClient $drive) {
         abort_unless(auth()->user()?->isSuperAdmin(), 403);
 
-        $expectedState = $request->session()->get('google_drive_oauth_state');
-        $redirectUri = $request->session()->get('google_drive_oauth_redirect_uri') ?: (string) config('services.google_drive.redirect_uri', 'http://localhost:8100/admin/backup/google/callback');
         $receivedState = (string) $request->query('state', '');
 
+        // --- Primary: validate via Cache (cross-host safe) ---
+        $cacheKey = 'google_oauth_state_' . $receivedState;
+        $cachedUserId = Cache::get($cacheKey);
+        $stateValidByCacheId = filled($cachedUserId) && (int) $cachedUserId === (int) auth()->id();
+
+        // --- Fallback: validate via session (same-host flow) ---
+        $expectedState = $request->session()->get('google_drive_oauth_state');
+        $stateValidBySession = filled($expectedState) && hash_equals((string) $expectedState, $receivedState);
+
+        $redirectUri = (string) config('services.google_drive.redirect_uri', 'http://localhost:8100/admin/backup/google/callback');
+
         Log::info('Google Drive OAuth callback received.', [
-            'host' => $request->getHost(),
-            'scheme' => $request->getScheme(),
-            'session_driver' => config('session.driver'),
-            'session_id_prefix' => substr((string) $request->session()->getId(), 0, 8),
-            'app_key_fingerprint' => substr(hash('sha256', (string) config('app.key')), 0, 10),
-            'redirect_uri' => $redirectUri,
-            'has_code' => $request->filled('code'),
-            'has_error' => $request->filled('error'),
-            'has_expected_state' => filled($expectedState),
-            'state_match' => filled($expectedState) && hash_equals((string) $expectedState, $receivedState),
+            'host'                   => $request->getHost(),
+            'user_id'                => auth()->id(),
+            'redirect_uri'           => $redirectUri,
+            'has_code'               => $request->filled('code'),
+            'has_error'              => $request->filled('error'),
+            'state_valid_by_cache'   => $stateValidByCacheId,
+            'state_valid_by_session' => $stateValidBySession,
         ]);
 
-        if (blank($expectedState) || ! hash_equals((string) $expectedState, $receivedState)) {
+        if (! $stateValidByCacheId && ! $stateValidBySession) {
             Log::warning('Google Drive OAuth state validation failed.', [
-                'host' => $request->getHost(),
-                'scheme' => $request->getScheme(),
-                'has_expected_state' => filled($expectedState),
-                'session_id_prefix' => substr((string) $request->session()->getId(), 0, 8),
-                'app_key_fingerprint' => substr(hash('sha256', (string) config('app.key')), 0, 10),
+                'host'           => $request->getHost(),
+                'user_id'        => auth()->id(),
+                'cached_user_id' => $cachedUserId,
             ]);
             abort(419, 'Sesi OAuth Google Drive tidak valid.');
         }
 
+        // Clean up
+        Cache::forget($cacheKey);
         $request->session()->forget(['google_drive_oauth_state', 'google_drive_oauth_redirect_uri']);
         $request->session()->save();
 
@@ -134,9 +125,9 @@ Route::middleware(['web', 'auth'])->prefix('admin/backup/google')->group(functio
         try {
             $credentials = $oauth->exchangeCode((string) $request->query('code'), $redirectUri);
             $oauth->storeCredentials($credentials);
-            $about = $drive->about();
+            $about  = $drive->about();
             $folder = $drive->ensureBackupFolder();
-            $email = $about['user']['emailAddress'] ?? null;
+            $email  = $about['user']['emailAddress'] ?? null;
 
             app(SettingsService::class)->saveGoogleDriveConnection(
                 $credentials,
@@ -147,15 +138,61 @@ Route::middleware(['web', 'auth'])->prefix('admin/backup/google')->group(functio
 
             return redirect(Backup::getUrl())->with('google_drive_message', 'Google Drive berhasil terhubung.');
         } catch (GoogleDriveException $e) {
-            Log::warning('Google Drive connection failed.', ['status' => $e->httpStatus]);
+            Log::warning('Google Drive connection failed (GoogleDriveException).', [
+                'status' => $e->httpStatus,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'previous_message' => $e->getPrevious() ? $e->getPrevious()->getMessage() : null,
+            ]);
 
             return redirect(Backup::getUrl())->with('google_drive_error', $e->getMessage());
         } catch (Throwable $e) {
-            Log::warning('Google Drive connection failed.', ['exception' => $e::class]);
+            Log::warning('Google Drive connection failed (Throwable).', [
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
 
-            return redirect(Backup::getUrl())->with('google_drive_error', 'Google Drive gagal terhubung.');
+            return redirect(Backup::getUrl())->with('google_drive_error', 'Google Drive gagal terhubung: ' . $e->getMessage());
         }
     })->name('google-drive.callback');
+
+    Route::get('download-local', function (\App\Services\BackupService $backupService) {
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
+
+        $method = new \ReflectionMethod($backupService, 'buildArchive');
+        $method->setAccessible(true);
+        $archive = $method->invoke($backupService);
+        $filename = $backupService->filename();
+
+        if (ob_get_level()) {
+            ob_end_clean();
+        }
+
+        return response()->download($archive['path'], $filename, [
+            'Content-Type' => 'application/zip',
+            'Content-Length' => (string) filesize($archive['path']),
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+        ])->deleteFileAfterSend(true);
+    })->name('admin.backup.download-local');
+
+    Route::get('{backupLog}/download', function (\App\Models\BackupLog $backupLog, \App\Services\GoogleDriveClient $drive) {
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
+        abort_unless($backupLog->drive_file_id, 404);
+
+        $tmp = tempnam(sys_get_temp_dir(), 'sipeta_drive_dl_');
+        $drive->download($backupLog->drive_file_id, $tmp);
+
+        if (ob_get_level()) {
+            ob_end_clean();
+        }
+
+        return response()->download($tmp, $backupLog->filename, [
+            'Content-Type' => 'application/zip',
+            'Content-Length' => (string) filesize($tmp),
+            'Content-Disposition' => 'attachment; filename="'.$backupLog->filename.'"',
+        ])->deleteFileAfterSend(true);
+    })->name('admin.backup.download');
 });
 
 /*

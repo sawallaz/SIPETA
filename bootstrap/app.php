@@ -16,6 +16,12 @@ $app = Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             EnsureSuperAdminExists::class,
         ]);
+        // Exclude Google Drive OAuth callback from CSRF verification.
+        // Google's redirect carries its own CSRF protection via the `state` parameter
+        // validated in the callback route; exempting here prevents 419 from CSRF token mismatch.
+        $middleware->validateCsrfTokens(except: [
+            'admin/backup/google/callback',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
