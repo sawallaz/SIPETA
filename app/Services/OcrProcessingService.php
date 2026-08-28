@@ -143,6 +143,9 @@ class OcrProcessingService
         $this->parsedResult = $this->parsingService->parse(
             $this->ocrResult->rawText,
             $this->ocrResult->confidence,
+            $this->ocrResult->tableRawText,
+            $this->ocrResult->tokens,
+            $this->ocrResult->tableTokens,
         );
 
         return $this->parsedResult;

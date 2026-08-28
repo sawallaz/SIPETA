@@ -111,12 +111,7 @@ class PendudukKkService
                 if ($gender === null && $existing !== null) {
                     $gender = $existing->gender?->value ?? (string) $existing->gender;
                 }
-
-                if ($gender === null) {
-                    throw ValidationException::withMessages([
-                        "ocr_members.{$index}.gender" => "Anggota ke-{$row}: jenis kelamin belum terbaca.",
-                    ]);
-                }
+                $gender ??= Gender::LAKI_LAKI->value;
 
                 $birthPlace = trim(
                     (string) ($member['birth_place'] ?? ''),
@@ -124,56 +119,35 @@ class PendudukKkService
                 if ($birthPlace === '' && $existing !== null) {
                     $birthPlace = (string) $existing->birth_place;
                 }
-
                 if ($birthPlace === '') {
-                    throw ValidationException::withMessages([
-                        "ocr_members.{$index}.birth_place" => "Anggota ke-{$row}: tempat lahir belum terbaca.",
-                    ]);
+                    $birthPlace = '-';
                 }
 
                 $birthDate = $member['birth_date'] ?? null;
                 if (blank($birthDate) && $existing !== null) {
                     $birthDate = $existing->birth_date?->format('Y-m-d');
                 }
-
                 if (blank($birthDate)) {
-                    throw ValidationException::withMessages([
-                        "ocr_members.{$index}.birth_date" => "Anggota ke-{$row}: tanggal lahir belum terbaca.",
-                    ]);
+                    $birthDate = '2000-01-01';
                 }
 
                 $religionRaw = $member['religion'] ?? null;
                 $religionId = filled($religionRaw)
                     ? $this->resolveReligionId($religionRaw)
                     : $existing?->religion_id;
-
-                if ($religionId === null) {
-                    throw ValidationException::withMessages([
-                        "ocr_members.{$index}.religion" => "Anggota ke-{$row}: agama belum terbaca.",
-                    ]);
-                }
+                $religionId ??= Religion::query()->orderBy('id')->value('id') ?: 1;
 
                 $educationRaw = $member['education'] ?? null;
                 $educationId = filled($educationRaw)
                     ? $this->resolveEducationId($educationRaw)
                     : $existing?->education_id;
-
-                if ($educationId === null) {
-                    throw ValidationException::withMessages([
-                        "ocr_members.{$index}.education" => "Anggota ke-{$row}: pendidikan belum terbaca.",
-                    ]);
-                }
+                $educationId ??= Education::query()->orderBy('id')->value('id') ?: 1;
 
                 $occupationRaw = $member['occupation'] ?? null;
                 $occupationId = filled($occupationRaw)
                     ? $this->resolveOccupationId($occupationRaw)
                     : $existing?->occupation_id;
-
-                if ($occupationId === null) {
-                    throw ValidationException::withMessages([
-                        "ocr_members.{$index}.occupation" => "Anggota ke-{$row}: pekerjaan belum terbaca.",
-                    ]);
-                }
+                $occupationId ??= Occupation::query()->orderBy('id')->value('id') ?: 1;
 
                 $marital = $this->normalizeEnumValue(
                     $member['marital_status'] ?? null,
@@ -181,12 +155,7 @@ class PendudukKkService
                 if ($marital === null && $existing !== null) {
                     $marital = $existing->marital_status?->value ?? (string) $existing->marital_status;
                 }
-
-                if ($marital === null) {
-                    throw ValidationException::withMessages([
-                        "ocr_members.{$index}.marital_status" => "Anggota ke-{$row}: status perkawinan belum terbaca.",
-                    ]);
-                }
+                $marital ??= MaritalStatus::BELUM_KAWIN->value;
 
                 $familyRelation = $this->normalizeEnumValue(
                     $member['family_relation'] ?? null,
@@ -194,12 +163,7 @@ class PendudukKkService
                 if ($familyRelation === null && $existing !== null) {
                     $familyRelation = $existing->family_relation?->value ?? (string) $existing->family_relation;
                 }
-
-                if ($familyRelation === null) {
-                    throw ValidationException::withMessages([
-                        "ocr_members.{$index}.family_relation" => "Anggota ke-{$row}: hubungan keluarga belum terbaca.",
-                    ]);
-                }
+                $familyRelation ??= ($index === 0 ? FamilyRelation::KEPALA_KELUARGA->value : FamilyRelation::ANAK->value);
 
                 $bloodType = $member['blood_type'] ?? $existing?->blood_type?->value ?? BloodType::TIDAK_DIKETAHUI->value;
 

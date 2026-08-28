@@ -16,34 +16,22 @@ use Illuminate\Support\Facades\Process;
  *   tesseract <image> stdout -l ind --psm 6 tsv
  *
  * — Indonesian language pack, single uniform text block (PSM 6), and TSV
- * output so word-level confidence is available. TSV word rows (level 5) are
- * grouped back into lines in reading order; the raw text is the joined
- * lines and the confidence is the mean of the word confidences.
- *
- * The binary path, language, PSM, and timeout come from config/ocr.php
- * (.ai/ocr.md §6). Failures (non-zero exit, timeout) raise
- * OcrEngineException; the pipeline persists the job as FAILED.
- *
- * Engine tuning not yet applied (documented in docs/PHASE5.md §5.4.3): the
- * character whitelist from .ai/ocr.md §4.3 is deferred — a digits/uppercase
- * whitelist would mangle lowercase address and name text before the parsing
- * stage exists to handle casing.
+ * output so word-level confidence and 2D spatial bounding boxes are available.
  */
 class TesseractOcrEngine implements OcrEngine
 {
-    /** Tesseract TSV column indexes (level, page, block, par, line, word, ...). */
+    /** Tesseract TSV column indexes (level, page, block, par, line, word, left, top, width, height, conf, text). */
     private const COL_LEVEL = 0;
-
     private const COL_PAGE = 1;
-
     private const COL_BLOCK = 2;
-
     private const COL_PAR = 3;
-
     private const COL_LINE = 4;
-
+    private const COL_WORD = 5;
+    private const COL_LEFT = 6;
+    private const COL_TOP = 7;
+    private const COL_WIDTH = 8;
+    private const COL_HEIGHT = 9;
     private const COL_CONF = 10;
-
     private const COL_TEXT = 11;
 
     /** TSV level of word rows (5 = word). */
@@ -60,8 +48,18 @@ class TesseractOcrEngine implements OcrEngine
         $cmd = $this->command($imagePath, $bin, $tessdata);
         $env = filled($tessdata) ? ['TESSDATA_PREFIX' => (string) $tessdata] : [];
 
+        if (is_file($bin)) {
+            $binDir = dirname($bin);
+            $currentPath = (string) (getenv('PATH') ?: '');
+            $env['PATH'] = $binDir.PATH_SEPARATOR.$currentPath;
+        }
+
+        $workDir = is_file($bin) ? dirname($bin) : base_path();
+        $timeout = (int) (config('ocr.timeout_seconds') ?: 30);
+
         try {
-            $process = Process::timeout((int) config('ocr.timeout_seconds'))
+            $process = Process::timeout($timeout)
+                ->path($workDir)
                 ->env($env)
                 ->run($cmd);
         } catch (ProcessTimedOutException) {
@@ -88,93 +86,144 @@ class TesseractOcrEngine implements OcrEngine
         }
 
         $fullResult = $this->parseOutput((string) $process->output(), hrtime(true) - $started);
+        $primaryScore = $this->scoreQuality($fullResult);
 
-        // Multi-zone Region of Interest (ROI) scanning untuk akurasi tinggi pada dokumen Kartu Keluarga
-        $zonedText = $this->runMultiZoneOcr($imagePath, $bin, $tessdata, $env);
-        if ($zonedText !== null && strlen($zonedText) > 20) {
-            $mergedText = $zonedText . "\n\n" . $fullResult->rawText;
-            return new OcrResult(
-                rawText: $mergedText,
-                confidence: $fullResult->confidence,
-                wordCount: $fullResult->wordCount,
-                durationMs: round((hrtime(true) - $started) / 1_000_000, 2),
-            );
+        // Fallback terukur: jika PSM utama menghasilkan NIK/data minim (<2 NIK valid atau skor < 250), evaluasi candidate PSM
+        $bestResult = $fullResult;
+        $bestScore = $primaryScore;
+
+        if ($primaryScore < 250.0 || $fullResult->wordCount < 15) {
+            $candidatePsms = ['3', '4', '6', '11'];
+
+            foreach ($candidatePsms as $candPsm) {
+                if ($candPsm === (string) config('ocr.psm', '4')) {
+                    continue;
+                }
+                $fallbackCmd = $this->command($imagePath, $bin, $tessdata, $candPsm);
+                try {
+                    $fallbackProc = Process::timeout($timeout)
+                        ->path($workDir)
+                        ->env($env)
+                        ->run($fallbackCmd);
+                    if ($fallbackProc->successful()) {
+                        $fallbackRes = $this->parseOutput((string) $fallbackProc->output(), hrtime(true) - $started);
+                        $fallbackScore = $this->scoreQuality($fallbackRes);
+                        if ($fallbackScore > $bestScore) {
+                            $bestResult = $fallbackRes;
+                            $bestScore = $fallbackScore;
+                        }
+                    }
+                } catch (\Throwable) {
+                    // Abaikan error fallback dan lanjutkan kandidat lain
+                }
+            }
         }
 
-        return $fullResult;
+        $imageDir = dirname($imagePath);
+        $tableImagePath = $imageDir.DIRECTORY_SEPARATOR.'ocr-table-members.png';
+        $bestTableResult = null;
+
+        // Specialized Table OCR Pass jika gambar tabel anggota terdeteksi
+        if (file_exists($tableImagePath)) {
+            $tableCandidatePsms = ['3', '6', '4', '11'];
+            $bestTableScore = -1.0;
+
+            foreach ($tableCandidatePsms as $tPsm) {
+                $tableCmd = $this->command($tableImagePath, $bin, $tessdata, $tPsm);
+                try {
+                    $tableProc = Process::timeout($timeout)
+                        ->path($workDir)
+                        ->env($env)
+                        ->run($tableCmd);
+                    if ($tableProc->successful()) {
+                        $tableRes = $this->parseOutput((string) $tableProc->output(), hrtime(true) - $started);
+                        $tableScore = $this->scoreQuality($tableRes);
+                        if ($tableScore > $bestTableScore) {
+                            $bestTableScore = $tableScore;
+                            $bestTableResult = $tableRes;
+                        }
+                    }
+                } catch (\Throwable) {
+                    // Abaikan kegagalan kandidat tabel
+                }
+            }
+        }
+
+        // Simpan debug artifacts pada temp directory jika memungkinkan
+        if (str_contains($imageDir, 'ocr_temp') || str_contains($imageDir, 'tmp') || str_contains($imageDir, 'temp')) {
+            @file_put_contents($imageDir.DIRECTORY_SEPARATOR.'ocr-full.tsv', (string) $bestResult->tsv);
+            @file_put_contents($imageDir.DIRECTORY_SEPARATOR.'ocr-full.txt', $bestResult->rawText);
+            @file_put_contents($imageDir.DIRECTORY_SEPARATOR.'ocr-raw.txt', $bestResult->rawText);
+
+            if ($bestTableResult !== null) {
+                @file_put_contents($imageDir.DIRECTORY_SEPARATOR.'ocr-table.tsv', (string) $bestTableResult->tsv);
+                @file_put_contents($imageDir.DIRECTORY_SEPARATOR.'ocr-table.txt', $bestTableResult->rawText);
+                @file_put_contents($imageDir.DIRECTORY_SEPARATOR.'ocr-table-raw.txt', $bestTableResult->rawText);
+            }
+        }
+
+        return new OcrResult(
+            rawText: $bestResult->rawText,
+            confidence: $bestResult->confidence,
+            wordCount: $bestResult->wordCount,
+            durationMs: $bestResult->durationMs,
+            tableRawText: $bestTableResult?->rawText,
+            tsv: $bestResult->tsv,
+            tokens: $bestResult->tokens,
+            tableTsv: $bestTableResult?->tsv,
+            tableTokens: $bestTableResult?->tokens,
+        );
     }
 
     /**
-     * Jalankan OCR tersegmentasi per Region of Interest (ROI):
-     * - Zona Header (0% - 28% tinggi gambar)
-     * - Zona Tabel I (24% - 65% tinggi gambar)
-     * - Zona Tabel II (60% - 95% tinggi gambar)
+     * Hitung skor kualitas hasil OCR berdasarkan:
+     * 1. Jumlah NIK 16 digit valid (bobot tertinggi)
+     * 2. Kelengkapan kata kunci struktur KK (header/tabel/kolom)
+     * 3. Rata-rata confidence kata
+     * 4. Kepadatan kata yang terbaca
      */
-    private function runMultiZoneOcr(string $imagePath, string $bin, ?string $tessdata, array $env): ?string
+    public function scoreQuality(OcrResult $res): float
     {
-        if (! file_exists($imagePath) || ! extension_loaded('gd')) {
-            return null;
+        if ($res->wordCount === 0 || trim($res->rawText) === '') {
+            return 0.0;
         }
 
-        $image = @imagecreatefrompng($imagePath)
-            ?: @imagecreatefromjpeg($imagePath)
-            ?: @imagecreatefromstring((string) @file_get_contents($imagePath));
+        $text = mb_strtoupper($res->rawText);
+        $score = 0.0;
 
-        if (! $image) {
-            return null;
+        // 1. Valid 16-digit NIK count (bobot utama)
+        preg_match_all('/\b\d{16}\b/', $res->rawText, $nikMatches);
+        $validNikCount = count(array_unique($nikMatches[0] ?? []));
+        $score += $validNikCount * 80.0;
+
+        // 1b. Spaced NIK count
+        preg_match_all('/\b\d{3,8}\s+\d{8,13}\b/', $res->rawText, $spacedNiks);
+        foreach ($spacedNiks[0] ?? [] as $sn) {
+            $digits = preg_replace('/\D/', '', $sn);
+            if (strlen($digits) === 16) {
+                $score += 70.0;
+            }
         }
 
-        $w = imagesx($image);
-        $h = imagesy($image);
-
-        if ($w < 500 || $h < 500) {
-            imagedestroy($image);
-            return null;
-        }
-
-        $zones = [
-            'header' => ['x' => 0, 'y' => 0, 'width' => $w, 'height' => (int) ($h * 0.28)],
-            'table1' => ['x' => 0, 'y' => (int) ($h * 0.24), 'width' => $w, 'height' => (int) ($h * 0.42)],
-            'table2' => ['x' => 0, 'y' => (int) ($h * 0.60), 'width' => $w, 'height' => (int) ($h * 0.38)],
+        // 2. Keyword detection struktur KK
+        $keywords = [
+            'KARTU KELUARGA', 'NOMOR', 'NIK', 'NAMA', 'ALAMAT', 'RT/RW',
+            'JENIS KELAMIN', 'TEMPAT LAHIR', 'TANGGAL LAHIR', 'AGAMA',
+            'PENDIDIKAN', 'PEKERJAAN', 'STATUS PERKAWINAN', 'HUBUNGAN',
+            'KEPALA KELUARGA', 'ISTRI', 'ANAK', 'LAKI-LAKI', 'PEREMPUAN',
+            'ISLAM', 'KRISTEN', 'KATOLIK', 'KAWIN', 'BELUM KAWIN',
         ];
-
-        $zoneTexts = [];
-
-        foreach ($zones as $key => $rect) {
-            $cropped = imagecrop($image, $rect);
-            if (! $cropped) {
-                continue;
-            }
-
-            $tempFile = tempnam(sys_get_temp_dir(), 'sipeta_zone_'.$key.'_').'.png';
-            imagepng($cropped, $tempFile);
-            imagedestroy($cropped);
-
-            $cmd = $this->command($tempFile, $bin, $tessdata);
-            try {
-                $process = Process::timeout((int) config('ocr.timeout_seconds'))
-                    ->env($env)
-                    ->run($cmd);
-                if ($process->successful()) {
-                    $zoneRes = $this->parseOutput((string) $process->output(), 0);
-                    if (trim($zoneRes->rawText) !== '') {
-                        $zoneTexts[$key] = trim($zoneRes->rawText);
-                    }
-                }
-            } catch (\Throwable) {
-                // Abaikan kegagalan zona individu
-            } finally {
-                @unlink($tempFile);
+        foreach ($keywords as $kw) {
+            if (str_contains($text, $kw)) {
+                $score += 10.0;
             }
         }
 
-        imagedestroy($image);
+        // 3. Word confidence & count contribution
+        $score += ($res->confidence * 0.5);
+        $score += min(30.0, $res->wordCount * 0.3);
 
-        if (count($zoneTexts) >= 2) {
-            return implode("\n\n", $zoneTexts);
-        }
-
-        return null;
+        return $score;
     }
 
     /**
@@ -188,21 +237,23 @@ class TesseractOcrEngine implements OcrEngine
             return $configured;
         }
 
-        $bundledWin = base_path('resources/tesseract/tesseract.exe');
-        if (file_exists($bundledWin)) {
-            return $bundledWin;
+        if (PHP_OS_FAMILY === 'Windows') {
+            $bundledWin = base_path('resources/tesseract/tesseract.exe');
+            if (file_exists($bundledWin)) {
+                return $bundledWin;
+            }
+        } else {
+            $bundledLinux = base_path('resources/tesseract/tesseract');
+            if (file_exists($bundledLinux) && is_executable($bundledLinux)) {
+                return $bundledLinux;
+            }
         }
 
-        $bundledLinux = base_path('resources/tesseract/tesseract');
-        if (file_exists($bundledLinux)) {
-            return $bundledLinux;
-        }
-
-        return $configured;
+        return 'tesseract';
     }
 
     /**
-     * Resolve Tessdata directory with bundled fallback.
+     * Resolve TESSDATA_PREFIX with bundled fallback.
      */
     public function resolveTessdataPrefix(): ?string
     {
@@ -221,12 +272,11 @@ class TesseractOcrEngine implements OcrEngine
     }
 
     /**
-     * Build the tesseract invocation as an argument array (Symfony Process
-     * handles quoting for paths with spaces).
+     * Build the tesseract invocation as an argument array.
      *
      * @return array<int, string>
      */
-    private function command(string $imagePath, ?string $bin = null, ?string $tessdata = null): array
+    private function command(string $imagePath, ?string $bin = null, ?string $tessdata = null, ?string $psm = null): array
     {
         $cmd = [
             $bin ?: (string) config('ocr.tesseract_path'),
@@ -235,7 +285,7 @@ class TesseractOcrEngine implements OcrEngine
             '-l',
             (string) config('ocr.language'),
             '--psm',
-            (string) config('ocr.psm'),
+            $psm ?: (string) config('ocr.psm'),
         ];
 
         $tessdata = $tessdata ?: (config('ocr.tessdata_prefix') ?: env('TESSDATA_PREFIX'));
@@ -250,13 +300,14 @@ class TesseractOcrEngine implements OcrEngine
     }
 
     /**
-     * Parse Tesseract TSV output into raw text + mean word confidence.
+     * Parse Tesseract TSV output into raw text + mean word confidence + full 2D token array.
      */
     private function parseOutput(string $tsv, int $elapsedNanoseconds): OcrResult
     {
         /** @var array<string, array<int, string>> $lineGroups reading-order line buckets */
         $lineGroups = [];
         $confidences = [];
+        $tokens = [];
 
         foreach (explode("\n", $tsv) as $row) {
             $columns = explode("\t", $row);
@@ -272,7 +323,27 @@ class TesseractOcrEngine implements OcrEngine
                 continue;
             }
 
+            $left = (int) $columns[self::COL_LEFT];
+            $top = (int) $columns[self::COL_TOP];
+            $width = (int) $columns[self::COL_WIDTH];
+            $height = (int) $columns[self::COL_HEIGHT];
+
             $confidences[] = $confidence;
+            $tokens[] = [
+                'text' => $text,
+                'conf' => $confidence,
+                'left' => $left,
+                'top' => $top,
+                'width' => $width,
+                'height' => $height,
+                'cx' => $left + ($width / 2),
+                'cy' => $top + ($height / 2),
+                'page_num' => (int) $columns[self::COL_PAGE],
+                'block_num' => (int) $columns[self::COL_BLOCK],
+                'par_num' => (int) $columns[self::COL_PAR],
+                'line_num' => (int) $columns[self::COL_LINE],
+                'word_num' => (int) $columns[self::COL_WORD],
+            ];
 
             $lineKey = implode(':', [
                 $columns[self::COL_PAGE],
@@ -295,6 +366,9 @@ class TesseractOcrEngine implements OcrEngine
             confidence: $meanConfidence,
             wordCount: count($confidences),
             durationMs: round($elapsedNanoseconds / 1_000_000, 2),
+            tableRawText: null,
+            tsv: $tsv,
+            tokens: $tokens,
         );
     }
 

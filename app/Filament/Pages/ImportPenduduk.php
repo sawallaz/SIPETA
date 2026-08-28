@@ -32,9 +32,18 @@ class ImportPenduduk extends Page
 
     public ?array $completedImportResult = null;
 
+    public bool $isImporting = false;
+
     public static function canAccess(): bool
     {
         return auth()->check();
+    }
+
+    public function updatedFile(): void
+    {
+        if ($this->file !== null) {
+            $this->uploadFile();
+        }
     }
 
     #[Computed]
@@ -180,35 +189,53 @@ class ImportPenduduk extends Page
             return;
         }
 
-        $request = request();
-        $controller = app(PendudukImportController::class);
-        $result = $controller->upload($request, $this->file);
+        try {
+            $request = request();
+            $controller = app(PendudukImportController::class);
+            $result = $controller->upload($request, $this->file);
 
-        if (isset($result['error'])) {
+            if (isset($result['error'])) {
+                Notification::make()
+                    ->title('Gagal mengunggah file')
+                    ->body($result['error'])
+                    ->danger()
+                    ->send();
+
+                $this->file = null;
+
+                return;
+            }
+
+            $sheets = $result['sheets'] ?? [];
+
+            session()->put('penduduk_import', array_merge(session('penduduk_import', []), [
+                'file_path' => $result['file_path'],
+                'file_name' => $result['file_name'] ?? '',
+                'sheets' => $sheets,
+                'step' => 'sheet',
+            ]));
+
+            $this->currentStep = 'sheet';
+            $this->file = null;
+
             Notification::make()
-                ->title('Gagal mengunggah file')
-                ->body($result['error'])
+                ->title('File berhasil diunggah')
+                ->body(count($sheets) > 1 ? 'Silakan pilih sheet yang akan diimpor.' : 'File siap dipetakan.')
+                ->success()
+                ->send();
+
+            if (count($sheets) === 1) {
+                $this->selectSheet(0);
+            }
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Terjadi kesalahan saat memproses file')
+                ->body($e->getMessage())
                 ->danger()
                 ->send();
 
-            return;
+            $this->file = null;
         }
-
-        session()->put('penduduk_import', array_merge(session('penduduk_import', []), [
-            'file_path' => $result['file_path'],
-            'file_name' => $result['file_name'] ?? '',
-            'sheets' => $result['sheets'] ?? [],
-            'step' => 'sheet',
-        ]));
-
-        $this->currentStep = 'sheet';
-        $this->file = null;
-
-        Notification::make()
-            ->title('File berhasil diunggah')
-            ->body('Silakan pilih sheet yang akan diimpor.')
-            ->success()
-            ->send();
     }
 
     // -------------------------------------------------------------------------
@@ -217,30 +244,38 @@ class ImportPenduduk extends Page
 
     public function selectSheet(int $sheetIndex): void
     {
-        $request = request();
-        $controller = app(PendudukImportController::class);
-        $result = $controller->selectSheet($request, $sheetIndex);
+        try {
+            $request = request();
+            $controller = app(PendudukImportController::class);
+            $result = $controller->selectSheet($request, $sheetIndex);
 
-        if (isset($result['error'])) {
+            if (isset($result['error'])) {
+                Notification::make()
+                    ->title('Gagal memuat sheet')
+                    ->body($result['error'])
+                    ->danger()
+                    ->send();
+
+                return;
+            }
+
+            session()->put('penduduk_import', array_merge(session('penduduk_import', []), [
+                'headers' => $result['headers'] ?? [],
+                'rows' => $result['rows'] ?? [],
+                'total_rows' => $result['total_rows'] ?? 0,
+                'selected_sheet' => $result['sheet_name'] ?? '',
+                'step' => 'mapping',
+            ]));
+
+            $this->currentStep = 'mapping';
+            $this->mapColumns();
+        } catch (\Throwable $e) {
             Notification::make()
                 ->title('Gagal memuat sheet')
-                ->body($result['error'])
+                ->body($e->getMessage())
                 ->danger()
                 ->send();
-
-            return;
         }
-
-        session()->put('penduduk_import', array_merge(session('penduduk_import', []), [
-            'headers' => $result['headers'] ?? [],
-            'rows' => $result['rows'] ?? [],
-            'total_rows' => $result['total_rows'] ?? 0,
-            'selected_sheet' => $result['sheet_name'] ?? '',
-            'step' => 'mapping',
-        ]));
-
-        $this->currentStep = 'mapping';
-        $this->mapColumns();
     }
 
     // -------------------------------------------------------------------------
@@ -249,34 +284,42 @@ class ImportPenduduk extends Page
 
     public function mapColumns(): void
     {
-        $controller = app(PendudukImportController::class);
-        $result = $controller->mapColumns(request());
+        try {
+            $controller = app(PendudukImportController::class);
+            $result = $controller->mapColumns(request());
 
-        if (isset($result['error'])) {
+            if (isset($result['error'])) {
+                Notification::make()
+                    ->title('Gagal memetakan kolom')
+                    ->body($result['error'])
+                    ->danger()
+                    ->send();
+
+                return;
+            }
+
+            session()->put('penduduk_import.mapping', $result);
+
+            if (! empty($result['ambiguous'])) {
+                Notification::make()
+                    ->title('Kolom ambigu terdeteksi')
+                    ->body('Beberapa kolom memiliki nama yang mirip. Pilih mapping yang tepat.')
+                    ->warning()
+                    ->send();
+            }
+
+            // Auto lanjut ke preview jika tidak ada ambiguous
+            if (empty($result['ambiguous']) && empty($result['missing_required'])) {
+                $this->currentStep = 'preview';
+                session()->put('penduduk_import.step', 'preview');
+                $this->loadPreview();
+            }
+        } catch (\Throwable $e) {
             Notification::make()
                 ->title('Gagal memetakan kolom')
-                ->body($result['error'])
+                ->body($e->getMessage())
                 ->danger()
                 ->send();
-
-            return;
-        }
-
-        session()->put('penduduk_import.mapping', $result);
-
-        if (! empty($result['ambiguous'])) {
-            Notification::make()
-                ->title('Kolom ambigu terdeteksi')
-                ->body('Beberapa kolom memiliki nama yang mirip. Pilih mapping yang tepat.')
-                ->warning()
-                ->send();
-        }
-
-        // Auto lanjut ke preview jika tidak ada ambiguous
-        if (empty($result['ambiguous']) && empty($result['missing_required'])) {
-            $this->currentStep = 'preview';
-            session()->put('penduduk_import.step', 'preview');
-            $this->loadPreview();
         }
     }
 
@@ -314,12 +357,36 @@ class ImportPenduduk extends Page
     public function updateMapping(string $field, string $selectedHeader): void
     {
         $mapping = $this->mapping();
-        $mapping['mapping'][$field] = $selectedHeader;
+        if (blank($selectedHeader)) {
+            unset($mapping['mapping'][$field]);
+        } else {
+            $mapping['mapping'][$field] = $selectedHeader;
+        }
+
+        if (isset($mapping['ambiguous'][$field])) {
+            unset($mapping['ambiguous'][$field]);
+        }
+
+        $required = ['nik', 'full_name', 'kk_number'];
+        $activeFields = array_keys(array_filter($mapping['mapping'] ?? [], fn ($h) => filled($h)));
+        $mapping['missing_required'] = array_values(array_diff($required, $activeFields));
+
+        $allHeaders = $this->headers();
+        $mappedHeaders = array_values($mapping['mapping'] ?? []);
+        $mapping['unrecognized'] = array_values(array_filter($allHeaders, fn ($h) => ! in_array($h, $mappedHeaders, true)));
+
+        $custom = session('penduduk_import.mapping.custom_mapping', []);
+        $custom[$field] = $selectedHeader;
 
         session()->put('penduduk_import.mapping', $mapping);
-        session()->put('penduduk_import.mapping.custom_mapping', [
-            $field => $selectedHeader,
-        ]);
+        session()->put('penduduk_import.mapping.custom_mapping', $custom);
+    }
+
+    public function mapHeaderToField(string $header, string $field): void
+    {
+        if (filled($field)) {
+            $this->updateMapping($field, $header);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -328,32 +395,40 @@ class ImportPenduduk extends Page
 
     public function loadPreview(): void
     {
-        $controller = app(PendudukImportController::class);
-        $result = $controller->preview(request());
+        try {
+            $controller = app(PendudukImportController::class);
+            $result = $controller->preview(request());
 
-        if (isset($result['error'])) {
+            if (isset($result['error'])) {
+                Notification::make()
+                    ->title('Gagal memuat preview')
+                    ->body($result['error'])
+                    ->danger()
+                    ->send();
+
+                return;
+            }
+
+            session()->put('penduduk_import.preview_result', $result);
+            $this->currentStep = 'preview';
+
+            $total = $result['total'] ?? 0;
+            $valid = $result['valid'] ?? 0;
+            $duplicate = $result['duplicate'] ?? 0;
+            $invalid = $result['invalid'] ?? 0;
+
+            Notification::make()
+                ->title('Preview Data')
+                ->body("Total: {$total} | Valid: {$valid} | Duplikat: {$duplicate} | Tidak valid: {$invalid}")
+                ->info()
+                ->send();
+        } catch (\Throwable $e) {
             Notification::make()
                 ->title('Gagal memuat preview')
-                ->body($result['error'])
+                ->body($e->getMessage())
                 ->danger()
                 ->send();
-
-            return;
         }
-
-        session()->put('penduduk_import.preview_result', $result);
-        $this->currentStep = 'preview';
-
-        $total = $result['total'] ?? 0;
-        $valid = $result['valid'] ?? 0;
-        $duplicate = $result['duplicate'] ?? 0;
-        $invalid = $result['invalid'] ?? 0;
-
-        Notification::make()
-            ->title('Preview Data')
-            ->body("Total: {$total} | Valid: {$valid} | Duplikat: {$duplicate} | Tidak valid: {$invalid}")
-            ->info()
-            ->send();
     }
 
     public function prepareImport(): void
@@ -374,31 +449,46 @@ class ImportPenduduk extends Page
 
     public function importData(): void
     {
-        $controller = app(PendudukImportController::class);
-        $result = $controller->import(request());
-
-        if (isset($result['error'])) {
-            Notification::make()
-                ->title('Gagal melakukan import')
-                ->body($result['error'])
-                ->danger()
-                ->send();
-
+        if ($this->isImporting) {
             return;
         }
 
-        $this->completedImportResult = $result;
-        $this->currentStep = 'result';
-        session()->put('penduduk_import', [
-            'import_result' => $result,
-        ]);
+        $this->isImporting = true;
 
-        Notification::make()
-            ->title('Import Selesai')
-            ->body($result['message'] ?? 'Import selesai.')
-            ->success()
-            ->send();
+        try {
+            $controller = app(PendudukImportController::class);
+            $result = $controller->import(request());
 
+            if (isset($result['error'])) {
+                Notification::make()
+                    ->title('Gagal melakukan import')
+                    ->body($result['error'])
+                    ->danger()
+                    ->send();
+
+                return;
+            }
+
+            $this->completedImportResult = $result;
+            $this->currentStep = 'result';
+            session()->put('penduduk_import', [
+                'import_result' => $result,
+            ]);
+
+            Notification::make()
+                ->title('Import Selesai')
+                ->body($result['message'] ?? 'Import selesai.')
+                ->success()
+                ->send();
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Gagal melakukan import')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        } finally {
+            $this->isImporting = false;
+        }
     }
 
     // -------------------------------------------------------------------------

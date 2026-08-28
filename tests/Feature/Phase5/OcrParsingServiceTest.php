@@ -796,6 +796,61 @@ TXT;
         $this->assertNull($result->members[0]->familyRelation);
     }
 
+    public function test_multiline_address_does_not_leak_members_into_address(): void
+    {
+        $text = implode("\n", [
+            'NOMOR KARTU KELUARGA : 7372010101230001',
+            'ALAMAT : JL. POROS PARE-PARE NO. 12',
+            'KOMPLEK PERUMAHAN INDAH BLOK B',
+            'RT/RW : 001/004',
+            'KELURAHAN : TANETE',
+            'KECAMATAN : TANETE',
+            '1 ANDI SURYAMAN 7372010101800001 LAKI-LAKI PAREPARE 10-01-1980 ISLAM SLTA/SEDERAJAT WIRASWASTA KAWIN KEPALA KELUARGA',
+            '2 SITI NURHALIZA 7372014502850002 PEREMPUAN PAREPARE 15-02-1985 ISLAM SLTA/SEDERAJAT IBU RUMAH TANGGA KAWIN ISTRI',
+        ]);
+
+        $result = $this->parse($text, 92.0);
+
+        $this->assertSame('7372010101230001', $result->kkNumber);
+        $this->assertSame('JL. POROS PARE-PARE NO. 12 KOMPLEK PERUMAHAN INDAH BLOK B', $result->address);
+        $this->assertSame('001', $result->rt);
+        $this->assertSame('004', $result->rw);
+        $this->assertCount(2, $result->members);
+        $this->assertSame('ANDI SURYAMAN', $result->members[0]->nama);
+        $this->assertSame('7372010101800001', $result->members[0]->nik);
+        $this->assertSame('SITI NURHALIZA', $result->members[1]->nama);
+        $this->assertSame('7372014502850002', $result->members[1]->nik);
+        $this->assertStringNotContainsString('ANDI SURYAMAN', (string) $result->address);
+        $this->assertStringNotContainsString('7372010101800001', (string) $result->address);
+    }
+
+    public function test_degraded_table_header_parses_all_members_without_loss(): void
+    {
+        // Table header text corrupted by OCR noise or missing entirely
+        $text = implode("\n", [
+            'NOMOR KARTU KELUARGA : 7372010101230001',
+            'ALAMAT : JL. JENDERAL SUDIRMAN NO. 99',
+            'RT/RW : 002/005',
+            '1 MUHAMMAD DAHLAN 7372010105700001 LAKI-LAKI BARRU 01-05-1970 ISLAM S1 WIRASWASTA KAWIN KEPALA KELUARGA',
+            '2 MARIAM 7372014107750002 PEREMPUAN BARRU 01-07-1975 ISLAM SMA IBU RUMAH TANGGA KAWIN ISTRI',
+            '3 FAHRI DAHLAN 7372011010020003 LAKI-LAKI BARRU 10-10-2002 ISLAM SMA MAHASISWA BELUM KAWIN ANAK',
+        ]);
+
+        $result = $this->parse($text, 90.0);
+
+        $this->assertSame('7372010101230001', $result->kkNumber);
+        $this->assertSame('JL. JENDERAL SUDIRMAN NO. 99', $result->address);
+        $this->assertSame('002', $result->rt);
+        $this->assertSame('005', $result->rw);
+        $this->assertCount(3, $result->members);
+        $this->assertSame('MUHAMMAD DAHLAN', $result->members[0]->nama);
+        $this->assertSame('7372010105700001', $result->members[0]->nik);
+        $this->assertSame('MARIAM', $result->members[1]->nama);
+        $this->assertSame('7372014107750002', $result->members[1]->nik);
+        $this->assertSame('FAHRI DAHLAN', $result->members[2]->nama);
+        $this->assertSame('7372011010020003', $result->members[2]->nik);
+    }
+
     private function parse(string $rawText, float $confidence): ParsedOcrResult
     {
         return (new OcrParsingService)->parse($rawText, $confidence);

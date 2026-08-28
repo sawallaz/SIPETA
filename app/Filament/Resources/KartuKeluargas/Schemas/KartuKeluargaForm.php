@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\KartuKeluargas\Schemas;
 
 use App\Models\AreaUnit;
+use App\Models\KartuKeluarga;
+use App\Models\Penduduk;
 use App\Models\Rt;
 use App\Services\KkPhotoService;
 use Filament\Actions\Action;
@@ -11,12 +13,15 @@ use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\ViewField;
+use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
 
 class KartuKeluargaForm
@@ -33,25 +38,26 @@ class KartuKeluargaForm
 
             Section::make('Dokumen Kartu Keluarga')
                 ->description(
-                    'Upload foto atau scan KK untuk arsip.'
+                    'Ambil foto langsung dengan kamera HP atau pilih dari galeri/file arsip KK.'
                 )
                 ->icon(Heroicon::OutlinedDocumentText)
                 ->columns(1)
                 ->schema([
 
+                    ViewField::make('kk_photo_capture')
+                        ->label('Sumber Foto')
+                        ->view('filament.forms.components.kk-photo-capture')
+                        ->columnSpanFull(),
+
                     FileUpload::make('kk_photo')
-                        ->label('Foto / Scan Kartu Keluarga')
+                        ->label('File Foto / Scan Kartu Keluarga')
                         ->disk(KkPhotoService::DISK)
                         ->directory('kk-photos')
                         ->storeFiles(false)
-
-                        /*
-                         * Penting: tanpa ->live(), penyelesaian upload
-                         * tidak memancarkan event 'updated' ke Livewire,
-                         * sehingga updated() (trigger OCR otomatis) tidak
-                         * terpanggil. ->live() membuat perubahan state foto
-                         * diteruskan sebagai update reaktif.
-                         */
+                        ->image()
+                        ->extraInputAttributes([
+                            'accept' => 'image/*',
+                        ])
                         ->live()
                         ->maxSize(25600)
                         ->acceptedFileTypes([
@@ -64,8 +70,8 @@ class KartuKeluargaForm
                         ->previewable()
                         ->helperText(
                             fn (string $operation): string => $operation === 'edit'
-                                ? 'Upload hanya jika ingin mengganti foto KK lama (Maks. 10 MB, JPG/PNG).'
-                                : 'Upload foto KK untuk arsip dan pembacaan OCR (Maks. 10 MB, JPG/PNG).'
+                                ? 'Upload untuk mengganti foto KK lama. Gunakan tombol "Scan OCR" di atas untuk memindai.'
+                                : 'Foto hasil kamera atau galeri akan muncul di sini. Gunakan tombol "Scan Foto dengan OCR" di atas untuk memindai.'
                         )
                         ->columnSpanFull(),
 
@@ -340,46 +346,155 @@ class KartuKeluargaForm
                         )
 
                         /*
-                         * Tambah RW.
+                         * Tambah / Kelola RW.
                          */
                         ->suffixAction(
                             Action::make('addAreaUnit')
-                                ->label('Tambah RW')
+                                ->label('Kelola RW')
                                 ->icon('heroicon-o-plus')
-                                ->tooltip('Tambah RW')
-                                ->modalHeading(
-                                    'Tambah RW'
-                                )
-                                ->modalSubmitActionLabel('Simpan')
+                                ->tooltip('Tambah / Kelola Master RW')
+                                ->modalHeading('Kelola Master RW')
+                                ->modalSubmitActionLabel('Proses')
                                 ->form([
+                                    Select::make('action_type')
+                                        ->label('Aksi')
+                                        ->options([
+                                            'create' => 'Tambah RW Baru',
+                                            'edit' => 'Ubah Nama RW',
+                                            'delete' => 'Hapus RW',
+                                        ])
+                                        ->default('create')
+                                        ->live()
+                                        ->required(),
+
+                                    Select::make('target_area_unit_id')
+                                        ->label('Pilih RW yang Ingin Diubah / Dihapus')
+                                        ->options(
+                                            fn (): array => AreaUnit::query()
+                                                ->orderBy('name')
+                                                ->get()
+                                                ->mapWithKeys(
+                                                    fn (AreaUnit $area): array => [
+                                                        $area->id => self::areaUnitLabel($area),
+                                                    ]
+                                                )
+                                                ->all()
+                                        )
+                                        ->default(function ($livewire, Get $get) {
+                                            return $livewire->data['area_unit_id'] ?? $get('area_unit_id');
+                                        })
+                                        ->visible(fn (Get $get): bool => in_array($get('action_type'), ['edit', 'delete'], true))
+                                        ->live()
+                                        ->afterStateUpdated(function ($state, Set $set): void {
+                                            if (filled($state)) {
+                                                $rw = AreaUnit::find($state);
+                                                if ($rw) {
+                                                    $set('name', $rw->name);
+                                                }
+                                            }
+                                        })
+                                        ->required(fn (Get $get): bool => in_array($get('action_type'), ['edit', 'delete'], true)),
 
                                     TextInput::make('name')
                                         ->label('Nama RW')
-                                        ->required()
+                                        ->required(fn (Get $get): bool => in_array($get('action_type'), ['create', 'edit'], true))
+                                        ->visible(fn (Get $get): bool => in_array($get('action_type'), ['create', 'edit'], true))
                                         ->maxLength(100)
-                                        ->placeholder(
-                                            'Contoh: RW 01'
-                                        ),
-
+                                        ->placeholder('Contoh: RW 01'),
                                 ])
                                 ->action(
                                     function (
                                         array $data,
-                                        Set $set
+                                        Set $set,
+                                        Get $get,
+                                        $livewire
                                     ): void {
-                                        $areaUnit = AreaUnit::query()->create([
-                                            'name' => trim(
-                                                (string) $data['name']
-                                            ),
-                                            'type' => 'rw',
-                                        ]);
+                                        $action = $data['action_type'] ?? 'create';
 
-                                        $set(
-                                            'area_unit_id',
-                                            $areaUnit->getKey()
-                                        );
+                                        if ($action === 'create') {
+                                            $name = trim((string) ($data['name'] ?? ''));
+                                            if ($name === '') {
+                                                return;
+                                            }
+                                            if (AreaUnit::where('name', $name)->exists()) {
+                                                Notification::make()
+                                                    ->danger()
+                                                    ->title('Gagal Menambahkan RW')
+                                                    ->body("{$name} sudah digunakan.")
+                                                    ->persistent()
+                                                    ->send();
 
-                                        $set('rt_id', null);
+                                                return;
+                                            }
+                                            $areaUnit = AreaUnit::query()->create([
+                                                'name' => $name,
+                                                'type' => 'rw',
+                                            ]);
+                                            $set('area_unit_id', $areaUnit->getKey());
+                                            $set('rt_id', null);
+                                            Notification::make()->success()->title('RW Berhasil Ditambahkan')->send();
+                                        } elseif ($action === 'edit') {
+                                            $targetId = $data['target_area_unit_id'] ?? null;
+                                            $name = trim((string) ($data['name'] ?? ''));
+                                            if (! $targetId || $name === '') {
+                                                return;
+                                            }
+                                            $rw = AreaUnit::find($targetId);
+                                            if (! $rw) {
+                                                return;
+                                            }
+                                            if (AreaUnit::where('name', $name)->where('id', '!=', $targetId)->exists()) {
+                                                Notification::make()
+                                                    ->danger()
+                                                    ->title('Gagal Mengubah RW')
+                                                    ->body("{$name} sudah digunakan.")
+                                                    ->persistent()
+                                                    ->send();
+
+                                                return;
+                                            }
+                                            $rw->update(['name' => $name]);
+                                            $set('area_unit_id', $rw->getKey());
+                                            Notification::make()->success()->title('Nama RW Berhasil Diperbarui')->send();
+                                        } elseif ($action === 'delete') {
+                                            $targetId = $data['target_area_unit_id'] ?? null;
+                                            $rw = AreaUnit::find($targetId);
+                                            if (! $rw) {
+                                                return;
+                                            }
+
+                                            $childRts = Rt::where('area_unit_id', $rw->id)->get();
+                                            $childRtIds = $childRts->pluck('id')->all();
+
+                                            $pendudukCount = Penduduk::whereIn('rt_id', $childRtIds)->count();
+                                            $kkCount = KartuKeluarga::whereIn('rt_id', $childRtIds)->count();
+                                            $rtCount = $childRts->count();
+
+                                            if ($pendudukCount > 0 || $kkCount > 0) {
+                                                Notification::make()
+                                                    ->danger()
+                                                    ->title('Gagal Menghapus RW')
+                                                    ->body("{$rw->name} tidak dapat dihapus karena masih digunakan oleh: {$rtCount} RT, {$pendudukCount} Penduduk, {$kkCount} Kartu Keluarga.")
+                                                    ->persistent()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            DB::transaction(function () use ($childRts, $rw): void {
+                                                foreach ($childRts as $rt) {
+                                                    $rt->delete();
+                                                }
+                                                $rw->delete();
+                                            });
+
+                                            $currentSelected = $livewire->data['area_unit_id'] ?? $get('area_unit_id');
+                                            if ($currentSelected == $targetId) {
+                                                $set('area_unit_id', null);
+                                                $set('rt_id', null);
+                                            }
+                                            Notification::make()->success()->title('RW Berhasil Dihapus')->send();
+                                        }
                                     }
                                 )
                         ),
@@ -397,8 +512,8 @@ class KartuKeluargaForm
                          * Hanya RT dari wilayah yang dipilih.
                          */
                         ->options(
-                            function (Get $get): array {
-                                $areaUnitId = $get('area_unit_id');
+                            function (Get $get, $livewire): array {
+                                $areaUnitId = $livewire->data['area_unit_id'] ?? $get('area_unit_id');
 
                                 if (blank($areaUnitId)) {
                                     return [];
@@ -426,32 +541,81 @@ class KartuKeluargaForm
                         ->live()
                         ->placeholder('Pilih RT')
                         ->disabled(
-                            fn (Get $get): bool => ! $get('area_unit_id')
+                            function (Get $get, $livewire): bool {
+                                $areaUnitId = $livewire->data['area_unit_id'] ?? $get('area_unit_id');
+
+                                return blank($areaUnitId);
+                            }
                         )
                         ->helperText(
-                            fn (Get $get): string => $get('area_unit_id')
-                                ? 'RT berdasarkan RW yang dipilih.'
-                                : 'Pilih RW terlebih dahulu.'
+                            function (Get $get, $livewire): string {
+                                $areaUnitId = $livewire->data['area_unit_id'] ?? $get('area_unit_id');
+
+                                return filled($areaUnitId)
+                                    ? 'RT berdasarkan RW yang dipilih.'
+                                    : 'Pilih RW terlebih dahulu.';
+                            }
                         )
 
                         /*
-                         * Tambah RT.
+                         * Tambah / Kelola RT.
                          */
                         ->suffixAction(
                             Action::make('addRt')
-                                ->label('Tambah RT')
+                                ->label('Kelola RT')
                                 ->icon('heroicon-o-plus')
-                                ->tooltip('Tambah RT')
-                                ->modalHeading('Tambah RT')
-                                ->modalSubmitActionLabel('Simpan')
-                                ->disabled(
-                                    fn (Get $get): bool => ! $get('area_unit_id')
-                                )
+                                ->tooltip('Tambah / Kelola Master RT')
+                                ->modalHeading('Kelola Master RT')
+                                ->modalSubmitActionLabel('Proses')
                                 ->form([
+                                    Select::make('action_type')
+                                        ->label('Aksi')
+                                        ->options([
+                                            'create' => 'Tambah RT Baru',
+                                            'edit' => 'Ubah Nomor RT',
+                                            'delete' => 'Hapus RT',
+                                        ])
+                                        ->default('create')
+                                        ->live()
+                                        ->required(),
+
+                                    Select::make('target_rt_id')
+                                        ->label('Pilih RT yang Ingin Diubah / Dihapus')
+                                        ->options(function (Get $get, $livewire): array {
+                                            $areaUnitId = $livewire->data['area_unit_id'] ?? $get('area_unit_id');
+                                            if ($areaUnitId) {
+                                                return Rt::where('area_unit_id', $areaUnitId)
+                                                    ->orderBy('number')
+                                                    ->get()
+                                                    ->mapWithKeys(fn (Rt $rt): array => [$rt->id => 'RT '.$rt->number])
+                                                    ->all();
+                                            }
+
+                                            return Rt::with('areaUnit')
+                                                ->orderBy('number')
+                                                ->get()
+                                                ->mapWithKeys(fn (Rt $rt): array => [$rt->id => 'RT '.$rt->number.' ('.($rt->areaUnit?->display_label ?? 'RW -').')'])
+                                                ->all();
+                                        })
+                                        ->default(function ($livewire, Get $get) {
+                                            return $livewire->data['rt_id'] ?? $get('rt_id');
+                                        })
+                                        ->visible(fn (Get $get): bool => in_array($get('action_type'), ['edit', 'delete'], true))
+                                        ->live()
+                                        ->afterStateUpdated(function ($state, Set $set): void {
+                                            if (filled($state)) {
+                                                $rt = Rt::find($state);
+                                                if ($rt) {
+                                                    $set('number', $rt->number);
+                                                }
+                                            }
+                                        })
+                                        ->required(fn (Get $get): bool => in_array($get('action_type'), ['edit', 'delete'], true)),
 
                                     TextInput::make('number')
                                         ->label('Nomor RT')
-                                        ->required()
+                                        ->required(fn (Get $get): bool => in_array($get('action_type'), ['create', 'edit'], true))
+                                        ->visible(fn (Get $get): bool => in_array($get('action_type'), ['create', 'edit'], true))
                                         ->maxLength(10)
                                         ->regex('/^[0-9]+$/')
                                         ->placeholder('Contoh: 01')
@@ -463,63 +627,114 @@ class KartuKeluargaForm
                                     function (
                                         array $data,
                                         Get $get,
-                                        Set $set
+                                        Set $set,
+                                        $livewire
                                     ): void {
-                                        $areaUnitId = $get('area_unit_id');
+                                        $areaUnitId = $livewire->data['area_unit_id'] ?? $get('area_unit_id');
 
-                                        if (! $areaUnitId) {
-                                            throw new \RuntimeException(
-                                                'Pilih RW terlebih dahulu.'
-                                            );
-                                        }
+                                        $action = $data['action_type'] ?? 'create';
 
-                                        $number = preg_replace(
-                                            '/\D/',
-                                            '',
-                                            (string) (
-                                                $data['number'] ?? ''
-                                            )
-                                        );
+                                        if ($action === 'create') {
+                                            if (! $areaUnitId) {
+                                                Notification::make()
+                                                    ->danger()
+                                                    ->title('Pilih RW Terlebih Dahulu')
+                                                    ->body('Silakan pilih RW pada formulir sebelum menambahkan RT baru.')
+                                                    ->send();
 
-                                        if ($number === '') {
-                                            throw new \RuntimeException(
-                                                'Nomor RT harus diisi.'
-                                            );
-                                        }
+                                                return;
+                                            }
 
-                                        /*
-                                         * Jangan membuat RT duplicate
-                                         * dalam satu wilayah.
-                                         */
-                                        $existing = Rt::query()
-                                            ->where(
-                                                'area_unit_id',
-                                                $areaUnitId
-                                            )
-                                            ->where(
-                                                'number',
-                                                $number
-                                            )
-                                            ->first();
-
-                                        if ($existing !== null) {
-                                            $set(
-                                                'rt_id',
-                                                $existing->getKey()
+                                            $number = preg_replace(
+                                                '/\D/',
+                                                '',
+                                                (string) ($data['number'] ?? '')
                                             );
 
-                                            return;
+                                            if ($number === '') {
+                                                Notification::make()
+                                                    ->danger()
+                                                    ->title('Gagal Menambahkan RT')
+                                                    ->body('Nomor RT harus diisi.')
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            $existing = Rt::query()
+                                                ->where('area_unit_id', $areaUnitId)
+                                                ->where('number', $number)
+                                                ->first();
+
+                                            if ($existing !== null) {
+                                                $set('rt_id', $existing->getKey());
+                                                Notification::make()
+                                                    ->warning()
+                                                    ->title('RT Sudah Terdaftar')
+                                                    ->body("RT {$number} sudah terdaftar pada RW yang dipilih.")
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            $rt = Rt::query()->create([
+                                                'area_unit_id' => $areaUnitId,
+                                                'number' => $number,
+                                            ]);
+
+                                            $set('rt_id', $rt->getKey());
+                                            Notification::make()->success()->title('RT Berhasil Ditambahkan')->send();
+                                        } elseif ($action === 'edit') {
+                                            $targetId = $data['target_rt_id'] ?? null;
+                                            $rt = Rt::find($targetId);
+                                            $number = preg_replace('/\D/', '', (string) ($data['number'] ?? ''));
+                                            if (! $rt || $number === '') {
+                                                return;
+                                            }
+                                            if (Rt::where('area_unit_id', $rt->area_unit_id)->where('number', $number)->where('id', '!=', $targetId)->exists()) {
+                                                Notification::make()
+                                                    ->danger()
+                                                    ->title('Gagal Mengubah RT')
+                                                    ->body("RT {$number} sudah digunakan pada RW ini.")
+                                                    ->persistent()
+                                                    ->send();
+
+                                                return;
+                                            }
+                                            $rt->update(['number' => $number]);
+                                            $set('rt_id', $rt->getKey());
+                                            Notification::make()->success()->title('Nomor RT Berhasil Diperbarui')->send();
+                                        } elseif ($action === 'delete') {
+                                            $targetId = $data['target_rt_id'] ?? null;
+                                            $rt = Rt::find($targetId);
+                                            if (! $rt) {
+                                                return;
+                                            }
+
+                                            $pendudukCount = Penduduk::where('rt_id', $rt->id)->count();
+                                            $kkCount = KartuKeluarga::where('rt_id', $rt->id)->count();
+
+                                            if ($pendudukCount > 0 || $kkCount > 0) {
+                                                Notification::make()
+                                                    ->danger()
+                                                    ->title('Gagal Menghapus RT')
+                                                    ->body("RT {$rt->number} tidak dapat dihapus karena masih digunakan oleh {$pendudukCount} Penduduk dan {$kkCount} Kartu Keluarga.")
+                                                    ->persistent()
+                                                    ->send();
+
+                                                return;
+                                            }
+
+                                            DB::transaction(function () use ($rt): void {
+                                                $rt->delete();
+                                            });
+
+                                            $currentRtSelected = $livewire->data['rt_id'] ?? $get('rt_id');
+                                            if ($currentRtSelected == $targetId) {
+                                                $set('rt_id', null);
+                                            }
+                                            Notification::make()->success()->title('RT Berhasil Dihapus')->send();
                                         }
-
-                                        $rt = Rt::query()->create([
-                                            'area_unit_id' => $areaUnitId,
-                                            'number' => $number,
-                                        ]);
-
-                                        $set(
-                                            'rt_id',
-                                            $rt->getKey()
-                                        );
                                     }
                                 )
                         ),

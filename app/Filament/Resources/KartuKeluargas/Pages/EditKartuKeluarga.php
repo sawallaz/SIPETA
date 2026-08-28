@@ -138,9 +138,29 @@ class EditKartuKeluarga extends EditRecord
             DeleteAction::make()
                 ->label('Hapus')
                 ->modalHeading('Hapus Kartu Keluarga')
-                ->modalDescription(
-                    'Kartu Keluarga hanya dapat dihapus jika tidak memiliki anggota atau data histori yang masih terhubung. Penghapusan tidak akan menghapus anggota, foto, maupun riwayat secara otomatis.'
-                )
+                ->modalDescription(function (Model $record): HtmlString {
+                    /** @var KartuKeluarga $record */
+                    $memberCount = $record->penduduks()->count();
+                    $kepala = $record->kepalaKeluarga?->full_name ?? 'Belum ditentukan';
+                    $alamat = $record->address_with_rt_rw ?? ($record->address ?? '-');
+
+                    $warning = $memberCount > 0
+                        ? '<div class="mt-3 p-3 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300 rounded-lg text-sm font-medium border border-red-200 dark:border-red-900">⚠️ PERINGATAN: Kartu Keluarga ini masih memiliki '.$memberCount.' anggota keluarga aktif. Sesuai aturan sistem, KK yang memiliki anggota atau riwayat tidak dapat dihapus permanen untuk melindungi integritas data kependudukan.</div>'
+                        : '<div class="mt-3 p-3 bg-gray-50 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded-lg text-sm">Hapus permanen hanya dapat dilakukan untuk data KK yang benar-benar kosong dan belum memiliki riwayat kependudukan.</div>';
+
+                    return new HtmlString('
+                        <div class="space-y-2 text-sm text-left">
+                            <p>Anda akan menghapus data Kartu Keluarga:</p>
+                            <div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg space-y-1">
+                                <div><strong>Nomor KK:</strong> '.e($record->kk_number).'</div>
+                                <div><strong>Kepala Keluarga:</strong> '.e($kepala).'</div>
+                                <div><strong>Alamat:</strong> '.e($alamat).'</div>
+                                <div><strong>Jumlah Anggota:</strong> '.e((string) $memberCount).' orang</div>
+                            </div>
+                            '.$warning.'
+                        </div>
+                    ');
+                })
                 ->modalSubmitActionLabel('Ya, Hapus')
                 ->modalCancelActionLabel('Batal')
                 ->before(
@@ -317,11 +337,17 @@ class EditKartuKeluarga extends EditRecord
 
         // Simpan anggota OCR langsung ke database jika ada
         if (! empty($this->ocrPreview['members'])) {
-            app(PendudukKkService::class)->saveOcrMembers(
-                $this->record,
-                $this->ocrPreview['members'],
-            );
+            try {
+                app(PendudukKkService::class)->saveOcrMembers(
+                    $this->record,
+                    $this->ocrPreview['members'],
+                );
+            } catch (Throwable $e) {
+                Log::warning('Failed saving OCR members during applyOcrResult: '.$e->getMessage());
+            }
         }
+
+        $this->record->refresh();
 
         // Isi form edit KK
         $this->form->fill($data);
@@ -331,6 +357,8 @@ class EditKartuKeluarga extends EditRecord
         $this->isOcrModalOpen = false;
         $this->ocrPreview = [];
         $this->duplicateKk = [];
+
+        $this->dispatch('$refresh');
 
         Notification::make()
             ->success()
@@ -412,22 +440,61 @@ class EditKartuKeluarga extends EditRecord
 
         if (is_array($value)) {
             foreach ($value as $uploadedFile) {
-                if ($uploadedFile instanceof TemporaryUploadedFile) {
-                    return $this->storeOcrTemporaryFile($uploadedFile);
-                }
-
-                if (is_string($uploadedFile) && filled($uploadedFile)) {
-                    $resolved = $this->normalizePhotoPath($uploadedFile);
-                    if ($resolved !== null) {
-                        return $resolved;
-                    }
+                $resolved = $this->resolveOcrDiskPath($uploadedFile);
+                if ($resolved !== null) {
+                    return $resolved;
                 }
             }
 
             return null;
         }
 
-        return $this->normalizePhotoPath($value);
+        if (is_string($value) && trim($value) !== '') {
+            $path = trim($value);
+
+            if (Storage::disk(KkPhotoService::DISK)->exists($path)) {
+                return $path;
+            }
+
+            $cleaned = preg_replace('/^livewire-file:/', '', $path);
+            $candidates = [
+                $path,
+                $cleaned,
+                'livewire-tmp/'.$cleaned,
+                'private/livewire-tmp/'.$cleaned,
+                storage_path('app/'.$path),
+                storage_path('app/'.$cleaned),
+                storage_path('app/livewire-tmp/'.$cleaned),
+                storage_path('app/private/livewire-tmp/'.$cleaned),
+                storage_path('app/kk_uploads/'.$path),
+            ];
+
+            foreach ($candidates as $candidate) {
+                if (is_file($candidate) && is_readable($candidate)) {
+                    $bytes = file_get_contents($candidate);
+                    if ($bytes !== false && $bytes !== '') {
+                        $ext = pathinfo($candidate, PATHINFO_EXTENSION) ?: 'jpg';
+                        $tempPath = 'ocr-tmp/'.Str::uuid().'.'.$ext;
+                        Storage::disk(KkPhotoService::DISK)->put($tempPath, $bytes);
+                        $this->ocrTempPath = $tempPath;
+
+                        return $tempPath;
+                    }
+                } elseif (Storage::disk('local')->exists($candidate)) {
+                    $bytes = Storage::disk('local')->get($candidate);
+                    if ($bytes !== null && $bytes !== '') {
+                        $ext = pathinfo($candidate, PATHINFO_EXTENSION) ?: 'jpg';
+                        $tempPath = 'ocr-tmp/'.Str::uuid().'.'.$ext;
+                        Storage::disk(KkPhotoService::DISK)->put($tempPath, $bytes);
+                        $this->ocrTempPath = $tempPath;
+
+                        return $tempPath;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -711,6 +778,7 @@ class EditKartuKeluarga extends EditRecord
     {
         return [
             'full_name' => $member->nama ?? '',
+            'nama' => $member->nama ?? '',
             'nik' => $member->nik ?? '',
             'gender' => $this->genderLabel($member->gender),
             'birth_place' => $member->birthPlace ?? '',

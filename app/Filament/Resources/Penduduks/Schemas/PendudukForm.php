@@ -325,13 +325,16 @@ class PendudukForm
                                     ->label('KTP Baru')
                                     ->disk(PendudukDocumentService::DISK)
                                     ->directory('penduduk-documents')
+                                    ->extraInputAttributes([
+                                        'accept' => 'image/*,application/pdf',
+                                    ])
                                     ->acceptedFileTypes(['image/jpeg', 'image/png', 'application/pdf'])
                                     ->maxSize(5120)
                                     ->storeFiles(false)
                                     ->downloadable()
                                     ->openable()
                                     ->previewable()
-                                    ->helperText('Opsional. JPG, PNG, atau PDF maksimal 5 MB.'),
+                                    ->helperText('Opsional. Foto kamera/galeri JPG, PNG, atau PDF maksimal 5 MB.'),
 
                                 // Akta Kelahiran
                                 Placeholder::make('akta_preview')
@@ -343,13 +346,16 @@ class PendudukForm
                                     ->label('Akta Kelahiran Baru')
                                     ->disk(PendudukDocumentService::DISK)
                                     ->directory('penduduk-documents')
+                                    ->extraInputAttributes([
+                                        'accept' => 'image/*,application/pdf',
+                                    ])
                                     ->acceptedFileTypes(['image/jpeg', 'image/png', 'application/pdf'])
                                     ->maxSize(5120)
                                     ->storeFiles(false)
                                     ->downloadable()
                                     ->openable()
                                     ->previewable()
-                                    ->helperText('Opsional. JPG, PNG, atau PDF maksimal 5 MB.'),
+                                    ->helperText('Opsional. Foto kamera/galeri JPG, PNG, atau PDF maksimal 5 MB.'),
                             ]),
                     ])
                     ->collapsible(),

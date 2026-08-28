@@ -6,22 +6,50 @@
     @endphp
 
     @if ($previewData)
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-                <div class="text-2xl font-bold text-gray-700">{{ $previewData['total'] ?? 0 }}</div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center dark:bg-gray-800 dark:border-gray-700">
+                <div class="text-2xl font-bold text-gray-700 dark:text-gray-200">{{ $previewData['total'] ?? 0 }}</div>
                 <div class="text-xs text-gray-500 uppercase font-semibold">Total Baris</div>
             </div>
-            <div class="bg-white rounded-lg border border-emerald-200 bg-emerald-50/30 p-4 text-center">
-                <div class="text-2xl font-bold text-emerald-600">{{ $previewData['valid'] ?? 0 }}</div>
-                <div class="text-xs text-emerald-600 uppercase font-semibold">Siap Diimpor</div>
+            <div class="bg-white rounded-lg border border-emerald-200 bg-emerald-50/30 p-4 text-center dark:bg-emerald-950/20 dark:border-emerald-800">
+                <div class="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{{ $previewData['valid'] ?? 0 }}</div>
+                <div class="text-xs text-emerald-600 dark:text-emerald-400 uppercase font-semibold">Siap Diimpor</div>
             </div>
-            <div class="bg-white rounded-lg border border-amber-200 bg-amber-50/30 p-4 text-center">
-                <div class="text-2xl font-bold text-amber-600">{{ $previewData['duplicate'] ?? 0 }}</div>
-                <div class="text-xs text-amber-600 uppercase font-semibold">Sudah Terdaftar</div>
+            <div class="bg-white rounded-lg border border-amber-200 bg-amber-50/30 p-4 text-center dark:bg-amber-950/20 dark:border-amber-800">
+                <div class="text-2xl font-bold text-amber-600 dark:text-amber-400">{{ $previewData['duplicate'] ?? 0 }}</div>
+                <div class="text-xs text-amber-600 dark:text-amber-400 uppercase font-semibold">Sudah Terdaftar</div>
             </div>
-            <div class="bg-white rounded-lg border border-red-200 bg-red-50/30 p-4 text-center">
-                <div class="text-2xl font-bold text-red-600">{{ $previewData['invalid'] ?? 0 }}</div>
-                <div class="text-xs text-red-600 uppercase font-semibold">Tidak Valid / Error</div>
+            <div class="bg-white rounded-lg border border-red-200 bg-red-50/30 p-4 text-center dark:bg-red-950/20 dark:border-red-800">
+                <div class="text-2xl font-bold text-red-600 dark:text-red-400">{{ $previewData['invalid'] ?? 0 }}</div>
+                <div class="text-xs text-red-600 dark:text-red-400 uppercase font-semibold">Tidak Valid / Error</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-6">
+            <div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-center dark:bg-gray-800/60 dark:border-gray-700">
+                <div class="text-lg font-bold text-gray-800 dark:text-gray-200">{{ $previewData['new_kk_count'] ?? 0 }}</div>
+                <div class="text-[11px] text-gray-500 uppercase font-semibold">KK Baru</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-center dark:bg-gray-800/60 dark:border-gray-700">
+                <div class="text-lg font-bold text-gray-800 dark:text-gray-200">{{ $previewData['existing_kk_count'] ?? 0 }}</div>
+                <div class="text-[11px] text-gray-500 uppercase font-semibold">KK Existing</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-center dark:bg-gray-800/60 dark:border-gray-700">
+                <div class="text-lg font-bold text-emerald-600 dark:text-emerald-400">{{ $previewData['rt_valid_count'] ?? 0 }}</div>
+                <div class="text-[11px] text-gray-500 uppercase font-semibold">RT Terbaca</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-center dark:bg-gray-800/60 dark:border-gray-700">
+                <div class="text-lg font-bold text-emerald-600 dark:text-emerald-400">{{ $previewData['rw_valid_count'] ?? 0 }}</div>
+                <div class="text-[11px] text-gray-500 uppercase font-semibold">RW Terbaca</div>
+            </div>
+            <div class="bg-gray-50 rounded-lg border border-gray-200 p-3 text-center dark:bg-gray-800/60 dark:border-gray-700">
+                @php
+                    $rtRwInvalid = ($previewData['rt_invalid_count'] ?? 0) + ($previewData['rw_invalid_count'] ?? 0);
+                @endphp
+                <div class="text-lg font-bold {{ $rtRwInvalid > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300' }}">
+                    {{ $rtRwInvalid }}
+                </div>
+                <div class="text-[11px] text-gray-500 uppercase font-semibold">RT/RW Invalid</div>
             </div>
         </div>
 

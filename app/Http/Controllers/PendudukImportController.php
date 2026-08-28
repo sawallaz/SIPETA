@@ -15,9 +15,19 @@ class PendudukImportController extends Controller
 
     private const ALLOWED_MIME_TYPES = [
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/zip',
+        'application/octet-stream',
+        'application/x-zip-compressed',
+        'application/vnd.ms-excel',
+        'application/x-excel',
+        'application/wps-office.xlsx',
         'text/csv',
         'application/csv',
         'text/plain',
+        'text/x-csv',
+        'application/x-csv',
+        'text/comma-separated-values',
+        'text/x-comma-separated-values',
     ];
 
     private const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -209,6 +219,12 @@ class PendudukImportController extends Controller
             'valid' => $validationResult['valid_count'],
             'duplicate' => $validationResult['duplicate_count'],
             'invalid' => $validationResult['invalid_count'],
+            'new_kk' => $validationResult['new_kk_count'] ?? 0,
+            'existing_kk' => $validationResult['existing_kk_count'] ?? 0,
+            'rt_valid' => $validationResult['rt_valid_count'] ?? 0,
+            'rt_invalid' => $validationResult['rt_invalid_count'] ?? 0,
+            'rw_valid' => $validationResult['rw_valid_count'] ?? 0,
+            'rw_invalid' => $validationResult['rw_invalid_count'] ?? 0,
             'preview_rows' => $validationResult['preview_rows'] ?? [],
             'errors' => $validationResult['errors'] ?? [],
         ];
@@ -255,6 +271,8 @@ class PendudukImportController extends Controller
                 'success' => true,
                 'status' => $result['status'],
                 'total_imported' => $result['imported'],
+                'created_kk' => $result['created_kk'] ?? 0,
+                'existing_kk' => $result['existing_kk'] ?? 0,
                 'total_skipped' => $duplicateCount + $invalidCount,
                 'duplicate_count' => $duplicateCount,
                 'invalid_count' => $invalidCount,

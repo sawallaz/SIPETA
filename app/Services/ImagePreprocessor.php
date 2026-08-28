@@ -145,6 +145,9 @@ class ImagePreprocessor
             throw new OcrProcessingException($message);
         }
 
+        // Simpan debug original image
+        @$this->filesystem->disk(self::DISK)->put('ocr-original.png', $bytes);
+
         $transforms = [];
         $warnings = [];
 
@@ -183,6 +186,51 @@ class ImagePreprocessor
         }
 
         $transforms[] = 'grayscale';
+
+        /*
+         * ============================================================
+         * 3b. LIGHT MARGIN AUTO-TRIM (Document Boundary Detection)
+         * ============================================================
+         */
+        $boundaries = $this->detectDocumentBoundaries($image);
+        if ($boundaries !== null) {
+            $cropped = imagecreatetruecolor($boundaries['w'], $boundaries['h']);
+            if ($cropped !== false) {
+                imagecopy(
+                    $cropped,
+                    $image,
+                    0, 0,
+                    $boundaries['x'], $boundaries['y'],
+                    $boundaries['w'], $boundaries['h']
+                );
+                imagedestroy($image);
+                $image = $cropped;
+                $width = $boundaries['w'];
+                $height = $boundaries['h'];
+                $transforms[] = 'margin_trim';
+            }
+        }
+        $croppedPng = $this->encodePng($image);
+        @$this->filesystem->disk(self::DISK)->put('ocr-cropped.png', $croppedPng);
+
+        /*
+         * ============================================================
+         * 3c. DESKEW / ROTATION CORRECTION
+         * ============================================================
+         */
+        $detectedSkew = $this->detectSkewAngle($image);
+        if (abs($detectedSkew) >= 0.5) {
+            $deskewed = $this->applyDeskew($image, $detectedSkew);
+            if ($deskewed !== null) {
+                imagedestroy($image);
+                $image = $deskewed;
+                $width = imagesx($image);
+                $height = imagesy($image);
+                $transforms[] = 'deskew_'.round($detectedSkew, 1).'deg';
+            }
+        }
+        $deskewedPng = $this->encodePng($image);
+        @$this->filesystem->disk(self::DISK)->put('ocr-deskewed.png', $deskewedPng);
 
         /*
          * ============================================================
@@ -341,6 +389,25 @@ class ImagePreprocessor
          * compression loss tambahan sebelum masuk Tesseract.
          */
 
+        // Simpan debug table crop (Tabel Anggota) secara spesifik
+        $tableBounds = $this->detectMemberTableBoundaries($image);
+        if ($tableBounds !== null) {
+            $tableCrop = imagecreatetruecolor($tableBounds['w'], $tableBounds['h']);
+            if ($tableCrop !== false) {
+                imagecopy(
+                    $tableCrop,
+                    $image,
+                    0, 0,
+                    $tableBounds['x'], $tableBounds['y'],
+                    $tableBounds['w'], $tableBounds['h']
+                );
+                $tablePng = $this->encodePng($tableCrop);
+                @$this->filesystem->disk(self::DISK)->put('ocr-table-members.png', $tablePng);
+                @$this->filesystem->disk(self::DISK)->put('ocr-table-processed.png', $tablePng);
+                imagedestroy($tableCrop);
+            }
+        }
+
         $outputName = pathinfo(
             $sourcePath,
             PATHINFO_FILENAME,
@@ -348,7 +415,8 @@ class ImagePreprocessor
 
         $png = $this->encodePng($image);
 
-        // Simpan debug image untuk verifikasi visual kualitas pra-pemrosesan OCR
+        // Simpan debug artifacts
+        @$this->filesystem->disk(self::DISK)->put('ocr-preprocessed.png', $png);
         @file_put_contents(storage_path('app/debug_ocr_processed.png'), $png);
 
         imagedestroy($image);
@@ -735,5 +803,338 @@ class ImagePreprocessor
             'OCR preprocessing '.$outcome,
             $context,
         );
+    }
+
+    /**
+     * Deteksi batas dokumen secara cerdas dan konservatif.
+     * Hanya membuang margin luar (background meja / border hitam kamera)
+     * tanpa pernah memotong bagian header, tabel, kolom, atau tanda tangan.
+     *
+     * @return array{x: int, y: int, w: int, h: int}|null
+     */
+    private function detectDocumentBoundaries(\GdImage $image): ?array
+    {
+        $w = imagesx($image);
+        $h = imagesy($image);
+
+        if ($w < 800 || $h < 600) {
+            return null;
+        }
+
+        // Buat thumbnail kecil untuk profiling cepat
+        $thumbW = 400;
+        $thumbH = (int) round($h * ($thumbW / $w));
+        $thumb = imagecreatetruecolor($thumbW, $thumbH);
+        if ($thumb === false) {
+            return null;
+        }
+
+        imagecopyresampled($thumb, $image, 0, 0, 0, 0, $thumbW, $thumbH, $w, $h);
+        imagefilter($thumb, IMG_FILTER_GRAYSCALE);
+
+        // Ambil sampel luminance di 4 sudut luar (masing-masing 15x15 px)
+        $cornerSamples = [];
+        for ($cy = 0; $cy < 15; $cy++) {
+            for ($cx = 0; $cx < 15; $cx++) {
+                $cornerSamples[] = (imagecolorat($thumb, $cx, $cy) & 0xFF);
+                $cornerSamples[] = (imagecolorat($thumb, $thumbW - 1 - $cx, $cy) & 0xFF);
+                $cornerSamples[] = (imagecolorat($thumb, $cx, $thumbH - 1 - $cy) & 0xFF);
+                $cornerSamples[] = (imagecolorat($thumb, $thumbW - 1 - $cx, $thumbH - 1 - $cy) & 0xFF);
+            }
+        }
+        sort($cornerSamples);
+        $bgLuminance = $cornerSamples[(int) (count($cornerSamples) * 0.5)];
+
+        // Jika sudut sudah terang (kertas dokumen memenuhi seluruh frame / scan bersih), tidak perlu crop
+        if ($bgLuminance >= 140) {
+            imagedestroy($thumb);
+
+            return null;
+        }
+
+        $threshold = max(70, $bgLuminance + 30);
+
+        // Cari batas atas & bawah
+        $minY = 0;
+        $maxY = $thumbH - 1;
+        for ($y = 0; $y < $thumbH; $y++) {
+            $rowBright = 0;
+            for ($x = (int) ($thumbW * 0.2); $x < (int) ($thumbW * 0.8); $x++) {
+                if ((imagecolorat($thumb, $x, $y) & 0xFF) > $threshold) {
+                    $rowBright++;
+                }
+            }
+            if ($rowBright > ($thumbW * 0.6 * 0.35)) {
+                $minY = $y;
+                break;
+            }
+        }
+
+        for ($y = $thumbH - 1; $y >= $minY; $y--) {
+            $rowBright = 0;
+            for ($x = (int) ($thumbW * 0.2); $x < (int) ($thumbW * 0.8); $x++) {
+                if ((imagecolorat($thumb, $x, $y) & 0xFF) > $threshold) {
+                    $rowBright++;
+                }
+            }
+            if ($rowBright > ($thumbW * 0.6 * 0.35)) {
+                $maxY = $y;
+                break;
+            }
+        }
+
+        // Cari batas kiri & kanan
+        $minX = 0;
+        $maxX = $thumbW - 1;
+        for ($x = 0; $x < $thumbW; $x++) {
+            $colBright = 0;
+            for ($y = (int) ($thumbH * 0.2); $y < (int) ($thumbH * 0.8); $y++) {
+                if ((imagecolorat($thumb, $x, $y) & 0xFF) > $threshold) {
+                    $colBright++;
+                }
+            }
+            if ($colBright > ($thumbH * 0.6 * 0.35)) {
+                $minX = $x;
+                break;
+            }
+        }
+
+        for ($x = $thumbW - 1; $x >= $minX; $x--) {
+            $colBright = 0;
+            for ($y = (int) ($thumbH * 0.2); $y < (int) ($thumbH * 0.8); $y++) {
+                if ((imagecolorat($thumb, $x, $y) & 0xFF) > $threshold) {
+                    $colBright++;
+                }
+            }
+            if ($colBright > ($thumbH * 0.6 * 0.35)) {
+                $maxX = $x;
+                break;
+            }
+        }
+
+        imagedestroy($thumb);
+
+        $scaleX = $w / $thumbW;
+        $scaleY = $h / $thumbH;
+
+        $origMinX = (int) floor($minX * $scaleX);
+        $origMaxX = (int) ceil($maxX * $scaleX);
+        $origMinY = (int) floor($minY * $scaleY);
+        $origMaxY = (int) ceil($maxY * $scaleY);
+
+        // Berikan safety padding konservatif (2%) keluar agar garis dokumen tidak pernah tersentuh
+        $padX = (int) round($w * 0.02);
+        $padY = (int) round($h * 0.02);
+
+        $finalMinX = max(0, $origMinX - $padX);
+        $finalMaxX = min($w - 1, $origMaxX + $padX);
+        $finalMinY = max(0, $origMinY - $padY);
+        $finalMaxY = min($h - 1, $origMaxY + $padY);
+
+        $cropW = $finalMaxX - $finalMinX + 1;
+        $cropH = $finalMaxY - $finalMinY + 1;
+
+        // Guard: jika area dokumen terdeteksi sudah mencakup >= 93% canvas, tidak perlu crop
+        if ($cropW >= $w * 0.93 && $cropH >= $h * 0.93) {
+            return null;
+        }
+
+        // Guard: jika area dokumen terdeteksi < 50% canvas (terlalu kecil atau anomali), jangan crop
+        if ($cropW < $w * 0.50 || $cropH < $h * 0.50) {
+            return null;
+        }
+
+        return [
+            'x' => $finalMinX,
+            'y' => $finalMinY,
+            'w' => $cropW,
+            'h' => $cropH,
+        ];
+    }
+
+    /**
+     * Deteksi sudut rotasi/kemiringan dokumen (deskew) berbasis variansi proyeksi horizontal.
+     * Menguji sudut dari -4.0° hingga +4.0° dengan interval 0.5°.
+     */
+    public function detectSkewAngle(\GdImage $image): float
+    {
+        $w = imagesx($image);
+        $h = imagesy($image);
+
+        if ($w < 600 || $h < 400) {
+            return 0.0;
+        }
+
+        $size = 300;
+        $centerSquare = imagecreatetruecolor($size, $size);
+        if ($centerSquare === false) {
+            return 0.0;
+        }
+
+        $srcX = (int) (($w - $h * 0.7) / 2);
+        $srcY = (int) ($h * 0.15);
+        $srcSize = (int) ($h * 0.7);
+        imagecopyresampled($centerSquare, $image, 0, 0, $srcX, $srcY, $size, $size, $srcSize, $srcSize);
+        imagefilter($centerSquare, IMG_FILTER_GRAYSCALE);
+
+        $bestAngle = 0.0;
+        $maxVariance = 0.0;
+        $baseVariance = 0.0;
+
+        for ($angle = -4.0; $angle <= 4.0; $angle += 0.5) {
+            $white = imagecolorallocate($centerSquare, 255, 255, 255);
+            $rotated = $angle === 0.0 ? $centerSquare : imagerotate($centerSquare, $angle, $white);
+            if ($rotated === false) {
+                continue;
+            }
+
+            $rw = imagesx($rotated);
+            $rh = imagesy($rotated);
+
+            // Sample secara stabil inner 200x200 square
+            $cropX = (int) (($rw - 200) / 2);
+            $cropY = (int) (($rh - 200) / 2);
+
+            $rowSums = [];
+            $totalSum = 0.0;
+            $count = 0;
+
+            for ($y = $cropY; $y < $cropY + 200; $y += 2) {
+                $sum = 0;
+                for ($x = $cropX; $x < $cropX + 200; $x += 2) {
+                    $val = imagecolorat($rotated, $x, $y) & 0xFF;
+                    if ($val < 120) {
+                        $sum++;
+                    }
+                }
+                $rowSums[] = $sum;
+                $totalSum += $sum;
+                $count++;
+            }
+
+            if ($angle !== 0.0) {
+                imagedestroy($rotated);
+            }
+
+            if ($count === 0) {
+                continue;
+            }
+
+            $mean = $totalSum / $count;
+            $variance = 0.0;
+            foreach ($rowSums as $rs) {
+                $variance += ($rs - $mean) * ($rs - $mean);
+            }
+
+            if ($angle === 0.0) {
+                $baseVariance = $variance;
+            }
+
+            if ($variance > $maxVariance) {
+                $maxVariance = $variance;
+                $bestAngle = $angle;
+            }
+        }
+
+        imagedestroy($centerSquare);
+
+        // Hanya terapkan rotasi jika kenaikan variansi signifikan (> 10%)
+        if (abs($bestAngle) >= 0.5 && $baseVariance > 0 && ($maxVariance / $baseVariance) > 1.10) {
+            return $bestAngle;
+        }
+
+        return 0.0;
+    }
+
+    /**
+     * Terapkan rotasi deskew pada gambar dokumen.
+     */
+    public function applyDeskew(\GdImage $image, float $angle): ?\GdImage
+    {
+        $white = imagecolorallocate($image, 255, 255, 255);
+        $rotated = imagerotate($image, -$angle, $white);
+
+        return $rotated !== false ? $rotated : null;
+    }
+
+    /**
+     * Deteksi bounding box tabel anggota (Tabel 1) secara otomatis berbasis kepadatan garis horizontal.
+     *
+     * @return array{x: int, y: int, w: int, h: int}|null
+     */
+    public function detectMemberTableBoundaries(\GdImage $image): ?array
+    {
+        $w = imagesx($image);
+        $h = imagesy($image);
+
+        if ($w < 600 || $h < 400) {
+            return null;
+        }
+
+        $tw = 600;
+        $th = (int) round($h * ($tw / $w));
+        $thumb = imagecreatetruecolor($tw, $th);
+        if ($thumb === false) {
+            return null;
+        }
+
+        imagecopyresampled($thumb, $image, 0, 0, 0, 0, $tw, $th, $w, $h);
+
+        // Ukur densitas pixel gelap per baris
+        $rowDensity = [];
+        for ($y = 0; $y < $th; $y++) {
+            $dark = 0;
+            for ($x = (int) ($tw * 0.05); $x < (int) ($tw * 0.95); $x++) {
+                $val = imagecolorat($thumb, $x, $y) & 0xFF;
+                if ($val < 110) {
+                    $dark++;
+                }
+            }
+            $rowDensity[$y] = $dark;
+        }
+
+        imagedestroy($thumb);
+
+        $threshold = $tw * 0.9 * 0.25;
+        $tableTopY = null;
+        $tableBottomY = null;
+
+        for ($y = (int) ($th * 0.18); $y <= (int) ($th * 0.40); $y++) {
+            if ($rowDensity[$y] > $threshold) {
+                $tableTopY = $y;
+                break;
+            }
+        }
+
+        for ($y = (int) ($th * 0.42); $y <= (int) ($th * 0.70); $y++) {
+            if ($rowDensity[$y] > $threshold) {
+                $tableBottomY = $y;
+                break;
+            }
+        }
+
+        $scaleY = $h / $th;
+
+        if ($tableTopY !== null && $tableBottomY !== null && $tableBottomY > $tableTopY) {
+            $origY1 = (int) floor($tableTopY * $scaleY);
+            $origY2 = (int) ceil($tableBottomY * $scaleY);
+        } else {
+            // Proporsional fallback aman (20% s/d 50%)
+            $origY1 = (int) round($h * 0.20);
+            $origY2 = (int) round($h * 0.50);
+        }
+
+        // Safety padding 1.5%
+        $padY = (int) round($h * 0.015);
+        $finalY1 = max(0, $origY1 - $padY);
+        $finalY2 = min($h - 1, $origY2 + $padY);
+        $finalH = $finalY2 - $finalY1 + 1;
+
+        return [
+            'x' => 0,
+            'y' => $finalY1,
+            'w' => $w,
+            'h' => $finalH,
+        ];
     }
 }

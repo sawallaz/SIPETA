@@ -34,4 +34,9 @@ class Rt extends Model
     {
         return $this->hasMany(Penduduk::class);
     }
+
+    public function kartuKeluargas(): HasMany
+    {
+        return $this->hasMany(KartuKeluarga::class);
+    }
 }

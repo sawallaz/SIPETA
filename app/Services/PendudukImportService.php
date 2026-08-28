@@ -9,6 +9,7 @@ use App\Enums\KkAnggotaStatus;
 use App\Enums\MaritalStatus;
 use App\Enums\OcrOutcome;
 use App\Enums\ResidentStatus;
+use App\Models\AreaUnit;
 use App\Models\Education;
 use App\Models\KartuKeluarga;
 use App\Models\KkAnggota;
@@ -459,23 +460,115 @@ class PendudukImportService
     }
 
     /**
-     * Resolve the reviewed `rt` (e.g. "001") to an existing Rt by number.
-     * Numbers are normalized (leading zeros) to match the seeded `rts` rows
-     * ("01".."09"). When the same number exists under several area units the
-     * first (by id) is chosen — the KK card carries no area unit, so the
-     * area-unit is deliberately kept out of scope.
+     * Resolve AreaUnit (RW / Lingkungan) from input string.
      */
-    private function resolveRt(string $value): ?Rt
+    private function resolveAreaUnit(?string $rwValue): ?AreaUnit
     {
-        $value = trim($value);
-
-        if ($value === '' || preg_match('/^\d{1,3}$/', $value) !== 1) {
+        if (blank($rwValue)) {
             return null;
         }
 
-        $number = str_pad((string) ((int) $value), 2, '0', STR_PAD_LEFT);
+        $raw = trim((string) $rwValue);
 
-        return Rt::query()->where('number', $number)->orderBy('id')->first();
+        // Strip float decimals if read from numeric cells e.g. "2.0" or "02.0" -> "2" or "02"
+        $cleanRaw = preg_replace('/[.,]0+$/', '', $raw);
+
+        // 1. Direct exact / case-insensitive match on name
+        $unit = AreaUnit::query()
+            ->where(function ($q) use ($raw, $cleanRaw) {
+                $q->whereRaw('UPPER(name) = ?', [mb_strtoupper($raw)])
+                    ->orWhereRaw('UPPER(name) = ?', [mb_strtoupper($cleanRaw)]);
+            })
+            ->first();
+
+        if ($unit !== null) {
+            return $unit;
+        }
+
+        // 2. Numeric normalization on name (e.g. "01", "001", "1", "RW 01", "RW.01", "RW 1")
+        $digits = preg_replace('/\D/', '', $cleanRaw);
+        if (filled($digits) && strlen($digits) <= 3) {
+            $num = (int) $digits;
+            $twoDigits = str_pad((string) $num, 2, '0', STR_PAD_LEFT);
+            $rawDigit = (string) $num;
+
+            $unit = AreaUnit::query()
+                ->where(function ($q) use ($twoDigits, $rawDigit) {
+                    $q->whereRaw('UPPER(name) = ?', ['RW '.$twoDigits])
+                        ->orWhereRaw('UPPER(name) = ?', ['RW '.$rawDigit])
+                        ->orWhereRaw('UPPER(name) = ?', ['RW.'.$twoDigits])
+                        ->orWhereRaw('UPPER(name) = ?', ['RW.'.$rawDigit])
+                        ->orWhereRaw('UPPER(name) = ?', ['LINGKUNGAN '.$twoDigits])
+                        ->orWhereRaw('UPPER(name) = ?', ['LINGKUNGAN '.$rawDigit])
+                        ->orWhereRaw('UPPER(name) LIKE ?', ['RW '.$twoDigits.' %'])
+                        ->orWhereRaw('UPPER(name) LIKE ?', ['RW '.$twoDigits.' /%'])
+                        ->orWhereRaw('UPPER(name) LIKE ?', ['RW '.$rawDigit.' /%'])
+                        ->orWhereRaw('UPPER(name) LIKE ?', ['%RW '.$twoDigits.'%']);
+                })
+                ->first();
+
+            if ($unit !== null) {
+                return $unit;
+            }
+
+            // Match on code
+            $unit = AreaUnit::query()
+                ->where('code', $twoDigits)
+                ->orWhere('code', $rawDigit)
+                ->first();
+
+            if ($unit !== null) {
+                return $unit;
+            }
+        }
+
+        // 3. Fallback partial substring match
+        return AreaUnit::query()
+            ->where('name', 'like', "%{$cleanRaw}%")
+            ->orWhere('name', 'like', "%{$raw}%")
+            ->first();
+    }
+
+    /**
+     * Resolve RT within an explicitly matched RW when RW is specified.
+     * If RW is provided, it STRICTLY restricts the search to that RW
+     * without silently falling back to a different RW.
+     */
+    private function resolveRt(string $value, ?string $rwValue = null): ?Rt
+    {
+        $value = trim($value);
+
+        // Strip float decimals if read from numeric cells e.g. "1.0" or "01.0"
+        $cleanValue = preg_replace('/[.,]0+$/', '', $value);
+
+        // Strip non-digit if contains e.g. "RT 01" or "RT.01" or "01"
+        $digits = preg_replace('/\D/', '', $cleanValue);
+        if ($digits === null || $digits === '' || strlen($digits) > 3) {
+            return null;
+        }
+
+        $num = (int) $digits;
+        $twoDigits = str_pad((string) $num, 2, '0', STR_PAD_LEFT);
+        $threeDigits = str_pad((string) $num, 3, '0', STR_PAD_LEFT);
+        $raw = (string) $num;
+        $candidates = array_unique([$twoDigits, $threeDigits, $raw]);
+
+        if (filled($rwValue)) {
+            $areaUnit = $this->resolveAreaUnit($rwValue);
+
+            if ($areaUnit === null) {
+                // Specified RW was not found in master data -> STRICT: return null, do not guess
+                return null;
+            }
+
+            // Strictly find RT under this specific AreaUnit
+            return Rt::query()
+                ->whereIn('number', $candidates)
+                ->where('area_unit_id', $areaUnit->id)
+                ->first();
+        }
+
+        return Rt::query()->whereIn('number', $candidates)->orderBy('id')->first();
     }
 
     /**
@@ -558,26 +651,56 @@ class PendudukImportService
 
                 $headers = null;
                 $rows = [];
+                $rowNumber = 0;
 
                 foreach ($sheet->getRowIterator() as $row) {
+                    $rowNumber++;
                     $values = array_map(static fn ($value): mixed => $value instanceof \DateTimeInterface ? $value->format('Y-m-d') : $value, $row->toArray());
+                    $nonEmptyValues = array_filter($values, static fn ($value): bool => trim((string) $value) !== '');
+
                     if ($headers === null) {
-                        $headers = array_map(static fn ($value): string => trim((string) $value), $values);
-                        if ($headers === [] || count(array_filter($headers, static fn (string $header): bool => $header !== '')) === 0) {
-                            $headers = null;
+                        // Skip completely empty rows or title rows with < 2 non-empty cells unless it's the only row
+                        if (count($nonEmptyValues) < 2) {
+                            continue;
                         }
+
+                        $rawHeaders = array_map(static fn ($value): string => trim((string) $value), $values);
+                        // Trim trailing empty header columns
+                        while (! empty($rawHeaders) && end($rawHeaders) === '') {
+                            array_pop($rawHeaders);
+                        }
+
+                        if (empty($rawHeaders)) {
+                            continue;
+                        }
+
+                        // Deduplicate headers to prevent array_combine collisions
+                        $seenHeaders = [];
+                        $uniqueHeaders = [];
+                        foreach ($rawHeaders as $idx => $hdr) {
+                            $baseName = $hdr !== '' ? $hdr : 'Kolom_'.($idx + 1);
+                            if (isset($seenHeaders[$baseName])) {
+                                $seenHeaders[$baseName]++;
+                                $uniqueHeaders[] = $baseName.'_'.$seenHeaders[$baseName];
+                            } else {
+                                $seenHeaders[$baseName] = 1;
+                                $uniqueHeaders[] = $baseName;
+                            }
+                        }
+                        $headers = $uniqueHeaders;
 
                         continue;
                     }
 
-                    if ($row->isEmpty() || count(array_filter($values, static fn ($value): bool => trim((string) $value) !== '')) === 0) {
+                    if ($row->isEmpty() || count($nonEmptyValues) === 0) {
                         continue;
                     }
 
                     $values = array_pad($values, count($headers), null);
+                    $rowData = array_combine($headers, array_slice($values, 0, count($headers))) ?: [];
                     $rows[] = array_merge(
-                        array_combine($headers, array_slice($values, 0, count($headers))) ?: [],
-                        ['__row_number' => count($rows) + 2],
+                        $rowData,
+                        ['__row_number' => $rowNumber],
                     );
                 }
 
@@ -672,7 +795,7 @@ class PendudukImportService
             }
         }
 
-        $required = ['nik', 'full_name', 'kk_number', 'gender', 'birth_date', 'rt', 'rw', 'address'];
+        $required = ['nik', 'full_name', 'kk_number'];
         $mappedHeaders = array_values($mapping);
         $unrecognized = array_values(array_filter($headers, static fn (string $h): bool => ! in_array($h, $mappedHeaders, true)));
 
@@ -684,15 +807,66 @@ class PendudukImportService
         ];
     }
 
-    /** @return array{valid_count: int, duplicate_count: int, invalid_count: int, valid_rows: array<int, array<string, mixed>>, preview_rows: array<int, array<string, mixed>>, errors: array<int, array<int, string>>} */
+    /** @return array{valid_count: int, duplicate_count: int, invalid_count: int, new_kk_count: int, existing_kk_count: int, rt_valid_count: int, rt_invalid_count: int, rw_valid_count: int, rw_invalid_count: int, valid_rows: array<int, array<string, mixed>>, preview_rows: array<int, array<string, mixed>>, errors: array<int, array<int, string>>} */
     public function validateRows(array $rows, array $mapping, array $customMapping = []): array
     {
         $validRows = [];
         $previewRows = [];
         $errors = [];
         $seenNiks = [];
+        $newKkMap = [];
+        $existingKkMap = [];
         $duplicateCount = 0;
         $invalidCount = 0;
+        $rtValidCount = 0;
+        $rtInvalidCount = 0;
+        $rwValidCount = 0;
+        $rwInvalidCount = 0;
+
+        // Pre-aggregate KK metadata across rows for multi-row KK support
+        $kkMetadata = [];
+        foreach ($rows as $r) {
+            $normRow = $this->normalizeImportRow($r, $mapping, $customMapping);
+            $kkNum = $this->normalizeNumericCode($normRow['kk_number'] ?? null);
+            if (! $kkNum || strlen($kkNum) !== 16) {
+                continue;
+            }
+            if (! isset($kkMetadata[$kkNum])) {
+                $kkMetadata[$kkNum] = [
+                    'address' => null,
+                    'rt' => null,
+                    'rw' => null,
+                    'postal_code' => null,
+                    'notes' => null,
+                ];
+            }
+            $isKepala = in_array(strtoupper(trim((string) ($normRow['family_relation'] ?? ''))), ['KEPALA_KELUARGA', 'KEPALA KELUARGA', 'KEPALA'], true);
+
+            // Address
+            if (filled($normRow['address'] ?? null)) {
+                if ($isKepala || $kkMetadata[$kkNum]['address'] === null) {
+                    $kkMetadata[$kkNum]['address'] = trim((string) $normRow['address']);
+                }
+            }
+            // RT
+            if (filled($normRow['rt'] ?? null)) {
+                if ($isKepala || $kkMetadata[$kkNum]['rt'] === null) {
+                    $kkMetadata[$kkNum]['rt'] = trim((string) $normRow['rt']);
+                }
+            }
+            // RW
+            if (filled($normRow['rw'] ?? null)) {
+                if ($isKepala || $kkMetadata[$kkNum]['rw'] === null) {
+                    $kkMetadata[$kkNum]['rw'] = trim((string) $normRow['rw']);
+                }
+            }
+            // Postal Code
+            if (filled($normRow['postal_code'] ?? null)) {
+                if ($isKepala || $kkMetadata[$kkNum]['postal_code'] === null) {
+                    $kkMetadata[$kkNum]['postal_code'] = trim((string) $normRow['postal_code']);
+                }
+            }
+        }
 
         foreach ($rows as $index => $row) {
             $normalized = $this->normalizeImportRow($row, $mapping, $customMapping);
@@ -719,30 +893,48 @@ class PendudukImportService
                 $rowErrors[] = 'Nomor KK wajib terdiri dari 16 digit.';
             }
 
-            // 4. Gender Validation
-            $normalized['gender'] = $this->normalizeGender($normalized['gender'] ?? null);
-            if ($normalized['gender'] === null) {
-                $rowErrors[] = 'Jenis kelamin tidak valid.';
+            // 4. Gender Validation (Opsional pada import minimal)
+            $rawGender = $normalized['gender'] ?? null;
+            if (filled($rawGender)) {
+                $normalized['gender'] = $this->normalizeGender($rawGender);
+                if ($normalized['gender'] === null) {
+                    $rowErrors[] = 'Jenis kelamin tidak valid.';
+                }
+            } else {
+                $normalized['gender'] = Gender::LAKI_LAKI->value;
             }
 
             // 5. Status Perkawinan
             $rawMaritalStatus = trim((string) ($normalized['marital_status'] ?? ''));
-            $normalized['marital_status'] = $this->normalizeMaritalStatus($rawMaritalStatus);
-            if ($rawMaritalStatus !== '' && $normalized['marital_status'] === null) {
-                $rowErrors[] = 'Status perkawinan tidak valid.';
+            if ($rawMaritalStatus !== '') {
+                $normalized['marital_status'] = $this->normalizeMaritalStatus($rawMaritalStatus);
+                if ($normalized['marital_status'] === null) {
+                    $rowErrors[] = 'Status perkawinan tidak valid.';
+                }
+            } else {
+                $normalized['marital_status'] = MaritalStatus::BELUM_KAWIN->value;
             }
 
             // 6. Hubungan Keluarga
             $rawFamilyRelation = trim((string) ($normalized['family_relation'] ?? ''));
-            $normalized['family_relation'] = $this->normalizeFamilyRelation($rawFamilyRelation);
-            if ($rawFamilyRelation !== '' && $normalized['family_relation'] === null) {
-                $rowErrors[] = 'Hubungan keluarga tidak valid.';
+            if ($rawFamilyRelation !== '') {
+                $normalized['family_relation'] = $this->normalizeFamilyRelation($rawFamilyRelation);
+                if ($normalized['family_relation'] === null) {
+                    $rowErrors[] = 'Hubungan keluarga tidak valid.';
+                }
+            } else {
+                $normalized['family_relation'] = FamilyRelation::LAINNYA->value;
             }
 
-            // 7. Tanggal Lahir
-            $normalized['birth_date'] = $this->normalizeBirthDateFromRow($normalized['birth_date'] ?? null);
-            if ($normalized['birth_date'] === null) {
-                $rowErrors[] = 'Tanggal lahir tidak valid.';
+            // 7. Tanggal Lahir (Opsional pada import minimal)
+            $rawBirthDate = $normalized['birth_date'] ?? null;
+            if (filled($rawBirthDate)) {
+                $normalized['birth_date'] = $this->normalizeBirthDateFromRow($rawBirthDate);
+                if ($normalized['birth_date'] === null) {
+                    $rowErrors[] = 'Tanggal lahir tidak valid.';
+                }
+            } else {
+                $normalized['birth_date'] = '2000-01-01';
             }
 
             // 8. Status Penduduk & Tanggal Status
@@ -751,20 +943,65 @@ class PendudukImportService
             $statusDate = $this->normalizeBirthDateFromRow($normalized['active_at'] ?? $normalized['moved_at'] ?? $normalized['deceased_at'] ?? null);
             $normalized['status_date'] = $statusDate;
 
-            // 9. Alamat & Wilayah (RT, RW, Lingkungan)
-            $normalized['address'] = trim(preg_replace('/\s+/', ' ', (string) ($normalized['address'] ?? '')) ?? '');
-            foreach (['rt' => 'RT', 'rw' => 'RW', 'address' => 'Alamat'] as $field => $label) {
-                if (blank($normalized[$field] ?? null)) {
-                    $rowErrors[] = $label.' wajib diisi.';
+            // 9. Alamat & Wilayah (RT, RW, Lingkungan) - Mendukung multi-row inheritance
+            $kkNum = $normalized['kk_number'];
+            $meta = ($kkNum && isset($kkMetadata[$kkNum])) ? $kkMetadata[$kkNum] : [];
+            $existingKkRecord = null;
+            if ($kkNum && preg_match('/^\d{16}$/', (string) $kkNum)) {
+                $existingKkRecord = KartuKeluarga::where('kk_number', $kkNum)->first();
+            }
+
+            $effectiveAddress = filled($normalized['address'] ?? null) ? trim((string) $normalized['address']) : ($meta['address'] ?? null);
+            if (blank($effectiveAddress) && $existingKkRecord !== null && filled($existingKkRecord->address) && $existingKkRecord->address !== '-') {
+                $effectiveAddress = $existingKkRecord->address;
+            }
+            $normalized['address'] = $effectiveAddress ?: '-';
+
+            $effectiveRw = filled($normalized['rw'] ?? null) ? trim((string) $normalized['rw']) : ($meta['rw'] ?? null);
+            $effectiveRt = filled($normalized['rt'] ?? null) ? trim((string) $normalized['rt']) : ($meta['rt'] ?? null);
+            if (blank($effectiveRt) && $existingKkRecord !== null && $existingKkRecord->rt_id) {
+                $effectiveRt = (string) ($existingKkRecord->rt?->number ?? '');
+            }
+            $normalized['rt'] = $effectiveRt ?? '';
+            if (filled($normalized['rt']) || filled($effectiveRw)) {
+                $resolvedRt = $this->resolveRt((string) $normalized['rt'], $effectiveRw);
+                if ($resolvedRt === null) {
+                    if (filled($effectiveRw)) {
+                        $areaUnit = $this->resolveAreaUnit($effectiveRw);
+                        if ($areaUnit === null) {
+                            $rowErrors[] = 'RW tidak ditemukan di master data (\''.$effectiveRw.'\').';
+                            $rwInvalidCount++;
+                        } else {
+                            $rowErrors[] = 'Kombinasi RT \''.$normalized['rt'].'\' pada RW \''.$effectiveRw.'\' tidak ditemukan di database.';
+                            $rtInvalidCount++;
+                        }
+                    } else {
+                        $rowErrors[] = 'RT tidak valid atau tidak ditemukan di database (\''.$normalized['rt'].'\').';
+                        $rtInvalidCount++;
+                    }
+                } else {
+                    $rtValidCount++;
+                    if ($resolvedRt->area_unit_id) {
+                        $rwValidCount++;
+                    } else {
+                        $rwInvalidCount++;
+                    }
+                }
+            } else {
+                $defaultRt = Rt::query()->orderBy('id')->first();
+                if ($defaultRt !== null) {
+                    $rtValidCount++;
                 }
             }
 
-            // 10. KK Check in Database
-            $kk = filled($normalized['kk_number'] ?? null) ? KartuKeluarga::where('kk_number', $normalized['kk_number'])->first() : null;
-            if ($kk === null) {
-                $rowErrors[] = 'Nomor KK tidak ditemukan di database.';
-            } elseif ($kk->rt_id === null) {
-                $rowErrors[] = 'KK belum memiliki RT di database.';
+            // 10. KK Deduplication & Auto-creation check
+            if ($normalized['kk_number'] !== null && preg_match('/^\d{16}$/', (string) $normalized['kk_number'])) {
+                $kkNum = (string) $normalized['kk_number'];
+                if ($existingKkRecord !== null) {
+                    $existingKkMap[$kkNum] = true;
+                } else {
+                    $newKkMap[$kkNum] = true;
+                }
             }
 
             // 11. Duplicate & Validity evaluation
@@ -816,6 +1053,12 @@ class PendudukImportService
             'valid_count' => count($validRows),
             'duplicate_count' => $duplicateCount,
             'invalid_count' => $invalidCount,
+            'new_kk_count' => count($newKkMap),
+            'existing_kk_count' => count($existingKkMap),
+            'rt_valid_count' => $rtValidCount,
+            'rt_invalid_count' => $rtInvalidCount,
+            'rw_valid_count' => $rwValidCount,
+            'rw_invalid_count' => $rwInvalidCount,
             'valid_rows' => $validRows,
             'preview_rows' => $previewRows,
             'errors' => $errors,
@@ -826,8 +1069,8 @@ class PendudukImportService
     private function importHeaderAliases(): array
     {
         $aliases = [
-            'nik' => ['nik', 'no nik', 'nomor nik', 'no. nik', 'no_nik', 'nomor induk kependudukan', 'nik penduduk', 'no ktp', 'nomor ktp', 'no. ktp', 'no_ktp', 'nik/no. ktp', 'nik/ktp'],
-            'full_name' => ['nama lengkap', 'nama', 'nama warga', 'nama penduduk', 'nama anggota', 'nama kepala keluarga', 'nama_lengkap', 'nama-lengkap', 'nama_penduduk', 'nama_warga'],
+            'nik' => ['nik', 'no nik', 'nomor nik', 'no. nik', 'no_nik', 'nomor induk kependudukan', 'nik penduduk', 'no ktp', 'nomor ktp', 'no. ktp', 'no_ktp', 'nik/no. ktp', 'nik/ktp', 'nik dummy', 'nik dummy penduduk', 'nik_dummy', 'nomor induk', 'ktp'],
+            'full_name' => ['nama lengkap', 'nama', 'nama warga', 'nama penduduk', 'nama anggota', 'nama kepala keluarga', 'nama_lengkap', 'nama-lengkap', 'nama_penduduk', 'nama_warga', 'nama_anggota'],
             'kk_number' => ['no kk', 'nomor kk', 'no. kk', 'no_kk', 'kartu keluarga', 'no kartu keluarga', 'nomor kartu keluarga', 'no. kartu keluarga', 'no_kartu_keluarga', 'kk', 'nomor kartu keluarga (kk)'],
             'gender' => ['jk', 'jenis kelamin', 'gender', 'j kelamin', 'j. kelamin', 'sex', 'jenis_kelamin'],
             'birth_date' => ['tgl lahir', 'tanggal lahir', 'tgl. lahir', 'tgl_lahir', 'tanggal_lahir', 'tanggal lahir penduduk', 'tgl lahir penduduk', 'birth date', 'tgl_lahir_penduduk'],
@@ -841,10 +1084,19 @@ class PendudukImportService
             'moved_at' => ['tanggal pindah', 'tgl pindah', 'tgl. pindah', 'tgl_pindah', 'tanggal_pindah'],
             'deceased_at' => ['tanggal meninggal', 'tgl meninggal', 'tgl. meninggal', 'tgl_meninggal', 'tanggal_meninggal'],
             'family_relation' => ['status hubungan dalam keluarga', 'hubungan keluarga', 'hubungan dalam keluarga', 'shdk', 'status hubungan', 'status dalam kk', 'family relation', 'hubungan_keluarga', 'status_hubungan'],
-            'rt' => ['rt', 'nomor rt', 'no rt', 'no. rt', 'no_rt'],
-            'rw' => ['rw', 'nomor rw', 'no rw', 'no. rw', 'no_rw'],
+            'rt' => ['rt', 'nomor rt', 'no rt', 'no. rt', 'no_rt', 'rukun tetangga', 'rt number', 'rt no', 'nama rt', 'rt/rw', 'rt rw', 'rt-rw'],
+            'rw' => ['rw', 'nomor rw', 'no rw', 'no. rw', 'no_rw', 'rukun warga', 'rw number', 'rw no', 'dusun', 'lingkungan', 'rw lingkungan', 'lingkungan rw', 'rw dusun', 'dusun rw', 'nama rw', 'nama lingkungan', 'nama dusun', 'area unit', 'wilayah'],
             'lingkungan' => ['lingkungan', 'nama lingkungan', 'lingkungan/dusun', 'dusun', 'nama_lingkungan', 'lingkungan_rw'],
             'address' => ['alamat', 'alamat rumah', 'alamat tinggal', 'domisili', 'alamat domisili', 'alamat lengkap', 'alamat_rumah'],
+            'citizenship' => ['kewarganegaraan', 'kewarganegaraan wni wna', 'warganegara', 'warga negara', 'citizenship'],
+            'father_name' => ['nama ayah', 'ayah', 'nama bapak', 'bapak', 'father name', 'father'],
+            'mother_name' => ['nama ibu', 'ibu', 'mother name', 'mother'],
+            'kelurahan' => ['desa/kelurahan', 'desa kelurahan', 'kelurahan/desa', 'kelurahan', 'desa', 'nama kelurahan', 'nama desa'],
+            'kecamatan' => ['kecamatan', 'nama kecamatan'],
+            'kabupaten' => ['kabupaten/kota', 'kabupaten kota', 'kabupaten', 'kota', 'nama kabupaten', 'nama kota'],
+            'provinsi' => ['provinsi', 'propinsi', 'nama provinsi'],
+            'postal_code' => ['kode pos', 'kodepos', 'pos', 'postal code'],
+            'row_no' => ['no', 'nomor', 'no.', 'nomor urut', 'no urut', 'no_urut'],
             'notes' => ['catatan', 'keterangan', 'ket', 'notes', 'catatan_tambahan'],
         ];
 
@@ -875,6 +1127,15 @@ class PendudukImportService
             }
         }
 
+        // Auto-split combined RT/RW format like "001/002" or "01/02" if RW is unmapped/empty
+        if (filled($normalized['rt'] ?? null) && blank($normalized['rw'] ?? null)) {
+            $rawRt = trim((string) $normalized['rt']);
+            if (preg_match('/^(?:RT)?\s*0*(\d{1,3})\s*[\/\-]\s*(?:RW)?\s*0*(\d{1,3})$/i', $rawRt, $m)) {
+                $normalized['rt'] = $m[1];
+                $normalized['rw'] = $m[2];
+            }
+        }
+
         return $normalized;
     }
 
@@ -882,17 +1143,76 @@ class PendudukImportService
      * Import rows penduduk dari array data (bukan OCR job).
      * Excel/CSV hanya menjadi data source; persistensi tetap di service ini.
      *
-     * @return array{status: string, imported: int, duplicates: int, invalids: int, message: string, details: array<int, mixed>}
+     * @return array{status: string, imported: int, created_kk: int, existing_kk: int, duplicates: int, invalids: int, message: string, details: array<int, mixed>}
+     */
+    /**
+     * Import rows penduduk dari array data (bukan OCR job).
+     * Excel/CSV hanya menjadi data source; persistensi tetap di service ini.
+     *
+     * @return array{status: string, imported: int, created_kk: int, existing_kk: int, duplicates: int, invalids: int, message: string, details: array<int, mixed>}
      */
     public function importRows(array $rows, ?User $operator = null): array
     {
         $imported = 0;
         $duplicates = 0;
         $invalids = 0;
+        $kkCache = [];
+        $createdKkCount = 0;
+        $existingKkCount = 0;
 
-        DB::transaction(function () use ($rows, &$imported, &$duplicates, &$invalids): void {
+        // Pre-aggregate KK metadata across rows for each KK number
+        $kkMetadata = [];
+        foreach ($rows as $r) {
+            $kkNum = $this->normalizeNumericCode($r['kk_number'] ?? null);
+            if (! $kkNum || strlen($kkNum) !== 16) {
+                continue;
+            }
+            if (! isset($kkMetadata[$kkNum])) {
+                $kkMetadata[$kkNum] = [
+                    'address' => null,
+                    'rt' => null,
+                    'rw' => null,
+                    'postal_code' => null,
+                    'notes' => null,
+                ];
+            }
+            $isKepala = in_array(strtoupper(trim((string) ($r['family_relation'] ?? ''))), ['KEPALA_KELUARGA', 'KEPALA KELUARGA', 'KEPALA'], true);
+
+            // Address
+            if (filled($r['address'] ?? null)) {
+                if ($isKepala || $kkMetadata[$kkNum]['address'] === null) {
+                    $kkMetadata[$kkNum]['address'] = trim((string) $r['address']);
+                }
+            }
+            // RT
+            if (filled($r['rt'] ?? null)) {
+                if ($isKepala || $kkMetadata[$kkNum]['rt'] === null) {
+                    $kkMetadata[$kkNum]['rt'] = trim((string) $r['rt']);
+                }
+            }
+            // RW
+            if (filled($r['rw'] ?? null)) {
+                if ($isKepala || $kkMetadata[$kkNum]['rw'] === null) {
+                    $kkMetadata[$kkNum]['rw'] = trim((string) $r['rw']);
+                }
+            }
+            // Postal Code
+            if (filled($r['postal_code'] ?? null)) {
+                if ($isKepala || $kkMetadata[$kkNum]['postal_code'] === null) {
+                    $kkMetadata[$kkNum]['postal_code'] = trim((string) $r['postal_code']);
+                }
+            }
+            // Notes
+            if (filled($r['notes'] ?? null)) {
+                if ($isKepala || $kkMetadata[$kkNum]['notes'] === null) {
+                    $kkMetadata[$kkNum]['notes'] = trim((string) $r['notes']);
+                }
+            }
+        }
+
+        DB::transaction(function () use ($rows, $kkMetadata, &$imported, &$duplicates, &$invalids, &$kkCache, &$createdKkCount, &$existingKkCount): void {
             foreach ($rows as $row) {
-                $result = $this->importRowFromArray($row);
+                $result = $this->importRowFromArray($row, $kkMetadata, $kkCache, $createdKkCount, $existingKkCount);
                 match ($result['status']) {
                     'imported' => $imported++,
                     'duplicate' => $duplicates++,
@@ -904,9 +1224,16 @@ class PendudukImportService
         return [
             'status' => 'completed',
             'imported' => $imported,
+            'created_kk' => $createdKkCount,
+            'existing_kk' => $existingKkCount,
             'duplicates' => $duplicates,
             'invalids' => $invalids,
-            'message' => sprintf('%d penduduk berhasil diimpor.', $imported),
+            'message' => sprintf(
+                '%d penduduk berhasil diimpor (%d KK baru dibuat, %d KK yang sudah ada digunakan).',
+                $imported,
+                $createdKkCount,
+                $existingKkCount
+            ),
             'details' => [],
         ];
     }
@@ -921,10 +1248,19 @@ class PendudukImportService
     }
 
     /**
-     * Import satu row dari array data.
+     * Import satu row dari array data dengan auto-create & cache KK.
+     *
+     * @param  array<string, mixed>  $row
+     * @param  array<string, array<string, ?string>>  $kkMetadata
+     * @param  array<string, KartuKeluarga>  $kkCache
      */
-    private function importRowFromArray(array $row): array
-    {
+    private function importRowFromArray(
+        array $row,
+        array $kkMetadata = [],
+        array &$kkCache = [],
+        int &$createdKkCount = 0,
+        int &$existingKkCount = 0
+    ): array {
         $nik = $this->normalizeNumericCode($row['nik'] ?? null);
         $fullName = trim((string) ($row['full_name'] ?? ''));
         $kkNumber = $this->normalizeNumericCode($row['kk_number'] ?? null);
@@ -934,10 +1270,62 @@ class PendudukImportService
             return ['status' => 'duplicate', 'nik' => $nik];
         }
 
-        // Cek KK ada
-        $kk = KartuKeluarga::where('kk_number', $kkNumber)->first();
-        if (! $kk) {
-            return ['status' => 'invalid', 'nik' => $nik, 'kk' => $kkNumber];
+        if (! $kkNumber || strlen($kkNumber) !== 16) {
+            return ['status' => 'invalid', 'nik' => $nik, 'reason' => 'Nomor KK tidak valid'];
+        }
+
+        // Dapatkan KK dari cache, query existing, atau buat KK baru
+        if (! isset($kkCache[$kkNumber])) {
+            $kk = KartuKeluarga::where('kk_number', $kkNumber)->first();
+            $meta = $kkMetadata[$kkNumber] ?? [];
+            $rtInput = $meta['rt'] ?? ($row['rt'] ?? '');
+            $rwInput = $meta['rw'] ?? ($row['rw'] ?? null);
+            $addressInput = $meta['address'] ?? ($row['address'] ?? null);
+            $postalCodeInput = $meta['postal_code'] ?? ($row['postal_code'] ?? null);
+            $notesInput = $meta['notes'] ?? ($row['notes'] ?? null);
+
+            if ($kk !== null) {
+                // Enrich existing KK if fields are empty
+                $dirty = false;
+                if (($kk->address === '-' || blank($kk->address)) && filled($addressInput)) {
+                    $kk->address = $addressInput;
+                    $dirty = true;
+                }
+                if (blank($kk->postal_code) && filled($postalCodeInput)) {
+                    $kk->postal_code = $postalCodeInput;
+                    $dirty = true;
+                }
+                if ($dirty) {
+                    $kk->save();
+                }
+                $kkCache[$kkNumber] = $kk;
+                $existingKkCount++;
+            } else {
+                $rt = $this->resolveRt((string) $rtInput, $rwInput);
+                if ($rt === null) {
+                    if (filled($rtInput) || filled($rwInput)) {
+                        return ['status' => 'invalid', 'nik' => $nik, 'reason' => 'RT/RW tidak valid atau tidak ditemukan di database'];
+                    }
+                    $rt = Rt::query()->orderBy('id')->first();
+                    if ($rt === null) {
+                        return ['status' => 'invalid', 'nik' => $nik, 'reason' => 'Belum ada data Master RT di sistem'];
+                    }
+                }
+
+                $address = filled($addressInput) ? trim((string) $addressInput) : '-';
+
+                $kk = KartuKeluarga::create([
+                    'kk_number' => $kkNumber,
+                    'address' => $address,
+                    'rt_id' => $rt->id,
+                    'postal_code' => filled($postalCodeInput) ? trim((string) $postalCodeInput) : null,
+                    'notes' => filled($notesInput) ? trim((string) $notesInput) : 'Diimpor otomatis dari data Excel/CSV',
+                ]);
+                $kkCache[$kkNumber] = $kk;
+                $createdKkCount++;
+            }
+        } else {
+            $kk = $kkCache[$kkNumber];
         }
 
         // Persiapan field
@@ -945,10 +1333,13 @@ class PendudukImportService
         if (filled($row['gender'] ?? null) && $gender === null) {
             throw new InvalidArgumentException('Jenis kelamin tidak valid.');
         }
+        $gender ??= Gender::LAKI_LAKI->value;
+
         $birthDate = isset($row['birth_date']) ? $this->normalizeBirthDateFromRow($row['birth_date']) : null;
         if (filled($row['birth_date'] ?? null) && $birthDate === null) {
             throw new InvalidArgumentException('Tanggal lahir tidak valid.');
         }
+        $birthDate ??= '2000-01-01';
         $birthPlace = filled($row['birth_place'] ?? null) ? trim((string) $row['birth_place']) : '-';
         $religionId = $this->resolveLookupId(Religion::class, (string) ($row['religion'] ?? 'Islam'));
         $educationId = $this->resolveLookupId(Education::class, (string) ($row['education'] ?? 'Tidak/Belum Sekolah'));

@@ -48,6 +48,21 @@
             @endif
         </div>
 
+        {{-- Global Loading State for Long Running Actions --}}
+        <div wire:loading wire:target="importData" class="mb-6 p-4 bg-primary/10 border border-primary/20 rounded-lg">
+            <div class="flex items-center gap-3 text-primary font-medium text-sm">
+                <x-filament::loading-indicator class="h-5 w-5 animate-spin" />
+                <span>Mengimpor data penduduk ke dalam sistem... Mohon jangan menutup halaman ini.</span>
+            </div>
+        </div>
+
+        <div wire:loading wire:target="confirmMapping, loadPreview" class="mb-6 p-4 bg-primary/10 border border-primary/20 rounded-lg">
+            <div class="flex items-center gap-3 text-primary font-medium text-sm">
+                <x-filament::loading-indicator class="h-5 w-5 animate-spin" />
+                <span>Memvalidasi kolom dan menyiapkan data preview... Mohon tunggu.</span>
+            </div>
+        </div>
+
         {{-- Footer Actions --}}
         <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200">
             @if ($page->currentStep !== 'upload')
@@ -57,6 +72,7 @@
                     color="gray"
                     icon="heroicon-o-arrow-left"
                     wire:click="cancelImport"
+                    wire:loading.attr="disabled"
                 >
                     Batal
                 </x-filament::button>
@@ -68,6 +84,8 @@
                     color="primary"
                     icon="heroicon-o-arrow-right"
                     wire:click="mapColumns"
+                    wire:loading.attr="disabled"
+                    wire:target="mapColumns, selectSheet"
                 >
                     Lanjut ke Mapping
                 </x-filament::button>
@@ -77,6 +95,8 @@
                     color="primary"
                     icon="heroicon-o-arrow-right"
                     wire:click="confirmMapping"
+                    wire:loading.attr="disabled"
+                    wire:target="confirmMapping, mapColumns"
                 >
                     Lanjut ke Preview
                 </x-filament::button>
@@ -86,6 +106,8 @@
                     color="primary"
                     icon="heroicon-o-arrow-right"
                     wire:click="prepareImport"
+                    wire:loading.attr="disabled"
+                    wire:target="prepareImport"
                 >
                     Lanjut ke Import
                 </x-filament::button>
@@ -95,6 +117,8 @@
                     color="primary"
                     icon="heroicon-o-check"
                     wire:click="importData"
+                    wire:loading.attr="disabled"
+                    wire:target="importData"
                 >
                     Impor Data
                 </x-filament::button>
@@ -104,6 +128,7 @@
                     color="primary"
                     icon="heroicon-o-arrow-path"
                     wire:click="cancelImport"
+                    wire:loading.attr="disabled"
                 >
                     Import File Lain
                 </x-filament::button>

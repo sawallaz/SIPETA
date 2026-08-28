@@ -28,6 +28,7 @@ use App\Services\PendudukDocumentService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -36,10 +37,12 @@ use Filament\Resources\Pages\CreateRecord;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -76,6 +79,12 @@ class CreateKartuKeluarga extends CreateRecord
 
     /** Early-cycle guard so re-entrant state updates during a scan are no-ops. */
     protected bool $scanning = false;
+
+    /** Transient OCR preview payload shown in the review modal before applying to form. */
+    public array $ocrPreview = [];
+
+    /** Controls visibility of the OCR Review Modal overlay. */
+    public bool $isOcrModalOpen = false;
 
     /**
      * Path OCR temp (on kk_uploads disk) that must be cleaned after scan.
@@ -139,29 +148,17 @@ class CreateKartuKeluarga extends CreateRecord
     }
 
     /**
-     * Triggered by Livewire whenever a bound page property changes — the
-     * "Upload Photo -> Automatic Reading" step: as soon as the KK photo is
-     * uploaded the scan runs automatically so the form can be reviewed.
+     * Livewire updated hook. OCR is strictly manual and must NOT auto-trigger
+     * on photo upload so the operator can preview or change the photo first.
      */
     public function updated(string $property): void
     {
-        if (
-            $property !== 'data.kk_photo'
-            && ! str_starts_with($property, 'data.kk_photo.')
-        ) {
-            return;
-        }
-
-        if (blank($this->data['kk_photo'] ?? null)) {
-            return;
-        }
-
-        $this->scanFoto();
+        // Passive upload: preview only. OCR is triggered via "Scan Foto dengan OCR" button.
     }
 
     /**
-     * Manual re-scan trigger (header action). Re-runs reading on the current
-     * photo, replacing any previously auto-filled values.
+     * Manual scan trigger (header action & field action). Runs OCR reading on the current
+     * photo, filling or replacing scanned values.
      */
     public function scanFoto(): void
     {
@@ -175,7 +172,7 @@ class CreateKartuKeluarga extends CreateRecord
                 ->title('Foto KK belum siap')
                 ->body(
                     'Foto Kartu Keluarga belum tersedia sebagai file yang dapat diproses. '
-                    .'Tunggu sampai upload selesai, lalu coba Scan Foto KK kembali.'
+                    .'Silakan pilih atau upload foto KK terlebih dahulu, lalu tekan Scan Foto dengan OCR.'
                 )
                 ->send();
 
@@ -268,7 +265,7 @@ class CreateKartuKeluarga extends CreateRecord
     {
         return [
             Action::make('scanFotoKk')
-                ->label('Scan Foto KK')
+                ->label('Scan Foto dengan OCR')
                 ->icon('heroicon-m-camera')
                 ->color('primary')
                 ->action(fn () => $this->scanFoto()),
@@ -285,7 +282,79 @@ class CreateKartuKeluarga extends CreateRecord
         return $schema->components([
             ...KartuKeluargaForm::components(),
             $this->anggotaSection(),
+
+            Placeholder::make('ocr_modal_overlay')
+                ->hiddenLabel()
+                ->dehydrated(false)
+                ->content(fn (): Htmlable => $this->renderOcrModal())
+                ->columnSpanFull(),
         ]);
+    }
+
+    public function closeOcrModal(): void
+    {
+        $this->isOcrModalOpen = false;
+        $this->ocrPreview = [];
+    }
+
+    public function applyOcrResult(): void
+    {
+        if (blank($this->ocrPreview)) {
+            $this->isOcrModalOpen = false;
+
+            return;
+        }
+
+        if (! empty($this->ocrPreview['is_kk_conflict'])) {
+            $conflictMsg = $this->ocrPreview['conflict_reason'] ?? 'Nomor KK atau NIK hasil OCR sudah terdaftar pada KK lain dan tidak dapat diterapkan ke formulir ini.';
+            Notification::make()
+                ->danger()
+                ->title('⚠️ Nomor KK / NIK Sudah Terdaftar di Sistem!')
+                ->body($conflictMsg)
+                ->send();
+
+            return;
+        }
+
+        $data = $this->data ?? [];
+
+        if (filled($this->ocrPreview['kk_number'] ?? null)) {
+            $data['kk_number'] = $this->ocrPreview['kk_number'];
+        }
+
+        if (filled($this->ocrPreview['address'] ?? null)) {
+            $data['address'] = $this->ocrPreview['address'];
+        }
+
+        if (filled($this->ocrPreview['postal_code'] ?? null)) {
+            $data['postal_code'] = $this->ocrPreview['postal_code'];
+        }
+
+        if (blank($data['rt_id'] ?? null) && filled($this->ocrPreview['rt'] ?? null)) {
+            $rt = $this->resolveRt($this->ocrPreview['rt']);
+
+            if ($rt !== null) {
+                $data['area_unit_id'] = $rt->area_unit_id;
+                $data['rt_id'] = $rt->id;
+            }
+        }
+
+        if (! empty($this->ocrPreview['members'])) {
+            $data['anggota'] = $this->ocrPreview['members'];
+        }
+
+        $this->form->fill($data);
+        $this->data = $data;
+
+        $this->isOcrModalOpen = false;
+        $this->ocrPreview = [];
+        $this->duplicateKk = [];
+
+        Notification::make()
+            ->success()
+            ->title('Data hasil OCR berhasil diterapkan')
+            ->body('Data Kartu Keluarga dan daftar anggota telah dimasukkan ke formulir.')
+            ->send();
     }
 
     /**
@@ -378,22 +447,61 @@ class CreateKartuKeluarga extends CreateRecord
 
         if (is_array($value)) {
             foreach ($value as $uploadedFile) {
-                if ($uploadedFile instanceof TemporaryUploadedFile) {
-                    return $this->storeOcrTemporaryFile($uploadedFile);
-                }
-
-                if (is_string($uploadedFile) && filled($uploadedFile)) {
-                    $resolved = $this->normalizePhotoPath($uploadedFile);
-                    if ($resolved !== null) {
-                        return $resolved;
-                    }
+                $resolved = $this->resolveOcrDiskPath($uploadedFile);
+                if ($resolved !== null) {
+                    return $resolved;
                 }
             }
 
             return null;
         }
 
-        return $this->normalizePhotoPath($value);
+        if (is_string($value) && trim($value) !== '') {
+            $path = trim($value);
+
+            if (Storage::disk(KkPhotoService::DISK)->exists($path)) {
+                return $path;
+            }
+
+            $cleaned = preg_replace('/^livewire-file:/', '', $path);
+            $candidates = [
+                $path,
+                $cleaned,
+                'livewire-tmp/'.$cleaned,
+                'private/livewire-tmp/'.$cleaned,
+                storage_path('app/'.$path),
+                storage_path('app/'.$cleaned),
+                storage_path('app/livewire-tmp/'.$cleaned),
+                storage_path('app/private/livewire-tmp/'.$cleaned),
+                storage_path('app/kk_uploads/'.$path),
+            ];
+
+            foreach ($candidates as $candidate) {
+                if (is_file($candidate) && is_readable($candidate)) {
+                    $bytes = file_get_contents($candidate);
+                    if ($bytes !== false && $bytes !== '') {
+                        $ext = pathinfo($candidate, PATHINFO_EXTENSION) ?: 'jpg';
+                        $tempPath = 'ocr-tmp/'.Str::uuid().'.'.$ext;
+                        Storage::disk(KkPhotoService::DISK)->put($tempPath, $bytes);
+                        $this->ocrTempPath = $tempPath;
+
+                        return $tempPath;
+                    }
+                } elseif (Storage::disk('local')->exists($candidate)) {
+                    $bytes = Storage::disk('local')->get($candidate);
+                    if ($bytes !== null && $bytes !== '') {
+                        $ext = pathinfo($candidate, PATHINFO_EXTENSION) ?: 'jpg';
+                        $tempPath = 'ocr-tmp/'.Str::uuid().'.'.$ext;
+                        Storage::disk(KkPhotoService::DISK)->put($tempPath, $bytes);
+                        $this->ocrTempPath = $tempPath;
+
+                        return $tempPath;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -562,37 +670,115 @@ class CreateKartuKeluarga extends CreateRecord
             $this->checkDuplicateKk($parsed->kkNumber);
         }
 
-        if (empty($this->duplicateKk)) {
-            $parsedNiks = [];
-            foreach ($parsed->members as $member) {
-                $nik = preg_replace('/\D/', '', (string) ($member->nik ?? ''));
-                if (strlen($nik) === 16) {
-                    $parsedNiks[] = $nik;
-                }
-            }
-            if (! empty($parsedNiks)) {
-                $conflictResident = Penduduk::query()
-                    ->with(['kartuKeluarga.rt.areaUnit'])
-                    ->whereIn('nik', $parsedNiks)
-                    ->whereNotNull('kk_id')
+        $isKkConflict = false;
+        $conflictKkData = null;
+        $conflictReason = null;
+
+        // 1. Check if parsed KK number belongs to another KK in database
+        if (filled($parsed->kkNumber)) {
+            $cleanNumber = preg_replace('/\D/', '', (string) $parsed->kkNumber);
+            if (strlen($cleanNumber) === 16) {
+                $conflictRecord = KartuKeluarga::query()
+                    ->with(['rt.areaUnit'])
+                    ->where('kk_number', $cleanNumber)
                     ->first();
 
-                if ($conflictResident !== null && $conflictResident->kartuKeluarga !== null) {
-                    $otherKk = $conflictResident->kartuKeluarga;
-                    $this->duplicateKk = [
-                        'id' => $otherKk->getKey(),
-                        'number' => (string) $otherKk->kk_number,
-                        'kepala' => $otherKk->kepalaKeluarga?->full_name ?? 'Belum ditentukan',
-                        'address' => (string) ($otherKk->address ?? '-'),
-                        'rt' => $otherKk->nomor_rt ? 'RT '.$otherKk->nomor_rt : '-',
-                        'rw' => (string) ($otherKk->nama_wilayah ?? '-'),
-                        'wilayah' => $otherKk->rt_rw_label ?? '-',
-                        'member_count' => $otherKk->jumlah_anggota.' orang',
-                        'view_url' => KartuKeluargaResource::getUrl('view', ['record' => $otherKk]),
-                        'edit_url' => KartuKeluargaResource::getUrl('edit', ['record' => $otherKk]),
+                if ($conflictRecord !== null) {
+                    $isKkConflict = true;
+                    $conflictKkData = [
+                        'id' => $conflictRecord->getKey(),
+                        'number' => (string) $conflictRecord->kk_number,
+                        'kepala' => $conflictRecord->kepalaKeluarga?->full_name ?? 'Belum ditentukan',
+                        'address' => (string) ($conflictRecord->address ?? '-'),
+                        'rt' => $conflictRecord->nomor_rt ? 'RT '.$conflictRecord->nomor_rt : '-',
+                        'rw' => (string) ($conflictRecord->nama_wilayah ?? '-'),
+                        'member_count' => $conflictRecord->jumlah_anggota.' orang',
+                        'view_url' => KartuKeluargaResource::getUrl('view', ['record' => $conflictRecord]),
+                        'edit_url' => KartuKeluargaResource::getUrl('edit', ['record' => $conflictRecord]),
+                    ];
+                    $conflictReason = 'Nomor KK '.$conflictRecord->kk_number.' atas nama '.($conflictRecord->kepalaKeluarga?->full_name ?? 'Belum ditentukan').' sudah ada di database (ID: #'.$conflictRecord->id.').';
+                    $this->duplicateKk = $conflictKkData;
+                }
+            }
+        }
+
+        // 2. Check if any member's NIK belongs to another KK in database
+        $parsedNiks = [];
+        foreach ($parsed->members as $member) {
+            $nik = preg_replace('/\D/', '', (string) ($member->nik ?? ''));
+            if (strlen($nik) === 16) {
+                $parsedNiks[] = $nik;
+            }
+        }
+
+        if (! empty($parsedNiks)) {
+            $conflictResident = Penduduk::query()
+                ->with(['kartuKeluarga.rt.areaUnit'])
+                ->whereIn('nik', $parsedNiks)
+                ->whereNotNull('kk_id')
+                ->first();
+
+            if ($conflictResident !== null && $conflictResident->kartuKeluarga !== null) {
+                $otherKk = $conflictResident->kartuKeluarga;
+                $isKkConflict = true;
+                $conflictKkData = [
+                    'id' => $otherKk->getKey(),
+                    'number' => (string) $otherKk->kk_number,
+                    'kepala' => $otherKk->kepalaKeluarga?->full_name ?? 'Belum ditentukan',
+                    'address' => (string) ($otherKk->address ?? '-'),
+                    'rt' => $otherKk->nomor_rt ? 'RT '.$otherKk->nomor_rt : '-',
+                    'rw' => (string) ($otherKk->nama_wilayah ?? '-'),
+                    'member_count' => $otherKk->jumlah_anggota.' orang',
+                    'view_url' => KartuKeluargaResource::getUrl('view', ['record' => $otherKk]),
+                    'edit_url' => KartuKeluargaResource::getUrl('edit', ['record' => $otherKk]),
+                ];
+                $conflictReason = 'NIK '.$conflictResident->nik.' ('.$conflictResident->full_name.') sudah terdaftar pada KK lain (No KK: '.$otherKk->kk_number.', Kepala: '.($otherKk->kepalaKeluarga?->full_name ?? 'Belum ditentukan').', ID: #'.$otherKk->id.').';
+                $this->duplicateKk = $conflictKkData;
+            }
+        }
+
+        // Build member list with resident lookup
+        $members = [];
+        foreach ($parsed->members as $member) {
+            $memberData = $this->memberFromParsed($member);
+
+            if (
+                ! empty($memberData['nik'])
+                && preg_match('/^\d{16}$/', $memberData['nik'])
+            ) {
+                $existingResident = Penduduk::query()
+                    ->with(['kartuKeluarga'])
+                    ->where('nik', $memberData['nik'])
+                    ->first();
+
+                if ($existingResident !== null) {
+                    $memberData['existing_resident'] = [
+                        'id' => $existingResident->id,
+                        'full_name' => $existingResident->full_name,
+                        'current_kk' => $existingResident->kartuKeluarga?->kk_number ?? '-',
                     ];
                 }
             }
+
+            $members[] = $memberData;
+        }
+
+        $this->ocrPreview = [
+            'kk_number' => $parsed->kkNumber,
+            'address' => $parsed->address,
+            'postal_code' => $parsed->postalCode,
+            'rt' => $parsed->rt,
+            'confidence' => $parsed->confidence,
+            'members' => $members,
+            'is_kk_conflict' => $isKkConflict,
+            'conflict_kk' => $conflictKkData,
+            'conflict_reason' => $conflictReason,
+        ];
+
+        $this->isOcrModalOpen = true;
+
+        if ($parsed->kkNumber !== null) {
+            $data['kk_number'] = $parsed->kkNumber;
         }
 
         if ($parsed->address !== null) {
@@ -603,13 +789,6 @@ class CreateKartuKeluarga extends CreateRecord
             $data['postal_code'] = $parsed->postalCode;
         }
 
-        /*
-         * Wilayah adalah milik KK, bukan milik tiap anggota.
-         *
-         * RT hasil pemindaian mengisi wilayah pada tingkat KK sehingga
-         * operator tidak perlu memilih RT berulang kali per anggota.
-         * Nilai yang sudah dipilih operator tidak ditimpa.
-         */
         if (blank($data['rt_id'] ?? null)) {
             $rt = $this->resolveRt($parsed->rt);
 
@@ -619,13 +798,307 @@ class CreateKartuKeluarga extends CreateRecord
             }
         }
 
-        $data['anggota'] = array_map(
-            fn (ParsedResident $member): array => $this->memberFromParsed($member),
-            $parsed->members,
-        );
+        $data['anggota'] = $members;
 
         $this->form->fill($data);
         $this->data = $data;
+    }
+
+    /**
+     * Render modal review OCR overlay untuk Tambah Kartu Keluarga.
+     */
+    private function renderOcrModal(): Htmlable
+    {
+        if (! $this->isOcrModalOpen || blank($this->ocrPreview)) {
+            return new HtmlString('');
+        }
+
+        $preview = $this->ocrPreview;
+        $members = (array) ($preview['members'] ?? []);
+        $isConflict = ! empty($preview['is_kk_conflict']);
+        $conflictKk = $preview['conflict_kk'] ?? null;
+
+        $html = <<<'HTML'
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/75 p-4 backdrop-blur-xs transition-opacity duration-300">
+        <div class="relative flex flex-col w-full max-w-5xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden border border-gray-200 dark:border-gray-800">
+
+        <!-- Modal Header -->
+        <div class="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4 bg-gray-50 dark:bg-gray-800/60">
+            <div class="flex items-center gap-3">
+                <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                    <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                </div>
+                <div>
+                    <h2 class="text-base font-bold text-gray-900 dark:text-gray-100">Hasil Pemindaian OCR</h2>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Tinjau data hasil OCR sebelum menerapkannya ke formulir Kartu Keluarga.</p>
+                </div>
+            </div>
+            <button
+                type="button"
+                wire:click="closeOcrModal"
+                class="rounded-lg p-1.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition"
+            >
+                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+
+        <!-- Modal Body (Scrollable) -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-5">
+HTML;
+
+        $isEmpty = empty($members) && blank($preview['kk_number'] ?? null);
+        $hasIncompleteFields = false;
+
+        if (blank($preview['kk_number'] ?? null) || blank($preview['address'] ?? null) || blank($preview['postal_code'] ?? null) || blank($preview['rt'] ?? null)) {
+            $hasIncompleteFields = true;
+        }
+
+        foreach ($members as $m) {
+            if (
+                blank($m['full_name'] ?? null)
+                || blank($m['nik'] ?? null)
+                || strlen($m['nik'] ?? '') !== 16
+                || blank($m['gender'] ?? null)
+                || blank($m['birth_date'] ?? null)
+                || blank($m['religion_id'] ?? null)
+                || blank($m['education_id'] ?? null)
+                || blank($m['occupation_id'] ?? null)
+                || blank($m['marital_status'] ?? null)
+                || blank($m['family_relation'] ?? null)
+            ) {
+                $hasIncompleteFields = true;
+                break;
+            }
+        }
+
+        // 1. Status Summary Banner
+        if ($isConflict && $conflictKk !== null) {
+            $html .= '<div class="rounded-xl border border-red-300 bg-red-50 dark:bg-red-950/40 dark:border-red-800 p-4 text-red-900 dark:text-red-200 shadow-sm">';
+            $html .= '<div class="flex items-start gap-3">';
+            $html .= '<div class="mt-0.5 text-red-600 dark:text-red-400">';
+            $html .= '<svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>';
+            $html .= '</div>';
+            $html .= '<div class="space-y-2 flex-1">';
+            $html .= '<h3 class="font-bold text-sm text-red-900 dark:text-red-100">⚠️ Nomor KK / NIK Sudah Terdaftar di Sistem!</h3>';
+            $html .= '<p class="text-xs text-red-700 dark:text-red-300 leading-relaxed">';
+            if (! empty($preview['conflict_reason'])) {
+                $html .= e($preview['conflict_reason']).' ';
+            } else {
+                $html .= 'Nomor KK <strong class="font-mono font-bold">'.e($conflictKk['number']).'</strong> atas nama <strong>'.e($conflictKk['kepala']).'</strong> sudah ada di database (ID: #'.e($conflictKk['id']).'). ';
+            }
+            $html .= 'Mengubah data di sini akan merusak data yang sudah ada.';
+            $html .= '</p>';
+            $html .= '<div class="flex items-center gap-2 pt-1">';
+            if (! empty($conflictKk['edit_url'])) {
+                $html .= '<a href="'.e($conflictKk['edit_url']).'" target="_blank" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700">Lihat / Edit Data KK Tersebut</a>';
+            } elseif (! empty($conflictKk['view_url'])) {
+                $html .= '<a href="'.e($conflictKk['view_url']).'" target="_blank" class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700">Lihat Data KK Tersebut</a>';
+            }
+            $html .= '<button type="button" wire:click="closeOcrModal" class="inline-flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700">Batal / Gunakan Foto Lain</button>';
+            $html .= '</div>';
+            $html .= '</div>';
+            $html .= '</div>';
+            $html .= '</div>';
+        } elseif ($isEmpty) {
+            $html .= '<div class="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-800 p-3.5 text-xs text-red-800 dark:text-red-300 flex items-center gap-2.5">';
+            $html .= '<svg class="h-5 w-5 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+            $html .= '<span class="font-medium">Data KK tidak berhasil dibaca.</span>';
+            $html .= '</div>';
+        } elseif ($hasIncompleteFields) {
+            $html .= '<div class="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-3.5 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2.5">';
+            $html .= '<svg class="h-5 w-5 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>';
+            $html .= '<span class="font-medium">OCR selesai. Beberapa data anggota perlu diperiksa.</span>';
+            $html .= '</div>';
+        } else {
+            $html .= '<div class="rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 dark:border-emerald-800 p-3.5 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2.5">';
+            $html .= '<svg class="h-5 w-5 text-emerald-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+            $html .= '<span class="font-medium">OCR berhasil membaca data KK. Silakan periksa hasil sebelum menyimpan.</span>';
+            $html .= '</div>';
+        }
+
+        // 2. Section 1: Data KK summary (Cards for KK Number, Kode Pos, RT/RW, Confidence + Alamat)
+        $html .= '<div>';
+        $html .= '<div class="mb-2 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">1. Data Kartu Keluarga</div>';
+        $html .= '<div class="grid gap-3 grid-cols-2 md:grid-cols-4">';
+
+        $html .= $this->previewCard(
+            'Nomor KK',
+            e(($preview['kk_number'] ?? null) ?: '(Tidak terbaca)'),
+            $isConflict ? 'text-red-600 font-mono font-bold' : 'font-mono',
+        );
+
+        $html .= $this->previewCard(
+            'Kode Pos',
+            filled($preview['postal_code'] ?? null) ? e($preview['postal_code']) : '(Perlu diperiksa)',
+            blank($preview['postal_code'] ?? null) ? 'text-amber-600' : '',
+        );
+
+        $html .= $this->previewCard(
+            'RT / RW',
+            e(($preview['rt'] ?? null) ?: '(Tidak terbaca)'),
+        );
+
+        $html .= $this->previewCard(
+            'Confidence',
+            e(number_format(
+                (float) ($preview['confidence'] ?? 0),
+                1,
+                ',',
+                '.',
+            ).'%'),
+        );
+
+        $html .= '</div>';
+        $html .= '</div>';
+
+        // 3. Alamat Card
+        $html .= '<div>';
+        $html .= '<div class="mb-1 text-xs font-medium text-gray-500 dark:text-gray-400">Alamat Terdeteksi</div>';
+        $html .= '<div class="rounded-lg border p-2.5 text-xs bg-gray-50 dark:bg-gray-800 dark:border-gray-700 text-gray-800 dark:text-gray-200 font-medium">';
+        $html .= e(($preview['address'] ?? null) ?: '(Alamat tidak terbaca)');
+        $html .= '</div>';
+        $html .= '</div>';
+
+        // 4. Section 2: Members Table
+        $html .= '<div>';
+        $html .= '<div class="mb-2 flex items-center justify-between">';
+        $html .= '<div class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">2. Daftar Anggota Terdeteksi ('.count($members).' Orang)</div>';
+        $html .= '</div>';
+
+        if (empty($members)) {
+            $html .= '<div class="rounded-lg border border-dashed p-6 text-center text-xs text-gray-500">';
+            $html .= 'Tidak ada anggota yang berhasil dikenali dari foto Kartu Keluarga.';
+            $html .= '</div>';
+        } else {
+            $html .= '<div class="overflow-x-auto rounded-lg border max-h-72 overflow-y-auto shadow-xs border-gray-200 dark:border-gray-700">';
+            $html .= '<table class="w-full text-xs text-left divide-y divide-gray-200 dark:divide-gray-700">';
+            $html .= '<thead class="bg-gray-50 dark:bg-gray-800 sticky top-0">';
+            $html .= '<tr class="text-gray-600 dark:text-gray-300 font-semibold">';
+            $html .= '<th class="px-2.5 py-2">No.</th>';
+            $html .= '<th class="px-2.5 py-2">Nama Lengkap</th>';
+            $html .= '<th class="px-2.5 py-2">NIK</th>';
+            $html .= '<th class="px-2.5 py-2">Gender</th>';
+            $html .= '<th class="px-2.5 py-2">Tempat / Tgl Lahir</th>';
+            $html .= '<th class="px-2.5 py-2">Pendidikan</th>';
+            $html .= '<th class="px-2.5 py-2">Pekerjaan</th>';
+            $html .= '<th class="px-2.5 py-2">Status Kawin</th>';
+            $html .= '<th class="px-2.5 py-2">Hubungan</th>';
+            $html .= '<th class="px-2.5 py-2">Status NIK</th>';
+            $html .= '</tr>';
+            $html .= '</thead>';
+            $html .= '<tbody class="divide-y divide-gray-100 dark:divide-gray-800 bg-white dark:bg-gray-900">';
+
+            $badgeCheck = '<span class="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">Perlu diperiksa</span>';
+
+            foreach ($members as $index => $member) {
+                $html .= '<tr class="hover:bg-gray-50/50 dark:hover:bg-gray-800/50">';
+
+                // No
+                $html .= '<td class="px-2.5 py-2 text-gray-500 font-medium">';
+                $html .= ($index + 1);
+                $html .= '</td>';
+
+                // Nama
+                $html .= '<td class="px-2.5 py-2 font-medium text-gray-900 dark:text-gray-100">';
+                $html .= filled($member['full_name'] ?? null) ? e($member['full_name']) : $badgeCheck;
+                $html .= '</td>';
+
+                // NIK
+                $html .= '<td class="px-2.5 py-2 font-mono text-gray-700 dark:text-gray-300">';
+                $html .= (filled($member['nik'] ?? null) && strlen($member['nik']) === 16) ? e($member['nik']) : $badgeCheck;
+                $html .= '</td>';
+
+                // Gender
+                $html .= '<td class="px-2.5 py-2 text-gray-700 dark:text-gray-300">';
+                $html .= filled($member['gender'] ?? null) ? e($member['gender']) : $badgeCheck;
+                $html .= '</td>';
+
+                // Tempat / Tgl Lahir
+                $birthInfo = trim(($member['birth_place'] ?? '').' '.($member['birth_date'] ?? ''));
+                $html .= '<td class="px-2.5 py-2 text-gray-700 dark:text-gray-300">';
+                $html .= filled($birthInfo) ? e($birthInfo) : $badgeCheck;
+                $html .= '</td>';
+
+                // Pendidikan
+                $html .= '<td class="px-2.5 py-2 text-gray-700 dark:text-gray-300">';
+                $eduName = null;
+                if (! empty($member['education_id'])) {
+                    $eduName = Education::find($member['education_id'])?->name;
+                }
+                $html .= filled($eduName) ? e($eduName) : $badgeCheck;
+                $html .= '</td>';
+
+                // Pekerjaan
+                $html .= '<td class="px-2.5 py-2 text-gray-700 dark:text-gray-300">';
+                $occName = null;
+                if (! empty($member['occupation_id'])) {
+                    $occName = Occupation::find($member['occupation_id'])?->name;
+                }
+                $html .= filled($occName) ? e($occName) : $badgeCheck;
+                $html .= '</td>';
+
+                // Status Perkawinan
+                $html .= '<td class="px-2.5 py-2 text-gray-700 dark:text-gray-300">';
+                $html .= filled($member['marital_status'] ?? null) ? e($member['marital_status']) : $badgeCheck;
+                $html .= '</td>';
+
+                // Hubungan
+                $html .= '<td class="px-2.5 py-2 text-gray-700 dark:text-gray-300">';
+                $html .= filled($member['family_relation'] ?? null) ? e($member['family_relation']) : $badgeCheck;
+                $html .= '</td>';
+
+                // Status NIK
+                $html .= '<td class="px-2.5 py-2">';
+                if (! empty($member['existing_resident'])) {
+                    $html .= '<span class="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10" title="KK: '.e($member['existing_resident']['current_kk']).'">Terdaftar</span>';
+                } else {
+                    $html .= '<span class="inline-flex items-center rounded-md bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700 ring-1 ring-inset ring-green-600/20">Baru</span>';
+                }
+                $html .= '</td>';
+
+                $html .= '</tr>';
+            }
+
+            $html .= '</tbody>';
+            $html .= '</table>';
+            $html .= '</div>';
+        }
+
+        $html .= '</div>'; // End Section 2
+        $html .= '</div>'; // End Modal body
+
+        // Modal Footer
+        $html .= '<div class="flex items-center justify-between border-t border-gray-200 dark:border-gray-800 px-6 py-4 bg-gray-50 dark:bg-gray-800/60">';
+        $html .= '<button type="button" wire:click="closeOcrModal" class="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition">';
+        $html .= '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>';
+        $html .= $isConflict ? 'Batal / Gunakan Foto Lain' : 'Kembali';
+        $html .= '</button>';
+
+        if ($isConflict) {
+            $html .= '<span class="text-xs text-red-600 dark:text-red-400 font-medium flex items-center gap-1"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>Terapkan dinonaktifkan (Konflik Data)</span>';
+        } else {
+            $html .= '<button type="button" wire:click="applyOcrResult" wire:loading.attr="disabled" class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition disabled:opacity-50">';
+            $html .= '<span wire:loading.remove wire:target="applyOcrResult"><svg class="h-4 w-4 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Setuju</span>';
+            $html .= '<span wire:loading wire:target="applyOcrResult">Menerapkan...</span>';
+            $html .= '</button>';
+        }
+
+        $html .= '</div></div></div>';
+
+        return new HtmlString($html);
+    }
+
+    private function previewCard(string $label, string $value, string $extraClass = ''): string
+    {
+        return
+            '<div class="rounded-lg border p-3 bg-white dark:bg-gray-800 dark:border-gray-700">'
+            .'<div class="text-xs text-gray-500 dark:text-gray-400 font-medium">'
+            .e($label)
+            .'</div>'
+            .'<div class="mt-1 font-semibold text-gray-900 dark:text-gray-100 '.e($extraClass).'">'
+            .$value
+            .'</div>'
+            .'</div>';
     }
 
     /**
@@ -723,6 +1196,7 @@ class CreateKartuKeluarga extends CreateRecord
     {
         return [
             'full_name' => $member->nama ?? '',
+            'nama' => $member->nama ?? '',
             'nik' => $member->nik ?? '',
             'gender' => $member->gender ?? '',
             'birth_place' => $member->birthPlace ?? '',
@@ -1039,8 +1513,8 @@ class CreateKartuKeluarga extends CreateRecord
                 'S1' => ['S1', 'S-I', 'S I', 'STRATA I', 'STRATA 1', 'SARJANA', 'D4', 'D-IV', 'D IV', 'DIPLOMA IV', 'DIPLOMA IV/STRATA I'],
                 'S2' => ['S2', 'S-II', 'S II', 'STRATA II', 'STRATA 2', 'MAGISTER'],
                 'S3' => ['S3', 'S-III', 'S III', 'STRATA III', 'STRATA 3', 'DOKTOR'],
-                'SMA' => ['SMA', 'SMA/SEDERAJAT', 'SLTA', 'SLTA/SEDERAJAT', 'SMK', 'SMK/SEDERAJAT', 'MA', 'MA/SEDERAJAT'],
-                'SMP' => ['SMP', 'SMP/SEDERAJAT', 'SLTP', 'SLTP/SEDERAJAT', 'MTS', 'MTS/SEDERAJAT'],
+                'SMA' => ['SMA', 'SMA/SEDERAJAT', 'SLTA', 'SLTA/SEDERAJAT', 'SMK', 'SMK/SEDERAJAT', 'MA', 'MA/SEDERAJAT', 'SITA/SEDERAJAT', 'SITA', 'SUTA/SEDERAJAT', 'SUTA', 'SLTASEDERAJAT', 'SITASEDERAJAT'],
+                'SMP' => ['SMP', 'SMP/SEDERAJAT', 'SLTP', 'SLTP/SEDERAJAT', 'MTS', 'MTS/SEDERAJAT', 'SITP/SEDERAJAT', 'SITP', 'SLTPSEDERAJAT', 'SITPSEDERAJAT'],
                 'SD' => ['SD', 'SD/SEDERAJAT', 'TAMAT SD', 'TAMAT SD/SEDERAJAT', 'BELUM TAMAT SD', 'BELUM TAMAT SD/SEDERAJAT'],
                 'Tidak/Belum Sekolah' => ['Tidak/Belum Sekolah', 'TIDAK/BELUM SEKOLAH', 'TIDAK BELUM SEKOLAH', 'BELUM SEKOLAH', 'TIDAK SEKOLAH'],
             ];
@@ -1160,13 +1634,17 @@ class CreateKartuKeluarga extends CreateRecord
     {
         $value = trim((string) $value);
 
-        if ($value === '' || preg_match('/^\d{1,3}$/', $value) !== 1) {
+        $digits = preg_replace('/\D/', '', $value);
+        if ($digits === null || $digits === '' || strlen($digits) > 3) {
             return null;
         }
 
-        $number = str_pad((string) ((int) $value), 2, '0', STR_PAD_LEFT);
+        $num = (int) $digits;
+        $twoDigits = str_pad((string) $num, 2, '0', STR_PAD_LEFT);
+        $threeDigits = str_pad((string) $num, 3, '0', STR_PAD_LEFT);
+        $raw = (string) $num;
 
-        return Rt::query()->where('number', $number)->orderBy('id')->first();
+        return Rt::query()->whereIn('number', [$twoDigits, $threeDigits, $raw])->orderBy('id')->first();
     }
 
     private function anggotaSection(): Section
@@ -1226,6 +1704,9 @@ class CreateKartuKeluarga extends CreateRecord
                             ->label('KTP')
                             ->disk(PendudukDocumentService::DISK)
                             ->directory('penduduk-documents')
+                            ->extraInputAttributes([
+                                'accept' => 'image/*,application/pdf',
+                            ])
                             ->acceptedFileTypes([
                                 'image/jpeg',
                                 'image/png',
@@ -1243,6 +1724,9 @@ class CreateKartuKeluarga extends CreateRecord
                             ->label('Akta Kelahiran')
                             ->disk(PendudukDocumentService::DISK)
                             ->directory('penduduk-documents')
+                            ->extraInputAttributes([
+                                'accept' => 'image/*,application/pdf',
+                            ])
                             ->acceptedFileTypes([
                                 'image/jpeg',
                                 'image/png',

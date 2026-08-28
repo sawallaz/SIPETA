@@ -273,9 +273,28 @@ class KartuKeluargasTable
                         fn (KartuKeluarga $record): bool => ! KartuKeluargaDeleteGuard::isHistorical($record)
                     )
                     ->modalHeading('Hapus Kartu Keluarga')
-                    ->modalDescription(
-                        'Hapus permanen hanya digunakan untuk data KK yang benar-benar kosong dan belum memiliki histori, foto, atau proses OCR.'
-                    )
+                    ->modalDescription(function (KartuKeluarga $record): HtmlString {
+                        $memberCount = $record->penduduks()->count();
+                        $kepala = $record->kepalaKeluarga?->full_name ?? 'Belum ditentukan';
+                        $alamat = $record->address_with_rt_rw ?? ($record->address ?? '-');
+
+                        $warning = $memberCount > 0
+                            ? '<div class="mt-3 p-3 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300 rounded-lg text-sm font-medium border border-red-200 dark:border-red-900">⚠️ PERINGATAN: Kartu Keluarga ini masih memiliki '.$memberCount.' anggota keluarga aktif. Sesuai aturan sistem, KK yang memiliki anggota atau riwayat tidak dapat dihapus permanen untuk melindungi integritas data kependudukan.</div>'
+                            : '<div class="mt-3 p-3 bg-gray-50 text-gray-700 dark:bg-gray-800 dark:text-gray-300 rounded-lg text-sm">Hapus permanen hanya dapat dilakukan untuk data KK yang benar-benar kosong dan belum memiliki riwayat kependudukan.</div>';
+
+                        return new HtmlString('
+                            <div class="space-y-2 text-sm text-left">
+                                <p>Anda akan menghapus data Kartu Keluarga:</p>
+                                <div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg space-y-1">
+                                    <div><strong>Nomor KK:</strong> '.e($record->kk_number).'</div>
+                                    <div><strong>Kepala Keluarga:</strong> '.e($kepala).'</div>
+                                    <div><strong>Alamat:</strong> '.e($alamat).'</div>
+                                    <div><strong>Jumlah Anggota:</strong> '.e((string) $memberCount).' orang</div>
+                                </div>
+                                '.$warning.'
+                            </div>
+                        ');
+                    })
                     ->modalSubmitActionLabel('Ya, Hapus Permanen')
                     ->modalCancelActionLabel('Batal')
                     ->before(

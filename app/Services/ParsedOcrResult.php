@@ -49,6 +49,11 @@ final readonly class ParsedOcrResult
         public array $validationErrors,
         public float $durationMs,
         public ?string $postalCode = null,
+        public ?string $namaKepalaKeluarga = null,
+        public ?string $kelurahan = null,
+        public ?string $kecamatan = null,
+        public ?string $kabupaten = null,
+        public ?string $provinsi = null,
     ) {}
 
     /**
